@@ -1,0 +1,163 @@
+<!-- app/templates/dashboard/index.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="h3 mb-0">Панель управления</h1>
+        <p class="text-muted">Добро пожаловать, {{ current_user.full_name }}!</p>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Статистика: Пользователи -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card border-left-primary shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">
+                            Пользователи
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">{{ stats.total_users }}</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-users fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Статистика: Факультеты -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card border-left-success shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                            Факультеты
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">0</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-university fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Статистика: Кафедры -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card border-left-info shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-info text-uppercase mb-1">
+                            Кафедры
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">0</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-building fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Статистика: Студенты -->
+    <div class="col-md-6 col-lg-3 mb-4">
+        <div class="card border-left-warning shadow h-100 py-2">
+            <div class="card-body">
+                <div class="row no-gutters align-items-center">
+                    <div class="col mr-2">
+                        <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">
+                            Студенты
+                        </div>
+                        <div class="h5 mb-0 font-weight-bold text-gray-800">0</div>
+                    </div>
+                    <div class="col-auto">
+                        <i class="fas fa-user-graduate fa-2x text-gray-300"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Последние действия -->
+    <div class="col-lg-8 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3 d-flex flex-row align-items-center justify-content-between">
+                <h6 class="m-0 font-weight-bold text-primary">Последние действия</h6>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Здесь будут отображаться последние действия в системе.</p>
+                <div class="list-group">
+                    <div class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">Создан пользователь</h6>
+                            <small>3 дня назад</small>
+                        </div>
+                        <p class="mb-1">Администратор создал нового пользователя: Иванов Иван.</p>
+                    </div>
+                    <div class="list-group-item list-group-item-action">
+                        <div class="d-flex w-100 justify-content-between">
+                            <h6 class="mb-1">Система запущена</h6>
+                            <small>1 неделю назад</small>
+                        </div>
+                        <p class="mb-1">Система МелГУ успешно запущена и настроена.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Быстрые ссылки -->
+    <div class="col-lg-4 mb-4">
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Быстрые ссылки</h6>
+            </div>
+            <div class="card-body">
+                <div class="list-group">
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="fas fa-user-plus fa-fw mr-2"></i> Добавить студента
+                    </a>
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="fas fa-calendar-plus fa-fw mr-2"></i> Управление расписанием
+                    </a>
+                    <a href="#" class="list-group-item list-group-item-action">
+                        <i class="fas fa-book-open fa-fw mr-2"></i> Добавить курс
+                    </a>
+                    <a href="{{ url_for('dashboard.profile') }}" class="list-group-item list-group-item-action">
+                        <i class="fas fa-user-edit fa-fw mr-2"></i> Редактировать профиль
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Системная информация -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <h6 class="m-0 font-weight-bold text-primary">Информация о системе</h6>
+            </div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <span class="font-weight-bold">Версия:</span> 1.0.0
+                </div>
+                <div class="mb-2">
+                    <span class="font-weight-bold">Последнее обновление:</span> 3 апреля 2025
+                </div>
+                <div>
+                    <span class="font-weight-bold">Статус API:</span>
+                    <span class="badge badge-success">Активен</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

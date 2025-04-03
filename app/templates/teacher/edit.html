@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Хлебные крошки -->
+<nav class="flex mb-5" aria-label="Breadcrumb">
+    <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+            <a href="{{ url_for('dashboard.index') }}" class="text-gray-700 hover:text-primary-900">
+                <i class="fas fa-home mr-2"></i>
+                Дашборд
+            </a>
+        </li>
+        <li>
+            <div class="flex items-center">
+                <i class="fas fa-chevron-right text-gray-400 mx-2 text-sm"></i>
+                <a href="{{ url_for('teacher.teachers_list') }}" class="text-gray-700 hover:text-primary-900">
+                    Преподаватели
+                </a>
+            </div>
+        </li>
+        <li>
+            <div class="flex items-center">
+                <i class="fas fa-chevron-right text-gray-400 mx-2 text-sm"></i>
+                <span class="text-gray-500">
+                    Редактирование преподавателя
+                </span>
+            </div>
+        </li>
+    </ol>
+</nav>
+
+<!-- Заголовок страницы -->
+<div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-900">Редактирование преподавателя</h2>
+    <p class="mt-1 text-sm text-gray-600">{{ teacher.full_name }}</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Форма редактирования -->
+    <div class="lg:col-span-2">
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="bg-gray-50 px-4 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Данные преподавателя</h3>
+            </div>
+            <div class="p-4 md:p-6">
+                <form method="POST" action="">
+                    {{ form.hidden_tag() }}
+
+                    <div class="space-y-6">
+                        <div>
+                            <label for="{{ form.full_name.id }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                {{ form.full_name.label.text }}
+                            </label>
+                            <div class="mt-1">
+                                {% if form.full_name.errors %}
+                                    {{ form.full_name(class="block w-full px-3 py-2 border border-red-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm") }}
+                                    <div class="mt-1 text-sm text-red-600">
+                                        {% for error in form.full_name.errors %}
+                                            <p>{{ error }}</p>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    {{ form.full_name(class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm", id="fullNameInput") }}
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="{{ form.position.id }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                {{ form.position.label.text }}
+                            </label>
+                            <div class="mt-1">
+                                {% if form.position.errors %}
+                                    {{ form.position(class="block w-full px-3 py-2 border border-red-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm") }}
+                                    <div class="mt-1 text-sm text-red-600">
+                                        {% for error in form.position.errors %}
+                                            <p>{{ error }}</p>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    {{ form.position(class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm") }}
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="{{ form.department.id }}" class="block text-sm font-medium text-gray-700 mb-1">
+                                {{ form.department.label.text }}
+                            </label>
+                            <div class="mt-1">
+                                {% if form.department.errors %}
+                                    {{ form.department(class="block w-full px-3 py-2 border border-red-300 rounded-md shadow-sm focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm") }}
+                                    <div class="mt-1 text-sm text-red-600">
+                                        {% for error in form.department.errors %}
+                                            <p>{{ error }}</p>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    {{ form.department(class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm") }}
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="flex justify-end">
+                            <a href="{{ url_for('teacher.teachers_list') }}" class="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-700 mr-3">
+                                Отмена
+                            </a>
+                            {{ form.submit(class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary-900 hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-700") }}
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Информация и действия -->
+    <div class="space-y-6">
+        <!-- Информация о преподавателе -->
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="bg-gray-50 px-4 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Информация</h3>
+            </div>
+            <div class="p-4 md:p-6 space-y-3">
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 w-24 text-sm font-medium text-gray-500">Кафедра:</div>
+                    <div class="ml-2 text-sm text-gray-900">{{ teacher.department.name if teacher.department else 'Не указана' }}</div>
+                </div>
+                <div class="flex items-start">
+                    <div class="flex-shrink-0 w-24 text-sm font-medium text-gray-500">Создан:</div>
+                    <div class="ml-2 text-sm text-gray-900">{{ teacher.created_at.strftime('%d.%m.%Y') }}</div>
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-gray-200">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-shrink-0 text-sm font-medium text-gray-700">Привязка к расписанию:</div>
+                        <div class="mt-1">
+                            {% if teacher.schedule_teacher %}
+                                <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                    {{ teacher.schedule_teacher.code }} - {{ teacher.schedule_teacher.full_name }}
+                                </span>
+                                <a href="{{ url_for('schedule.link_teacher', teacher_id=teacher.id) }}" class="mt-2 text-sm text-primary-900 hover:text-primary-700 inline-flex items-center">
+                                    <i class="fas fa-edit mr-1"></i> Изменить
+                                </a>
+                            {% else %}
+                                <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                    Не привязан
+                                </span>
+                                <div class="mt-2">
+                                    <a href="{{ url_for('schedule.link_teacher', teacher_id=teacher.id) }}" class="text-sm text-primary-900 hover:text-primary-700 inline-flex items-center">
+                                        <i class="fas fa-link mr-1"></i> Привязать вручную
+                                    </a>
+                                </div>
+                                <div class="mt-1">
+                                    <button id="autoFindBtn" class="text-sm text-primary-900 hover:text-primary-700 inline-flex items-center">
+                                        <i class="fas fa-magic mr-1"></i> Найти подходящего
+                                    </button>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 pt-4 border-t border-gray-200">
+                    <div class="flex justify-between items-start">
+                        <div class="flex-shrink-0 text-sm font-medium text-gray-700">Учетная запись:</div>
+                        <div class="mt-1">
+                            {% if teacher.user_id %}
+                                <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                                    Создана
+                                </span>
+                                <div class="mt-2">
+                                    <a href="{{ url_for('teacher.view_credentials', teacher_id=teacher.id) }}" class="text-sm text-primary-900 hover:text-primary-700 inline-flex items-center">
+                                        <i class="fas fa-key mr-1"></i> Просмотр учетных данных
+                                    </a>
+                                </div>
+                            {% else %}
+                                <span class="px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">
+                                    Не создана
+                                </span>
+                                <div class="mt-2">
+                                    <form action="{{ url_for('teacher.generate_credentials', teacher_id=teacher.id) }}" method="POST" class="inline">
+                                        <button type="submit" class="text-sm text-primary-900 hover:text-primary-700 inline-flex items-center" onclick="return confirm('Вы уверены, что хотите создать учетные данные для этого преподавателя?');">
+                                            <i class="fas fa-key mr-1"></i> Создать учетные данные
+                                        </button>
+                                    </form>
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Действия -->
+        <div class="bg-white shadow rounded-lg overflow-hidden">
+            <div class="bg-gray-50 px-4 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-medium text-gray-900">Действия</h3>
+            </div>
+            <div class="p-4 md:p-6">
+                <form action="{{ url_for('teacher.delete_teacher', teacher_id=teacher.id) }}" method="POST">
+                    <button type="submit" class="w-full inline-flex justify-center items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500" onclick="return confirm('Вы уверены, что хотите удалить этого преподавателя? Это действие нельзя отменить.');">
+                        <i class="fas fa-trash-alt mr-2"></i> Удалить преподавателя
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для автоматически найденных преподавателей -->
+<div id="autoFindModal" class="fixed z-10 inset-0 hidden overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+    <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+        <!-- Фон -->
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
+
+        <!-- Центрирование модального окна -->
+        <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+
+        <!-- Содержимое модального окна -->
+        <div class="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+            <div class="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                <div class="sm:flex sm:items-start">
+                    <div class="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-indigo-100 sm:mx-0 sm:h-10 sm:w-10">
+                        <i class="fas fa-search text-indigo-600"></i>
+                    </div>
+                    <div class="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
+                        <h3 class="text-lg leading-6 font-medium text-gray-900" id="modal-title">
+                            Найденные совпадения
+                        </h3>
+                        <div class="mt-2">
+                            <p class="text-sm text-gray-500" id="matchCount">
+                                Найдено преподавателей: <span id="matchCountValue">0</span>
+                            </p>
+                        </div>
+
+                        <div class="mt-4 max-h-60 overflow-y-auto">
+                            <ul class="divide-y divide-gray-200" id="matchesList">
+                                <!-- Здесь будут отображаться найденные преподаватели -->
+                                <li class="py-3 flex justify-between items-center">
+                                    <div class="text-sm text-gray-500">Поиск преподавателей...</div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                <button type="button" id="closeModalBtn" class="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm">
+                    Закрыть
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Функция для автоматического поиска подходящих преподавателей
+    document.getElementById('autoFindBtn')?.addEventListener('click', function() {
+        const fullName = document.getElementById('fullNameInput').value;
+
+        if (!fullName) {
+            alert('Пожалуйста, введите ФИО преподавателя');
+            return;
+        }
+
+        // Показываем модальное окно
+        document.getElementById('autoFindModal').classList.remove('hidden');
+        document.getElementById('matchesList').innerHTML = '<li class="py-3 flex justify-between items-center"><div class="text-sm text-gray-500">Поиск преподавателей...</div></li>';
+
+        // Выполняем AJAX-запрос для поиска подходящих преподавателей
+        fetch(`/api/find-similar-teachers?full_name=${encodeURIComponent(fullName)}`)
+            .then(response => response.json())
+            .then(data => {
+                const matchesList = document.getElementById('matchesList');
+                const matchCountValue = document.getElementById('matchCountValue');
+
+                matchCountValue.textContent = data.length;
+
+                if (data.length === 0) {
+                    matchesList.innerHTML = '<li class="py-3 flex justify-between items-center"><div class="text-sm text-gray-500">Не найдено подходящих преподавателей</div></li>';
+                    return;
+                }
+
+                // Создаем список найденных преподавателей
+                matchesList.innerHTML = '';
+                data.forEach(teacher => {
+                    const listItem = document.createElement('li');
+                    listItem.className = 'py-3 flex justify-between items-center hover:bg-gray-50';
+
+                    const listItem = document.createElement('li');
+                    listItem.className = 'py-3 flex justify-between items-center hover:bg-gray-50';
+
+                    const infoDiv = document.createElement('div');
+                    const nameP = document.createElement('p');
+                    nameP.className = 'text-sm font-medium text-gray-900';
+                    nameP.textContent = teacher.full_name;
+
+                    const codeP = document.createElement('p');
+                    codeP.className = 'text-sm text-gray-500';
+                    codeP.textContent = `Код: ${teacher.code}`;
+
+                    infoDiv.appendChild(nameP);
+                    infoDiv.appendChild(codeP);
+
+                    const linkA = document.createElement('a');
+                    linkA.className = 'text-indigo-600 hover:text-indigo-900 text-sm font-medium';
+                    linkA.textContent = 'Выбрать';
+                    linkA.href = `/schedule/teachers/link/{{ teacher.id }}?schedule_teacher_id=${teacher.id}`;
+
+                    listItem.appendChild(infoDiv);
+                    listItem.appendChild(linkA);
+
+                    matchesList.appendChild(listItem);
+                });
+            })
+            .catch(error => {
+                console.error('Ошибка при поиске преподавателей:', error);
+                const matchesList = document.getElementById('matchesList');
+                matchesList.innerHTML = '<li class="py-3 flex justify-between items-center"><div class="text-sm text-gray-500">Ошибка при поиске преподавателей</div></li>';
+            });
+    });
+
+    // Закрытие модального окна
+    document.getElementById('closeModalBtn')?.addEventListener('click', function() {
+        document.getElementById('autoFindModal').classList.add('hidden');
+    });
+
+    // Закрытие модального окна при клике вне его области
+    document.getElementById('autoFindModal')?.addEventListener('click', function(event) {
+        if (event.target === this) {
+            this.classList.add('hidden');
+        }
+    });
+</script>
+{% endblock %}

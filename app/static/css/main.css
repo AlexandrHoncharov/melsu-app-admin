@@ -1,0 +1,135 @@
+/* app/static/css/main.css */
+
+/* Основные стили */
+body {
+    font-family: var(--font-family);
+    background-color: #f8f9fc;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.wrapper {
+    display: flex;
+    min-height: 100vh;
+}
+
+#content {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s;
+}
+
+#content.with-sidebar {
+    width: calc(100% - 250px);
+    margin-left: 250px;
+}
+
+.navbar {
+    background-color: var(--primary-color) !important;
+    box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.15);
+    z-index: 10;
+}
+
+footer {
+    margin-top: auto;
+}
+
+/* Кнопки */
+.btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background-color: #5a0002 !important;
+    border-color: #5a0002 !important;
+}
+
+/* Карточки */
+.card {
+    border-radius: 0.35rem;
+    border: none;
+    box-shadow: 0 0.15rem 1.75rem 0 rgba(58, 59, 69, 0.1);
+}
+
+.card-header {
+    background-color: #f8f9fc;
+    border-bottom: 1px solid #e3e6f0;
+}
+
+.border-left-primary {
+    border-left: 0.25rem solid var(--primary-color) !important;
+}
+
+.border-left-success {
+    border-left: 0.25rem solid #1cc88a !important;
+}
+
+.border-left-info {
+    border-left: 0.25rem solid #36b9cc !important;
+}
+
+.border-left-warning {
+    border-left: 0.25rem solid #f6c23e !important;
+}
+
+.bg-primary {
+    background-color: var(--primary-color) !important;
+}
+
+.text-primary {
+    color: var(--primary-color) !important;
+}
+
+/* Формы */
+.form-control {
+    border-radius: 0.35rem;
+    padding: 0.8rem 1rem;
+    font-size: 0.9rem;
+}
+
+.form-control:focus {
+    border-color: #d1d3e2;
+    box-shadow: 0 0 0 0.2rem rgba(119, 0, 2, 0.25);
+}
+
+/* Вспомогательные классы */
+.text-gray-300 {
+    color: #dddfeb !important;
+}
+
+.text-gray-800 {
+    color: #5a5c69 !important;
+}
+
+/* Отзывчивый дизайн */
+@media (max-width: 992px) {
+    #sidebar {
+        margin-left: -250px;
+    }
+
+    #sidebar.active {
+        margin-left: 0;
+    }
+
+    #content {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    #content.with-sidebar {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    #content.active {
+        margin-left: 250px;
+    }
+
+    #sidebarCollapse span {
+        display: none;
+    }
+}

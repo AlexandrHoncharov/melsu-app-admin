@@ -88,8 +88,10 @@ class Teacher(db.Model):
         """Генерирует учетные данные для преподавателя"""
         from app import bcrypt
 
-        # Создаем логин на основе ФИО
-        parts = self.full_name.lower().split()
+        # Транслитерируем ФИО и создаем логин на латинице
+        transliterated_name = self.transliterate(self.full_name).lower()
+        parts = transliterated_name.split()
+
         if len(parts) >= 2:
             username = f"{parts[0]}_{parts[1][0]}"
             if len(parts) > 2:
@@ -97,7 +99,11 @@ class Teacher(db.Model):
         else:
             username = f"teacher_{self.id}"
 
-        # Генерируем случайный пароль
+        # Удаляем специальные символы из имени пользователя
+        import re
+        username = re.sub(r'[^a-z0-9_]', '', username)
+
+        # Генерируем случайный пароль (уже на латинице)
         import secrets
         password = secrets.token_urlsafe(8)
 
@@ -115,8 +121,9 @@ class Teacher(db.Model):
             username=username,
             email=f"{username}@melgu.ru",
             password=bcrypt.generate_password_hash(password).decode('utf-8'),
-            first_name=self.full_name.split()[0] if ' ' in self.full_name else self.full_name,
-            last_name=' '.join(self.full_name.split()[1:]) if ' ' in self.full_name else '',
+            first_name=self.transliterate(self.full_name.split()[0]) if ' ' in self.full_name else self.transliterate(
+                self.full_name),
+            last_name=self.transliterate(' '.join(self.full_name.split()[1:])) if ' ' in self.full_name else '',
             role='teacher'
         )
 
@@ -125,10 +132,6 @@ class Teacher(db.Model):
 
         # Связываем пользователя с преподавателем
         self.user_id = user.id
-
-        # Сохраняем учетные данные для возможности показа их позже
-        # Пароль шифруем с помощью простой симметричной криптографии
-        # В этом примере используем обычный base64, но можно использовать более продвинутые методы
 
         # Удаляем старые учетные данные, если они есть
         TeacherCredential.query.filter_by(teacher_id=self.id).delete()
@@ -172,6 +175,29 @@ class Teacher(db.Model):
                 }
 
         return None
+
+    # Добавьте эту функцию в класс Teacher в файле app/models.py
+
+    def transliterate(self, text):
+        """Транслитерация русского текста в латиницу"""
+        char_map = {
+            'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e',
+            'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+            'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+            'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'sch',
+            'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+            'А': 'A', 'Б': 'B', 'В': 'V', 'Г': 'G', 'Д': 'D', 'Е': 'E', 'Ё': 'E',
+            'Ж': 'ZH', 'З': 'Z', 'И': 'I', 'Й': 'Y', 'К': 'K', 'Л': 'L', 'М': 'M',
+            'Н': 'N', 'О': 'O', 'П': 'P', 'Р': 'R', 'С': 'S', 'Т': 'T', 'У': 'U',
+            'Ф': 'F', 'Х': 'KH', 'Ц': 'TS', 'Ч': 'CH', 'Ш': 'SH', 'Щ': 'SCH',
+            'Ъ': '', 'Ы': 'Y', 'Ь': '', 'Э': 'E', 'Ю': 'YU', 'Я': 'YA'
+        }
+
+        result = ""
+        for char in text:
+            result += char_map.get(char, char)
+
+        return result
 
 
 class TeacherCredential(db.Model):

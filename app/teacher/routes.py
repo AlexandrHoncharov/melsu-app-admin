@@ -4,7 +4,7 @@ import requests
 from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify
 from flask_login import login_required, current_user
 from app import db, bcrypt
-from app.models import Teacher, Department, User
+from app.models import Teacher, Department, User, ScheduleTeacher
 from app.teacher.forms import TeacherForm, APISettingsForm
 from app.config import Config
 
@@ -213,3 +213,142 @@ def add_department():
             flash('Название кафедры обязательно!', 'danger')
 
     return render_template('teacher/add_department.html', title='Добавление кафедры')
+
+
+# API для получения списка преподавателей из расписания
+@teacher.route('/api/schedule-teachers', methods=['GET'])
+@login_required
+def api_schedule_teachers():
+    """API для получения всех преподавателей из расписания"""
+    schedule_teachers = ScheduleTeacher.query.order_by(ScheduleTeacher.full_name).all()
+
+    results = []
+    for teacher in schedule_teachers:
+        results.append({
+            'id': teacher.id,
+            'code': teacher.code,
+            'full_name': teacher.full_name
+        })
+
+    return jsonify(results)
+
+
+# API для поиска преподавателей из расписания
+@teacher.route('/api/search-schedule-teachers', methods=['GET'])
+@login_required
+def api_search_schedule_teachers():
+    """API для поиска преподавателей из расписания"""
+    query = request.args.get('q', '')
+
+    if not query or len(query) < 2:
+        return jsonify([])
+
+    # Ищем по коду и ФИО
+    schedule_teachers = ScheduleTeacher.query.filter(
+        (ScheduleTeacher.full_name.ilike(f'%{query}%')) |
+        (ScheduleTeacher.code.ilike(f'%{query}%'))
+    ).order_by(ScheduleTeacher.full_name).limit(10).all()
+
+    results = []
+    for teacher in schedule_teachers:
+        results.append({
+            'id': teacher.id,
+            'code': teacher.code,
+            'full_name': teacher.full_name
+        })
+
+    return jsonify(results)
+
+
+# API для привязки преподавателя к преподавателю из расписания
+@teacher.route('/api/link-teacher', methods=['POST'])
+@login_required
+def api_link_teacher():
+    """API для привязки преподавателя к преподавателю из расписания"""
+    teacher_id = request.form.get('teacher_id', type=int)
+    schedule_teacher_id = request.form.get('schedule_teacher_id', type=int)
+
+    if not teacher_id or not schedule_teacher_id:
+        return jsonify({'success': False, 'message': 'Не указаны необходимые параметры'})
+
+    teacher = Teacher.query.get_or_404(teacher_id)
+    schedule_teacher = ScheduleTeacher.query.get_or_404(schedule_teacher_id)
+
+    # Привязываем преподавателя
+    teacher.schedule_teacher_id = schedule_teacher_id
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'message': 'Преподаватель успешно привязан к расписанию',
+        'teacher': {
+            'id': teacher.id,
+            'full_name': teacher.full_name
+        },
+        'schedule_teacher': {
+            'id': schedule_teacher.id,
+            'code': schedule_teacher.code,
+            'full_name': schedule_teacher.full_name
+        }
+    })
+
+# API для поиска похожих преподавателей
+@teacher.route('/api/find-similar-teachers', methods=['GET'])
+@login_required
+def find_similar_teachers():
+    """API для поиска похожих преподавателей на основе имени"""
+    full_name = request.args.get('full_name', '')
+
+    if not full_name:
+        return jsonify([])
+
+    # Получаем всех преподавателей из расписания
+    all_teachers = ScheduleTeacher.query.all()
+
+    # Разбиваем имя на слова для сравнения
+    query_words = set(full_name.lower().split())
+
+    # Список найденных совпадений с оценкой
+    matches = []
+
+    for teacher in all_teachers:
+        teacher_name = teacher.full_name.lower()
+        teacher_words = set(teacher_name.split())
+
+        # Рассчитываем оценку совпадения
+        score = 0
+
+        # Совпадающие слова
+        common_words = query_words.intersection(teacher_words)
+        score += len(common_words) * 10
+
+        # Слова, которые являются подстроками друг друга
+        for qword in query_words:
+            if len(qword) < 3:  # Пропускаем короткие слова
+                continue
+
+            for tword in teacher_words:
+                if len(tword) < 3:  # Пропускаем короткие слова
+                    continue
+
+                # Слова начинаются одинаково
+                if qword.startswith(tword[:3]) or tword.startswith(qword[:3]):
+                    score += 5
+                # Слово является подстрокой другого
+                elif qword in tword or tword in qword:
+                    score += 3
+
+        # Если оценка достаточно высокая, добавляем в результаты
+        if score > 5:
+            matches.append({
+                'id': teacher.id,
+                'code': teacher.code,
+                'full_name': teacher.full_name,
+                'score': score
+            })
+
+    # Сортируем по оценке, затем по имени
+    matches.sort(key=lambda x: (-x['score'], x['full_name']))
+
+    # Возвращаем топ-5 совпадений
+    return jsonify(matches[:5])

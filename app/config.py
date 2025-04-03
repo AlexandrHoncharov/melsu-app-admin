@@ -28,7 +28,7 @@ class Config:
     TEMPLATES_AUTO_RELOAD = True
 
     # Настройки приложения
-    APP_NAME = 'МелГУ - Админ панель'
+    APP_NAME = 'МелГУ - Админ панель приложения'
     APP_COLOR = '#770002'
     APP_FONT = 'Montserrat'
 

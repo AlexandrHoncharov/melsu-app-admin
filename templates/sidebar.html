@@ -1,0 +1,26 @@
+<div class="w-64 bg-white shadow h-screen">
+    <div class="h-16 flex items-center justify-center bg-primary">
+        <h1 class="text-white text-xl font-bold">Университет</h1>
+    </div>
+
+    <div class="p-4">
+        <ul class="space-y-2">
+            <li>
+                <div class="text-gray-500 font-medium mb-2">Преподаватели</div>
+                <ul class="pl-4 space-y-2">
+                    <li>
+                        <a href="{{ url_for('teachers_list') }}" class="block py-2 px-3 text-gray-600 hover:bg-gray-100 rounded">
+                            Список преподавателей
+                        </a>
+                    </li>
+                </ul>
+            </li>
+        </ul>
+    </div>
+
+    <div class="absolute bottom-0 left-0 w-64 p-4 border-t">
+        <a href="{{ url_for('logout') }}" class="block text-center py-2 px-4 bg-gray-200 hover:bg-gray-300 rounded text-gray-700">
+            Выйти
+        </a>
+    </div>
+</div>

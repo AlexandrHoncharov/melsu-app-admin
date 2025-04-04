@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Список преподавателей</h1>
+        <a href="{{ url_for('sync_teachers') }}" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+            Синхронизировать
+        </a>
+    </div>
+
+    <!-- Поиск -->
+    <div class="mb-6">
+        <form action="{{ url_for('teachers_list') }}" method="GET" class="flex">
+            <input type="text" name="search" value="{{ search_query|default('', true) }}"
+                   class="flex-grow px-4 py-2 border rounded-l-md focus:outline-none focus:ring-2 focus:ring-primary"
+                   placeholder="Поиск по ФИО, должности или кафедре">
+            <button type="submit" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 border-t border-r border-b rounded-r-md">
+                Найти
+            </button>
+            {% if search_query %}
+                <a href="{{ url_for('teachers_list') }}" class="ml-2 flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm">
+                    Сбросить
+                </a>
+            {% endif %}
+        </form>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                {% set bg_color = 'bg-green-100 text-green-700' if category == 'success' else 'bg-red-100 text-red-700' if category == 'error' else 'bg-yellow-100 text-yellow-700' %}
+                <div class="mb-4 p-4 {{ bg_color }} rounded-md">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white">
+            <thead>
+                <tr class="bg-gray-100 text-gray-600 uppercase text-sm leading-normal">
+                    <th class="py-3 px-6 text-left">ФИО</th>
+                    <th class="py-3 px-6 text-left">Должность</th>
+                    <th class="py-3 px-6 text-left">Кафедра</th>
+                    <th class="py-3 px-6 text-center">Учетная запись</th>
+                    <th class="py-3 px-6 text-center">Действия</th>
+                </tr>
+            </thead>
+            <tbody class="text-gray-600 text-sm">
+                {% if teachers %}
+                    {% for teacher in teachers %}
+                        <tr class="border-b border-gray-200 hover:bg-gray-50">
+                            <td class="py-3 px-6 text-left">
+                                <div class="font-medium">{{ teacher.name }}</div>
+                            </td>
+                            <td class="py-3 px-6 text-left">{{ teacher.position }}</td>
+                            <td class="py-3 px-6 text-left">{{ teacher.department }}</td>
+                            <td class="py-3 px-6 text-center">
+                                {% if teacher.has_account %}
+                                    <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Есть</span>
+                                {% else %}
+                                    <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Нет</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-6 text-center">
+                                <div class="flex item-center justify-center space-x-2">
+                                    {% if not teacher.has_account %}
+                                        <a href="{{ url_for('create_teacher_account', teacher_id=teacher.id) }}" class="bg-primary hover:bg-red-800 text-white py-1 px-3 rounded text-xs">
+                                            Создать учетную запись
+                                        </a>
+                                    {% else %}
+                                        <a href="{{ url_for('view_teacher_credentials', teacher_id=teacher.id) }}" class="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded text-xs">
+                                            Просмотреть данные
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="5" class="py-8 text-center text-gray-500">
+                            Нет данных о преподавателях. Используйте кнопку "Синхронизировать" для загрузки данных.
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

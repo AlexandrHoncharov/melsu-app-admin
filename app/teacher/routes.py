@@ -1,21 +1,16 @@
 # app/teacher/routes.py
-import json
-import requests
-from flask import Blueprint, render_template, url_for, flash, redirect, request, jsonify
+from flask import Blueprint, render_template, url_for, flash, redirect, request
 from flask_login import login_required, current_user
-from app import db, bcrypt
+from app import db
 from app.models import Teacher, Department, User, ScheduleTeacher
-from app.teacher.forms import TeacherForm, APISettingsForm
-from app.config import Config
+from app.teacher.forms import TeacherForm
 
 teacher = Blueprint('teacher', __name__)
-
 
 @teacher.route('/teachers')
 @login_required
 def teachers_list():
     """Список преподавателей"""
-    # Проверка прав доступа - только для админов
     if not current_user.has_role('admin'):
         flash('У вас нет прав для просмотра этой страницы', 'danger')
         return redirect(url_for('dashboard.index'))
@@ -27,14 +22,13 @@ def teachers_list():
     # Базовый запрос
     query = Teacher.query
 
-    # Применяем фильтры поиска, если они есть
+    # Применяем фильтры
     if search_query:
         query = query.filter(Teacher.full_name.ilike(f'%{search_query}%'))
-
     if department_id:
         query = query.filter_by(department_id=department_id)
 
-    # Получаем список преподавателей
+    # Получаем данные
     teachers = query.all()
     departments = Department.query.all()
 
@@ -42,12 +36,10 @@ def teachers_list():
                            teachers=teachers, departments=departments,
                            search_query=search_query, department_id=department_id)
 
-
 @teacher.route('/teachers/add', methods=['GET', 'POST'])
 @login_required
 def add_teacher():
     """Добавление преподавателя"""
-    # Проверка прав доступа - только для админов
     if not current_user.has_role('admin'):
         flash('У вас нет прав для выполнения этого действия', 'danger')
         return redirect(url_for('dashboard.index'))
@@ -68,12 +60,10 @@ def add_teacher():
 
     return render_template('teacher/add.html', title='Добавление преподавателя', form=form)
 
-
 @teacher.route('/teachers/edit/<int:teacher_id>', methods=['GET', 'POST'])
 @login_required
 def edit_teacher(teacher_id):
     """Редактирование преподавателя"""
-    # Проверка прав доступа - только для админов
     if not current_user.has_role('admin'):
         flash('У вас нет прав для выполнения этого действия', 'danger')
         return redirect(url_for('dashboard.index'))
@@ -98,12 +88,10 @@ def edit_teacher(teacher_id):
     return render_template('teacher/edit.html', title='Редактирование преподавателя',
                            form=form, teacher=teacher)
 
-
 @teacher.route('/teachers/delete/<int:teacher_id>', methods=['POST'])
 @login_required
 def delete_teacher(teacher_id):
     """Удаление преподавателя"""
-    # Проверка прав доступа - только для админов
     if not current_user.has_role('admin'):
         flash('У вас нет прав для выполнения этого действия', 'danger')
         return redirect(url_for('dashboard.index'))
@@ -114,99 +102,24 @@ def delete_teacher(teacher_id):
     flash('Преподаватель удален!', 'success')
     return redirect(url_for('teacher.teachers_list'))
 
-
-@teacher.route('/teachers/sync', methods=['GET', 'POST'])
-@login_required
-def sync_teachers():
-    """Синхронизация преподавателей через API"""
-    # Проверка прав доступа - только для админов
-    if not current_user.has_role('admin'):
-        flash('У вас нет прав для выполнения этого действия', 'danger')
-        return redirect(url_for('dashboard.index'))
-
-    form = APISettingsForm()
-
-    if form.validate_on_submit():
-        api_url = form.api_url.data
-        try:
-            response = requests.get(api_url)
-            if response.status_code == 200:
-                data = response.json()
-                teachers_added = 0
-                departments_added = 0
-
-                for teacher_data in data:
-                    full_name = teacher_data[0]
-                    position = teacher_data[1]
-                    department_name = teacher_data[2]
-
-                    # Проверяем/создаем кафедру
-                    department = Department.query.filter_by(name=department_name).first()
-                    if not department:
-                        department = Department(name=department_name)
-                        db.session.add(department)
-                        db.session.commit()
-                        departments_added += 1
-
-                    # Проверяем существование преподавателя
-                    existing_teacher = Teacher.query.filter_by(
-                        full_name=full_name,
-                        position=position,
-                        department_id=department.id
-                    ).first()
-
-                    if not existing_teacher:
-                        new_teacher = Teacher(
-                            full_name=full_name,
-                            position=position,
-                            department_id=department.id
-                        )
-                        db.session.add(new_teacher)
-                        teachers_added += 1
-
-                db.session.commit()
-                flash(
-                    f'Синхронизация завершена! Добавлено {departments_added} кафедр и {teachers_added} преподавателей.',
-                    'success')
-                return redirect(url_for('teacher.teachers_list'))
-            else:
-                flash(f'Ошибка: API вернул код {response.status_code}', 'danger')
-        except Exception as e:
-            flash(f'Ошибка при синхронизации: {str(e)}', 'danger')
-
-    return render_template('teacher/sync.html', title='Синхронизация преподавателей', form=form)
-
-
 @teacher.route('/teachers/generate-credentials/<int:teacher_id>', methods=['POST'])
 @login_required
 def generate_credentials(teacher_id):
     """Генерация учетных данных для преподавателя"""
-    # Проверка прав доступа - только для админов
     if not current_user.has_role('admin'):
         flash('У вас нет прав для выполнения этого действия', 'danger')
         return redirect(url_for('dashboard.index'))
 
     teacher = Teacher.query.get_or_404(teacher_id)
-
-    # Если у преподавателя уже есть пользователь, удаляем его
-    if teacher.user_id:
-        user = User.query.get(teacher.user_id)
-        if user:
-            db.session.delete(user)
-            db.session.commit()
-
-    # Генерируем новые учетные данные
     credentials = teacher.generate_credentials()
 
     flash(f'Учетные данные созданы! Логин: {credentials["username"]}, Пароль: {credentials["password"]}', 'success')
     return redirect(url_for('teacher.view_credentials', teacher_id=teacher.id))
 
-
 @teacher.route('/teachers/credentials/<int:teacher_id>')
 @login_required
 def view_credentials(teacher_id):
     """Просмотр учетных данных преподавателя"""
-    # Проверка прав доступа - только для админов
     if not current_user.has_role('admin'):
         flash('У вас нет прав для просмотра этой страницы', 'danger')
         return redirect(url_for('dashboard.index'))
@@ -221,121 +134,13 @@ def view_credentials(teacher_id):
     return render_template('teacher/credentials.html', title='Учетные данные',
                            teacher=teacher, credentials=credentials)
 
-
 @teacher.route('/departments')
 @login_required
 def departments_list():
     """Список кафедр"""
-    # Проверка прав доступа - только для админов
     if not current_user.has_role('admin'):
         flash('У вас нет прав для просмотра этой страницы', 'danger')
         return redirect(url_for('dashboard.index'))
 
     departments = Department.query.all()
     return render_template('teacher/departments.html', title='Кафедры', departments=departments)
-
-
-@teacher.route('/departments/add', methods=['GET', 'POST'])
-@login_required
-def add_department():
-    """Добавление кафедры"""
-    # Проверка прав доступа - только для админов
-    if not current_user.has_role('admin'):
-        flash('У вас нет прав для выполнения этого действия', 'danger')
-        return redirect(url_for('dashboard.index'))
-
-    if request.method == 'POST':
-        name = request.form.get('name')
-        description = request.form.get('description')
-
-        if name:
-            department = Department(name=name, description=description)
-            db.session.add(department)
-            db.session.commit()
-            flash('Кафедра успешно добавлена!', 'success')
-            return redirect(url_for('teacher.departments_list'))
-        else:
-            flash('Название кафедры обязательно!', 'danger')
-
-    return render_template('teacher/add_department.html', title='Добавление кафедры')
-
-
-# API для получения списка преподавателей из расписания
-@teacher.route('/api/schedule-teachers', methods=['GET'])
-@login_required
-def api_schedule_teachers():
-    """API для получения всех преподавателей из расписания"""
-    schedule_teachers = ScheduleTeacher.query.order_by(ScheduleTeacher.full_name).all()
-
-    results = []
-    for teacher in schedule_teachers:
-        results.append({
-            'id': teacher.id,
-            'code': teacher.code,
-            'full_name': teacher.full_name
-        })
-
-    return jsonify(results)
-
-
-# API для поиска преподавателей из расписания
-@teacher.route('/api/search-schedule-teachers', methods=['GET'])
-@login_required
-def api_search_schedule_teachers():
-    """API для поиска преподавателей из расписания"""
-    query = request.args.get('q', '')
-
-    if not query or len(query) < 2:
-        return jsonify([])
-
-    # Ищем по коду и ФИО
-    schedule_teachers = ScheduleTeacher.query.filter(
-        (ScheduleTeacher.full_name.ilike(f'%{query}%')) |
-        (ScheduleTeacher.code.ilike(f'%{query}%'))
-    ).order_by(ScheduleTeacher.full_name).limit(10).all()
-
-    results = []
-    for teacher in schedule_teachers:
-        results.append({
-            'id': teacher.id,
-            'code': teacher.code,
-            'full_name': teacher.full_name
-        })
-
-    return jsonify(results)
-
-
-# API для привязки преподавателя к преподавателю из расписания
-@teacher.route('/api/link-teacher', methods=['POST'])
-@login_required
-def api_link_teacher():
-    """API для привязки преподавателя к преподавателю из расписания"""
-    if not (current_user.has_role('admin') or current_user.has_role('umr')):
-        return jsonify({'success': False, 'message': 'Недостаточно прав'}), 403
-
-    teacher_id = request.form.get('teacher_id', type=int)
-    schedule_teacher_id = request.form.get('schedule_teacher_id', type=int)
-
-    if not teacher_id or not schedule_teacher_id:
-        return jsonify({'success': False, 'message': 'Не указаны необходимые параметры'})
-
-    teacher = Teacher.query.get_or_404(teacher_id)
-    schedule_teacher = ScheduleTeacher.query.get_or_404(schedule_teacher_id)
-
-    # Привязываем преподавателя
-    teacher.schedule_teacher_id = schedule_teacher_id
-    db.session.commit()
-
-    return jsonify({
-        'success': True,
-        'message': 'Преподаватель успешно привязан к расписанию',
-        'teacher': {
-            'id': teacher.id,
-            'full_name': teacher.full_name
-        },
-        'schedule_teacher': {
-            'id': schedule_teacher.id,
-            'code': schedule_teacher.code,
-            'full_name': schedule_teacher.full_name
-        }
-    })

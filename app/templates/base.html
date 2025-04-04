@@ -3,25 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
     <title>{{ title }} - {{ config.APP_NAME }}</title>
-
-    <!-- Favicon -->
     <link rel="shortcut icon" href="{{ url_for('static', filename='img/favicon.ico') }}" type="image/x-icon">
-
-    <!-- Google Fonts - Montserrat -->
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
-    <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
-
-    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-
-    <!-- DataTables CSS -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css">
-    <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.4.1/css/responsive.dataTables.min.css">
-
     <script>
         tailwind.config = {
             theme: {
@@ -29,73 +15,18 @@
                     colors: {
                         primary: {
                             DEFAULT: '#770002',
-                            50: '#fff0f0',
-                            100: '#ffdddd',
-                            200: '#ffbdbd',
-                            300: '#ff8f8f',
-                            400: '#ff5252',
-                            500: '#ff2424',
-                            600: '#ff0000',
-                            700: '#d70000',
-                            800: '#b10000',
                             900: '#770002',
-                            950: '#4c0000',
+                            800: '#5a0002',
+                            700: '#4c0000',
                         },
                     },
                     fontFamily: {
-                        'sans': ['Montserrat', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                        'sans': ['Montserrat', 'system-ui', 'sans-serif'],
                     },
                 }
             }
         }
     </script>
-
-    <style>
-        body {
-            font-family: 'Montserrat', sans-serif;
-        }
-
-        /* DataTables Customization */
-        .dataTables_wrapper .dataTables_length,
-        .dataTables_wrapper .dataTables_filter,
-        .dataTables_wrapper .dataTables_info,
-        .dataTables_wrapper .dataTables_processing,
-        .dataTables_wrapper .dataTables_paginate {
-            color: #374151;
-            margin-bottom: 1rem;
-            margin-top: 0.5rem;
-        }
-
-        .dataTables_wrapper .dataTables_filter input {
-            border: 1px solid #d1d5db;
-            border-radius: 0.375rem;
-            padding: 0.5rem;
-            margin-left: 0.5rem;
-        }
-
-        .dataTables_wrapper .dataTables_paginate .paginate_button {
-            border-radius: 0.375rem;
-            padding: 0.5rem 0.75rem;
-        }
-
-        .dataTables_wrapper .dataTables_paginate .paginate_button.current {
-            background: #770002 !important;
-            color: #ffffff !important;
-            border: none;
-        }
-
-        .dataTables_wrapper .dataTables_paginate .paginate_button:hover {
-            background: #f3f4f6 !important;
-            color: #1f2937 !important;
-            border: 1px solid #d1d5db;
-        }
-
-        table.dataTable tbody tr:hover {
-            background-color: #f9fafb;
-        }
-    </style>
-
-    {% block styles %}{% endblock %}
 </head>
 <body class="bg-gray-50 h-screen flex flex-col">
     <div class="min-h-screen flex">
@@ -163,26 +94,6 @@
                             <span class="ml-3">Пользователи</span>
                         </a>
                     </li>
-
-                    <li>
-                        <button type="button" class="flex items-center w-full p-2 text-base font-medium text-gray-300 transition duration-75 rounded-lg group hover:bg-gray-800 hover:text-white" aria-controls="settings-dropdown" data-collapse-toggle="settings-dropdown">
-                            <i class="fas fa-cogs w-6 text-center"></i>
-                            <span class="flex-1 ml-3 text-left whitespace-nowrap">Настройки</span>
-                            <i class="fas fa-chevron-down ml-3"></i>
-                        </button>
-                        <ul id="settings-dropdown" class="hidden py-2 space-y-2">
-                            <li>
-                                <a href="#" class="flex items-center p-2 pl-11 w-full text-base font-medium text-gray-300 rounded-lg hover:bg-gray-800 hover:text-white">
-                                    Общие настройки
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#" class="flex items-center p-2 pl-11 w-full text-base font-medium text-gray-300 rounded-lg hover:bg-gray-800 hover:text-white">
-                                    Настройки API
-                                </a>
-                            </li>
-                        </ul>
-                    </li>
                     {% endif %}
                 </ul>
             </div>
@@ -199,11 +110,6 @@
             <header class="bg-primary-900 shadow-md">
                 <div class="px-4 py-3 lg:px-6 flex justify-between items-center">
                     <div class="flex items-center">
-                        {% if current_user.is_authenticated %}
-                        <button type="button" id="sidebar-toggle" class="p-2 mr-2 text-white hover:text-gray-200 focus:outline-none lg:hidden">
-                            <i class="fas fa-bars"></i>
-                        </button>
-                        {% endif %}
                         <h1 class="text-white font-semibold text-lg">{{ config.APP_NAME }}</h1>
                     </div>
 
@@ -232,9 +138,7 @@
                             <a href="{{ url_for('auth.login') }}" class="text-white hover:text-gray-200">
                                 <i class="fas fa-sign-in-alt mr-1"></i> Вход
                             </a>
-                            <a href="{{ url_for('auth.register') }}" class="text-white hover:text-gray-200">
-                                <i class="fas fa-user-plus mr-1"></i> Регистрация
-                            </a>
+
                         </div>
                         {% endif %}
                     </div>
@@ -290,73 +194,49 @@
 
     <!-- JavaScript -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
-    <script src="https://cdn.datatables.net/responsive/2.4.1/js/dataTables.responsive.min.js"></script>
 
     <script>
-        // Мобильное меню - показать/скрыть боковую панель
-        const sidebarToggle = document.getElementById('sidebar-toggle');
-        const sidebar = document.getElementById('sidebar');
+        document.addEventListener('DOMContentLoaded', function() {
+            // Выпадающее меню пользователя
+            const userMenuButton = document.getElementById('user-menu-button');
+            const userDropdown = document.getElementById('user-dropdown');
 
-        if (sidebarToggle && sidebar) {
-            sidebarToggle.addEventListener('click', function() {
-                if (sidebar.classList.contains('-translate-x-full')) {
-                    sidebar.classList.remove('-translate-x-full');
-                } else {
-                    sidebar.classList.add('-translate-x-full');
-                }
-            });
-        }
+            if (userMenuButton && userDropdown) {
+                userMenuButton.addEventListener('click', function() {
+                    userDropdown.classList.toggle('hidden');
+                });
 
-        // Выпадающее меню пользователя
-        const userMenuButton = document.getElementById('user-menu-button');
-        const userDropdown = document.getElementById('user-dropdown');
-
-        if (userMenuButton && userDropdown) {
-            userMenuButton.addEventListener('click', function() {
-                userDropdown.classList.toggle('hidden');
-            });
-
-            // Закрыть меню при клике вне его
-            document.addEventListener('click', function(event) {
-                if (!userMenuButton.contains(event.target) && !userDropdown.contains(event.target)) {
-                    userDropdown.classList.add('hidden');
-                }
-            });
-        }
-
-        // Сворачивающиеся подменю в боковой панели
-        document.querySelectorAll('[data-collapse-toggle]').forEach(function(button) {
-            button.addEventListener('click', function() {
-                const targetId = this.getAttribute('aria-controls');
-                const targetElement = document.getElementById(targetId);
-
-                if (targetElement) {
-                    targetElement.classList.toggle('hidden');
-
-                    // Вращение иконки
-                    const icon = this.querySelector('.fas.fa-chevron-down');
-                    if (icon) {
-                        icon.classList.toggle('rotate-180');
+                document.addEventListener('click', function(event) {
+                    if (!userMenuButton.contains(event.target) && !userDropdown.contains(event.target)) {
+                        userDropdown.classList.add('hidden');
                     }
-                }
-            });
-        });
+                });
+            }
 
-        // Закрытие уведомлений
-        document.querySelectorAll('.close-alert').forEach(function(button) {
-            button.addEventListener('click', function() {
-                this.closest('div').remove();
-            });
-        });
+            // Сворачивающиеся подменю в боковой панели
+            document.querySelectorAll('[data-collapse-toggle]').forEach(function(button) {
+                button.addEventListener('click', function() {
+                    const targetId = this.getAttribute('aria-controls');
+                    const targetElement = document.getElementById(targetId);
 
-        // Автоматическое закрытие уведомлений
-        document.querySelectorAll('.close-alert').forEach(function(button) {
-            setTimeout(function() {
-                if (button && button.closest('div')) {
-                    button.closest('div').remove();
-                }
-            }, 5000);
+                    if (targetElement) {
+                        targetElement.classList.toggle('hidden');
+                    }
+                });
+            });
+
+            // Закрытие уведомлений
+            document.querySelectorAll('.close-alert').forEach(function(button) {
+                button.addEventListener('click', function() {
+                    this.closest('div').remove();
+                });
+
+                setTimeout(function() {
+                    if (button && button.closest('div')) {
+                        button.closest('div').remove();
+                    }
+                }, 5000);
+            });
         });
     </script>
 

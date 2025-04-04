@@ -1,7 +1,6 @@
 # app/schedule/routes.py
 import os
-import pandas as pd
-from flask import Blueprint, render_template, url_for, flash, redirect, request, current_app, jsonify
+from flask import Blueprint, render_template, url_for, flash, redirect, request
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 from app import db
@@ -12,61 +11,17 @@ from datetime import datetime
 
 schedule = Blueprint('schedule', __name__)
 
-# Количество записей на странице
-PER_PAGE = 20
-
 
 @schedule.route('/schedule/teachers')
 @login_required
 def teachers_list():
     """Список преподавателей расписания"""
-    # Проверка прав доступа - разрешено только админам и специалистам УМР
     if not (current_user.has_role('admin') or current_user.has_role('umr')):
         flash('У вас нет прав для просмотра этой страницы', 'danger')
         return redirect(url_for('dashboard.index'))
 
-    # Получаем параметры поиска и страницы
+    # Получаем параметры поиска
     search_query = request.args.get('q', '')
-    page = request.args.get('page', 1, type=int)
-
-    # Базовый запрос
-    query = ScheduleTeacher.query
-
-    # Применяем фильтры поиска, если они есть
-    if search_query:
-        query = query.filter(
-            (ScheduleTeacher.full_name.ilike(f'%{search_query}%')) |
-            (ScheduleTeacher.code.ilike(f'%{search_query}%'))
-        )
-
-    # Получаем общее количество записей
-    total_count = query.count()
-
-    # Получаем преподавателей для первой страницы с пагинацией
-    schedule_teachers = query.order_by(ScheduleTeacher.full_name).limit(PER_PAGE).all()
-
-    # Проверяем, есть ли еще преподаватели
-    has_more = total_count > PER_PAGE
-
-    return render_template('schedule/teachers_list.html',
-                           title='Преподаватели расписания',
-                           schedule_teachers=schedule_teachers,
-                           search_query=search_query,
-                           has_more=has_more,
-                           total_count=total_count)
-
-
-@schedule.route('/api/schedule-teachers-list')
-@login_required
-def api_teachers_list():
-    """API для получения списка преподавателей с пагинацией"""
-    # Проверка прав доступа
-    if not (current_user.has_role('admin') or current_user.has_role('umr')):
-        return jsonify({'success': False, 'message': 'Недостаточно прав'}), 403
-
-    # Получаем параметры
-    search_query = request.args.get('q', '')
-    page = request.args.get('page', 1, type=int)
 
     # Базовый запрос
     query = ScheduleTeacher.query
@@ -78,41 +33,19 @@ def api_teachers_list():
             (ScheduleTeacher.code.ilike(f'%{search_query}%'))
         )
 
-    # Получаем общее количество
-    total_count = query.count()
+    # Получаем преподавателей
+    schedule_teachers = query.order_by(ScheduleTeacher.full_name).all()
 
-    # Получаем записи для текущей страницы
-    offset = (page - 1) * PER_PAGE
-    teachers = query.order_by(ScheduleTeacher.full_name).offset(offset).limit(PER_PAGE).all()
-
-    # Преобразуем в список словарей
-    teachers_data = []
-    for teacher in teachers:
-        teachers_data.append({
-            'id': teacher.id,
-            'code': teacher.code,
-            'full_name': teacher.full_name,
-            'teachers_count': len(teacher.teachers) if teacher.teachers else 0,
-            'updated_at': teacher.updated_at.strftime('%d.%m.%Y %H:%M')
-        })
-
-    # Проверяем, есть ли еще записи
-    has_more = total_count > offset + len(teachers)
-
-    return jsonify({
-        'success': True,
-        'teachers': teachers_data,
-        'total': total_count,
-        'has_more': has_more,
-        'page': page
-    })
+    return render_template('schedule/teachers_list.html',
+                           title='Преподаватели расписания',
+                           schedule_teachers=schedule_teachers,
+                           search_query=search_query)
 
 
 @schedule.route('/schedule/teachers/upload', methods=['GET', 'POST'])
 @login_required
 def upload_teachers():
     """Загрузка преподавателей из файла Excel"""
-    # Проверка прав доступа - разрешено только админам и специалистам УМР
     if not (current_user.has_role('admin') or current_user.has_role('umr')):
         flash('У вас нет прав для просмотра этой страницы', 'danger')
         return redirect(url_for('dashboard.index'))
@@ -124,7 +57,7 @@ def upload_teachers():
             # Сохраняем файл
             file = form.file.data
             filename = secure_filename(file.filename)
-            temp_path = os.path.join(current_app.root_path, 'tmp', filename)
+            temp_path = os.path.join(os.getcwd(), 'temp', filename)
 
             # Создаем директорию, если она не существует
             os.makedirs(os.path.dirname(temp_path), exist_ok=True)
@@ -134,7 +67,6 @@ def upload_teachers():
             # Обрабатываем файл
             teachers_data, messages = process_excel_teachers(temp_path)
 
-            # Выводим информационные сообщения
             for msg in messages:
                 flash(msg, "info")
 
@@ -172,18 +104,13 @@ def upload_teachers():
             # Удаляем временный файл
             os.remove(temp_path)
 
-            if count_added == 0 and count_updated == 0:
-                flash(f'Файл обработан, но ни один преподаватель не был добавлен или обновлен.', 'warning')
-            else:
-                flash(f'Файл успешно обработан! Добавлено: {count_added}, обновлено: {count_updated} преподавателей.',
-                      'success')
+            flash(f'Файл успешно обработан! Добавлено: {count_added}, обновлено: {count_updated} преподавателей.',
+                  'success')
 
             return redirect(url_for('schedule.teachers_list'))
 
         except Exception as e:
-            import traceback
             flash(f'Ошибка при обработке файла: {str(e)}', 'danger')
-            flash(f'Детали ошибки: {traceback.format_exc()}', 'danger')
             return redirect(url_for('schedule.upload_teachers'))
 
     return render_template('schedule/upload.html', title='Загрузка преподавателей', form=form)
@@ -193,7 +120,6 @@ def upload_teachers():
 @login_required
 def link_teacher(teacher_id):
     """Привязка преподавателя к преподавателю из расписания"""
-    # Проверка прав доступа - разрешено только админам и специалистам УМР
     if not (current_user.has_role('admin') or current_user.has_role('umr')):
         flash('У вас нет прав для просмотра этой страницы', 'danger')
         return redirect(url_for('dashboard.index'))
@@ -201,7 +127,7 @@ def link_teacher(teacher_id):
     teacher = Teacher.query.get_or_404(teacher_id)
     form = SelectScheduleTeacherForm()
 
-    # Получаем список преподавателей из расписания для выпадающего списка
+    # Получаем список преподавателей из расписания
     form.schedule_teacher.choices = [
         (st.id, f"{st.code} - {st.full_name}")
         for st in ScheduleTeacher.query.order_by(ScheduleTeacher.full_name).all()
@@ -214,79 +140,9 @@ def link_teacher(teacher_id):
         flash('Преподаватель успешно привязан к преподавателю из расписания', 'success')
         return redirect(url_for('teacher.edit_teacher', teacher_id=teacher.id))
 
-    # Если запрос с предварительно выбранным преподавателем
-    schedule_teacher_id = request.args.get('schedule_teacher_id', type=int)
-    if schedule_teacher_id:
-        form.schedule_teacher.data = schedule_teacher_id
-    # Если у преподавателя уже есть привязка, выбираем ее по умолчанию
-    elif request.method == 'GET' and teacher.schedule_teacher_id:
+    # Выбираем текущую привязку по умолчанию
+    if request.method == 'GET' and teacher.schedule_teacher_id:
         form.schedule_teacher.data = teacher.schedule_teacher_id
 
     return render_template('schedule/link_teacher.html', title='Привязка преподавателя',
                            form=form, teacher=teacher)
-
-
-# API для поиска похожих преподавателей
-@schedule.route('/api/find-similar-teachers', methods=['GET'])
-@login_required
-def find_similar_teachers():
-    """API для поиска похожих преподавателей на основе имени"""
-    # Проверка прав доступа - разрешено только админам и специалистам УМР
-    if not (current_user.has_role('admin') or current_user.has_role('umr')):
-        return jsonify({'success': False, 'message': 'Недостаточно прав'}), 403
-
-    full_name = request.args.get('full_name', '')
-
-    if not full_name:
-        return jsonify([])
-
-    # Получаем всех преподавателей из расписания
-    all_teachers = ScheduleTeacher.query.all()
-
-    # Разбиваем имя на слова для сравнения
-    query_words = set(full_name.lower().split())
-
-    # Список найденных совпадений с оценкой
-    matches = []
-
-    for teacher in all_teachers:
-        teacher_name = teacher.full_name.lower()
-        teacher_words = set(teacher_name.split())
-
-        # Рассчитываем оценку совпадения
-        score = 0
-
-        # Совпадающие слова
-        common_words = query_words.intersection(teacher_words)
-        score += len(common_words) * 10
-
-        # Слова, которые являются подстроками друг друга
-        for qword in query_words:
-            if len(qword) < 3:  # Пропускаем короткие слова
-                continue
-
-            for tword in teacher_words:
-                if len(tword) < 3:  # Пропускаем короткие слова
-                    continue
-
-                # Слова начинаются одинаково
-                if qword.startswith(tword[:3]) or tword.startswith(qword[:3]):
-                    score += 5
-                # Слово является подстрокой другого
-                elif qword in tword or tword in qword:
-                    score += 3
-
-        # Если оценка достаточно высокая, добавляем в результаты
-        if score > 5:
-            matches.append({
-                'id': teacher.id,
-                'code': teacher.code,
-                'full_name': teacher.full_name,
-                'score': score
-            })
-
-    # Сортируем по оценке, затем по имени
-    matches.sort(key=lambda x: (-x['score'], x['full_name']))
-
-    # Возвращаем топ-5 совпадений
-    return jsonify(matches[:5])

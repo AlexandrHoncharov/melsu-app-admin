@@ -109,31 +109,8 @@
 
             <div class="px-3 py-4 overflow-y-auto">
                 <ul class="space-y-2">
-                    <button type="button" class="flex items-center w-full p-2 text-base font-medium text-gray-300 transition duration-75 rounded-lg group hover:bg-gray-800 hover:text-white" aria-controls="students-dropdown" data-collapse-toggle="students-dropdown">
-                            <i class="fas fa-user-graduate w-6 text-center"></i>
-                            <span class="flex-1 ml-3 text-left whitespace-nowrap">Студенты</span>
-                            <i class="fas fa-chevron-down ml-3"></i>
-                        </button>
-                        <ul id="students-dropdown" class="hidden py-2 space-y-2">
-                            <li>
-                                <a href="#" class="flex items-center p-2 pl-11 w-full text-base font-medium text-gray-300 rounded-lg hover:bg-gray-800 hover:text-white">
-                                    Список студентов
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#" class="flex items-center p-2 pl-11 w-full text-base font-medium text-gray-300 rounded-lg hover:bg-gray-800 hover:text-white">
-                                    Добавить студента
-                                </a>
-                            </li>
-                            <li>
-                                <a href="#" class="flex items-center p-2 pl-11 w-full text-base font-medium text-gray-300 rounded-lg hover:bg-gray-800 hover:text-white">
-                                    Группы
-                                </a>
-                            </li>
-                        </ul>
-                    </li>
-
                     {% if current_user.has_role('admin') %}
+                    <li>
                         <a href="{{ url_for('dashboard.index') }}" class="flex items-center p-2 text-base font-medium rounded-lg {{ 'text-white bg-gray-800' if request.endpoint == 'dashboard.index' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
                             <i class="fas fa-tachometer-alt w-6 text-center"></i>
                             <span class="ml-3">Дашборд</span>
@@ -152,11 +129,6 @@
                                     Список преподавателей
                                 </a>
                             </li>
-                            <li>
-                                <a href="{{ url_for('teacher.add_teacher') }}" class="flex items-center p-2 pl-11 w-full text-base font-medium rounded-lg {{ 'text-white bg-gray-800' if request.endpoint == 'teacher.add_teacher' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
-                                    Добавить преподавателя
-                                </a>
-                            </li>
 
                             <li>
                                 <a href="{{ url_for('teacher.departments_list') }}" class="flex items-center p-2 pl-11 w-full text-base font-medium rounded-lg {{ 'text-white bg-gray-800' if request.endpoint == 'teacher.departments_list' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
@@ -165,7 +137,9 @@
                             </li>
                         </ul>
                     </li>
+                    {% endif %}
 
+                    {% if current_user.has_role('admin') or current_user.has_role('umr') %}
                     <li>
                         <button type="button" class="flex items-center w-full p-2 text-base font-medium transition duration-75 rounded-lg group {{ 'text-white bg-gray-800' if request.endpoint and request.endpoint.startswith('schedule.') else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}" aria-controls="schedule-dropdown" data-collapse-toggle="schedule-dropdown">
                             <i class="fas fa-calendar-alt w-6 text-center"></i>
@@ -178,15 +152,11 @@
                                     Преподаватели (расписание)
                                 </a>
                             </li>
-                            <li>
-                                <a href="{{ url_for('schedule.upload_teachers') }}" class="flex items-center p-2 pl-11 w-full text-base font-medium rounded-lg {{ 'text-white bg-gray-800' if request.endpoint == 'schedule.upload_teachers' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
-                                    Загрузить данные преподавателей
-                                </a>
-                            </li>
                         </ul>
                     </li>
+                    {% endif %}
 
-                    <li>
+                    {% if current_user.has_role('admin') %}
                     <li>
                         <a href="{{ url_for('dashboard.users') }}" class="flex items-center p-2 text-base font-medium rounded-lg {{ 'text-white bg-gray-800' if request.endpoint == 'dashboard.users' else 'text-gray-300 hover:bg-gray-800 hover:text-white' }}">
                             <i class="fas fa-users w-6 text-center"></i>

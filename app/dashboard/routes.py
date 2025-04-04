@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, url_for, flash, redirect, request,
 from flask_login import login_required, current_user
 from app import db, bcrypt
 from app.models import User, Teacher, Department, ScheduleTeacher
+from app.dashboard.forms import UpdateProfileForm, ChangePasswordForm
 from datetime import datetime
 
 dashboard = Blueprint('dashboard', __name__)
@@ -13,6 +14,10 @@ dashboard = Blueprint('dashboard', __name__)
 @login_required
 def index():
     """Главная страница дашборда"""
+    # Если пользователь - специалист УМР, перенаправляем на страницу преподавателей расписания
+    if current_user.has_role('umr'):
+        return redirect(url_for('schedule.teachers_list'))
+
     # Собираем статистику для дашборда
     stats = {
         'total_users': User.query.count(),
@@ -25,11 +30,37 @@ def index():
     return render_template('dashboard/index.html', title='Дашборд', stats=stats)
 
 
-@dashboard.route('/profile')
+@dashboard.route('/profile', methods=['GET', 'POST'])
 @login_required
 def profile():
     """Страница профиля пользователя"""
-    return render_template('dashboard/profile.html', title='Профиль')
+    # Форма для обновления профиля
+    update_form = UpdateProfileForm(obj=current_user)
+    password_form = ChangePasswordForm()
+
+    # Обработка формы обновления профиля
+    if update_form.validate_on_submit() and 'update_profile' in request.form:
+        current_user.username = update_form.username.data
+        current_user.first_name = update_form.first_name.data
+        current_user.last_name = update_form.last_name.data
+        current_user.email = update_form.email.data
+        db.session.commit()
+        flash('Ваш профиль успешно обновлен!', 'success')
+        return redirect(url_for('dashboard.profile'))
+
+    # Обработка формы смены пароля
+    if password_form.validate_on_submit() and 'change_password' in request.form:
+        if bcrypt.check_password_hash(current_user.password, password_form.current_password.data):
+            hashed_password = bcrypt.generate_password_hash(password_form.new_password.data).decode('utf-8')
+            current_user.password = hashed_password
+            db.session.commit()
+            flash('Ваш пароль успешно изменен!', 'success')
+            return redirect(url_for('dashboard.profile'))
+        else:
+            flash('Неверный текущий пароль. Пожалуйста, попробуйте снова.', 'danger')
+
+    return render_template('dashboard/profile.html', title='Профиль',
+                           update_form=update_form, password_form=password_form)
 
 
 @dashboard.route('/users')

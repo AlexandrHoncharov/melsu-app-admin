@@ -15,6 +15,11 @@ teacher = Blueprint('teacher', __name__)
 @login_required
 def teachers_list():
     """Список преподавателей"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для просмотра этой страницы', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     # Получаем параметры поиска
     search_query = request.args.get('q', '')
     department_id = request.args.get('department', type=int)
@@ -42,6 +47,11 @@ def teachers_list():
 @login_required
 def add_teacher():
     """Добавление преподавателя"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для выполнения этого действия', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     form = TeacherForm()
     form.department.choices = [(d.id, d.name) for d in Department.query.all()]
 
@@ -63,6 +73,11 @@ def add_teacher():
 @login_required
 def edit_teacher(teacher_id):
     """Редактирование преподавателя"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для выполнения этого действия', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     teacher = Teacher.query.get_or_404(teacher_id)
     form = TeacherForm()
     form.department.choices = [(d.id, d.name) for d in Department.query.all()]
@@ -88,6 +103,11 @@ def edit_teacher(teacher_id):
 @login_required
 def delete_teacher(teacher_id):
     """Удаление преподавателя"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для выполнения этого действия', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     teacher = Teacher.query.get_or_404(teacher_id)
     db.session.delete(teacher)
     db.session.commit()
@@ -99,6 +119,11 @@ def delete_teacher(teacher_id):
 @login_required
 def sync_teachers():
     """Синхронизация преподавателей через API"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для выполнения этого действия', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     form = APISettingsForm()
 
     if form.validate_on_submit():
@@ -156,6 +181,11 @@ def sync_teachers():
 @login_required
 def generate_credentials(teacher_id):
     """Генерация учетных данных для преподавателя"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для выполнения этого действия', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     teacher = Teacher.query.get_or_404(teacher_id)
 
     # Если у преподавателя уже есть пользователь, удаляем его
@@ -176,6 +206,11 @@ def generate_credentials(teacher_id):
 @login_required
 def view_credentials(teacher_id):
     """Просмотр учетных данных преподавателя"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для просмотра этой страницы', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     teacher = Teacher.query.get_or_404(teacher_id)
     credentials = teacher.get_credentials()
 
@@ -191,6 +226,11 @@ def view_credentials(teacher_id):
 @login_required
 def departments_list():
     """Список кафедр"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для просмотра этой страницы', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     departments = Department.query.all()
     return render_template('teacher/departments.html', title='Кафедры', departments=departments)
 
@@ -199,6 +239,11 @@ def departments_list():
 @login_required
 def add_department():
     """Добавление кафедры"""
+    # Проверка прав доступа - только для админов
+    if not current_user.has_role('admin'):
+        flash('У вас нет прав для выполнения этого действия', 'danger')
+        return redirect(url_for('dashboard.index'))
+
     if request.method == 'POST':
         name = request.form.get('name')
         description = request.form.get('description')
@@ -265,6 +310,9 @@ def api_search_schedule_teachers():
 @login_required
 def api_link_teacher():
     """API для привязки преподавателя к преподавателю из расписания"""
+    if not (current_user.has_role('admin') or current_user.has_role('umr')):
+        return jsonify({'success': False, 'message': 'Недостаточно прав'}), 403
+
     teacher_id = request.form.get('teacher_id', type=int)
     schedule_teacher_id = request.form.get('schedule_teacher_id', type=int)
 
@@ -291,64 +339,3 @@ def api_link_teacher():
             'full_name': schedule_teacher.full_name
         }
     })
-
-# API для поиска похожих преподавателей
-@teacher.route('/api/find-similar-teachers', methods=['GET'])
-@login_required
-def find_similar_teachers():
-    """API для поиска похожих преподавателей на основе имени"""
-    full_name = request.args.get('full_name', '')
-
-    if not full_name:
-        return jsonify([])
-
-    # Получаем всех преподавателей из расписания
-    all_teachers = ScheduleTeacher.query.all()
-
-    # Разбиваем имя на слова для сравнения
-    query_words = set(full_name.lower().split())
-
-    # Список найденных совпадений с оценкой
-    matches = []
-
-    for teacher in all_teachers:
-        teacher_name = teacher.full_name.lower()
-        teacher_words = set(teacher_name.split())
-
-        # Рассчитываем оценку совпадения
-        score = 0
-
-        # Совпадающие слова
-        common_words = query_words.intersection(teacher_words)
-        score += len(common_words) * 10
-
-        # Слова, которые являются подстроками друг друга
-        for qword in query_words:
-            if len(qword) < 3:  # Пропускаем короткие слова
-                continue
-
-            for tword in teacher_words:
-                if len(tword) < 3:  # Пропускаем короткие слова
-                    continue
-
-                # Слова начинаются одинаково
-                if qword.startswith(tword[:3]) or tword.startswith(qword[:3]):
-                    score += 5
-                # Слово является подстрокой другого
-                elif qword in tword or tword in qword:
-                    score += 3
-
-        # Если оценка достаточно высокая, добавляем в результаты
-        if score > 5:
-            matches.append({
-                'id': teacher.id,
-                'code': teacher.code,
-                'full_name': teacher.full_name,
-                'score': score
-            })
-
-    # Сортируем по оценке, затем по имени
-    matches.sort(key=lambda x: (-x['score'], x['full_name']))
-
-    # Возвращаем топ-5 совпадений
-    return jsonify(matches[:5])

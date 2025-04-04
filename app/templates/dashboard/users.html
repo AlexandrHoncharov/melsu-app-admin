@@ -33,14 +33,15 @@
                 </div>
             </div>
             <div>
-                <label for="role" class="block text-sm font-medium text-gray-700 mb-1">Роль</label>
-                <select id="role" name="role" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-700 focus:border-primary-700 sm:text-sm">
-                    <option value="">Все роли</option>
-                    <option value="admin" {% if request.args.get('role') == 'admin' %}selected{% endif %}>Администратор</option>
-                    <option value="user" {% if request.args.get('role') == 'user' %}selected{% endif %}>Пользователь</option>
-                    <option value="teacher" {% if request.args.get('role') == 'teacher' %}selected{% endif %}>Преподаватель</option>
-                </select>
-            </div>
+    <label for="role" class="block text-sm font-medium text-gray-700 mb-1">Роль</label>
+    <select id="role" name="role" class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-700 focus:border-primary-700 sm:text-sm">
+        <option value="">Все роли</option>
+        <option value="admin" {% if request.args.get('role') == 'admin' %}selected{% endif %}>Администратор</option>
+        <option value="user" {% if request.args.get('role') == 'user' %}selected{% endif %}>Пользователь</option>
+        <option value="teacher" {% if request.args.get('role') == 'teacher' %}selected{% endif %}>Преподаватель</option>
+        <option value="umr" {% if request.args.get('role') == 'umr' %}selected{% endif %}>Специалист по УМР</option>
+    </select>
+</div>
             <div class="flex items-end">
                 <div class="flex space-x-2 w-full">
                     <button type="submit" class="flex-grow sm:flex-grow-0 inline-flex justify-center items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-900 hover:bg-primary-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-700">
@@ -245,13 +246,14 @@
                                 </div>
 
                                 <div>
-                                    <label for="role" class="block text-sm font-medium text-gray-700">Роль</label>
-                                    <select id="userRole" name="userRole" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm">
-                                        <option value="user">Пользователь</option>
-                                        <option value="teacher">Преподаватель</option>
-                                        <option value="admin">Администратор</option>
-                                    </select>
-                                </div>
+    <label for="userRole" class="block text-sm font-medium text-gray-700">Роль</label>
+    <select id="userRole" name="userRole" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 sm:text-sm">
+        <option value="user">Пользователь</option>
+        <option value="teacher">Преподаватель</option>
+        <option value="admin">Администратор</option>
+        <option value="umr">Специалист по УМР</option>
+    </select>
+</div>
 
                                 <div class="flex items-center">
                                     <input id="isActive" name="isActive" type="checkbox" class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded" checked>

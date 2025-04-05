@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6 max-w-lg mx-auto">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6">Синхронизация расписания</h1>
+
+    <p class="mb-4 text-gray-600">
+        Выберите параметры и нажмите "Синхронизировать" для получения актуального расписания из базы данных университета.
+    </p>
+
+    <p class="mb-6 text-sm text-yellow-600 bg-yellow-50 p-3 rounded">
+        <strong>Примечание:</strong> При синхронизации большого объема данных процесс может занять продолжительное время.
+        Используйте фильтры для загрузки только необходимых данных.
+    </p>
+
+    <form method="POST" action="{{ url_for('sync_schedule') }}" class="space-y-4">
+        <div class="mb-4">
+            <label for="semester" class="block text-gray-700 mb-2">Семестр</label>
+            <select id="semester" name="semester" class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="">Все семестры</option>
+                {% for semester in semesters %}
+                    <option value="{{ semester }}">{{ semester }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="mb-4">
+            <label for="group" class="block text-gray-700 mb-2">Группа</label>
+            <select id="group" name="group" class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="">Все группы</option>
+                {% for group in groups %}
+                    <option value="{{ group }}">{{ group }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="flex items-center space-x-4">
+            <button type="submit" class="bg-primary hover:bg-red-900 text-white py-2 px-4 rounded-md">
+                Синхронизировать
+            </button>
+            <a href="{{ url_for('schedule_list') }}" class="text-gray-600 hover:text-gray-800">
+                Отмена
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}

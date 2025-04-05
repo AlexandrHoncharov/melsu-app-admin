@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Расписание занятий</h1>
+        <a href="{{ url_for('sync_schedule') }}" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+            Синхронизировать
+        </a>
+    </div>
+
+    <!-- Поиск и фильтрация -->
+    <div class="mb-6">
+        <form action="{{ url_for('schedule_list') }}" method="GET" class="flex flex-wrap gap-2">
+            <input type="text" name="search" value="{{ search_query|default('', true) }}"
+                   class="flex-grow px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                   placeholder="Поиск по предмету, преподавателю или аудитории">
+
+            <select name="group" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="">Все группы</option>
+                {% for group in group_names %}
+                    <option value="{{ group }}" {% if group == group_filter %}selected{% endif %}>
+                        {{ group }}
+                    </option>
+                {% endfor %}
+            </select>
+
+            <select name="subgroup" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="">Все подгруппы</option>
+                {% for subgroup in subgroup_values %}
+                    <option value="{{ subgroup }}" {% if subgroup|string == subgroup_filter %}selected{% endif %}>
+                        {% if subgroup == 0 %}Общая{% else %}{{ subgroup }}{% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+
+            <input type="date" name="date" value="{{ date_filter|default('', true) }}"
+                   class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+
+            <button type="submit" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 border rounded-md">
+                Применить
+            </button>
+
+            {% if search_query or group_filter or date_filter or subgroup_filter %}
+                <a href="{{ url_for('schedule_list') }}" class="flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm">
+                    Сбросить
+                </a>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white">
+            <thead>
+                <tr class="bg-gray-100 text-gray-600 uppercase text-sm leading-normal">
+                    <th class="py-3 px-6 text-left">Дата</th>
+                    <th class="py-3 px-6 text-left">Время</th>
+                    <th class="py-3 px-6 text-left">Группа</th>
+                    <th class="py-3 px-6 text-left">Подгруппа</th>
+                    <th class="py-3 px-6 text-left">Предмет</th>
+                    <th class="py-3 px-6 text-left">Тип</th>
+                    <th class="py-3 px-6 text-left">Преподаватель</th>
+                    <th class="py-3 px-6 text-left">Аудитория</th>
+                </tr>
+            </thead>
+            <tbody class="text-gray-600 text-sm">
+                {% if schedules %}
+                    {% for schedule in schedules %}
+                        <tr class="border-b border-gray-200 hover:bg-gray-50">
+                            <td class="py-3 px-6 text-left">{{ schedule.date.strftime('%d.%m.%Y') }}</td>
+                            <td class="py-3 px-6 text-left">{{ schedule.time_start }} - {{ schedule.time_end }}</td>
+                            <td class="py-3 px-6 text-left">{{ schedule.group_name }}</td>
+                            <td class="py-3 px-6 text-left">
+                                {% if schedule.subgroup > 0 %}
+                                    {{ schedule.subgroup }}
+                                {% else %}
+                                    Общая
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-6 text-left">{{ schedule.subject }}</td>
+                            <td class="py-3 px-6 text-left">
+                                {% if schedule.lesson_type %}
+                                    {{ schedule.lesson_type }}
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-6 text-left">{{ schedule.teacher_name }}</td>
+                            <td class="py-3 px-6 text-left">{{ schedule.auditory }}</td>
+                        </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-gray-500">
+                            Нет данных о расписании. Используйте кнопку "Синхронизировать" для загрузки данных.
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Пагинация -->
+    {% if pagination and pagination.pages > 1 %}
+    <div class="mt-6 flex justify-center">
+        <div class="flex space-x-2">
+            {% if pagination.has_prev %}
+                <a href="{{ url_for('schedule_list', page=pagination.prev_num, search=search_query, group=group_filter, date=date_filter, subgroup=subgroup_filter) }}"
+                   class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
+                    &laquo; Предыдущая
+                </a>
+            {% endif %}
+
+            <span class="px-4 py-2 bg-gray-100 rounded">
+                Страница {{ pagination.page }} из {{ pagination.pages }}
+            </span>
+
+            {% if pagination.has_next %}
+                <a href="{{ url_for('schedule_list', page=pagination.next_num, search=search_query, group=group_filter, date=date_filter, subgroup=subgroup_filter) }}"
+                   class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
+                    Следующая &raquo;
+                </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

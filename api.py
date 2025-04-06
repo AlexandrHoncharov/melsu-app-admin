@@ -9,7 +9,7 @@ import random
 import string
 from functools import wraps
 from db import db
-from models import User, Teacher, Schedule, VerificationLog
+from models import User, Teacher, Schedule, VerificationLog, DeviceToken
 
 app = Flask(__name__)
 CORS(app)
@@ -553,18 +553,10 @@ def internal_error(error):
     return jsonify({'message': 'Внутренняя ошибка сервера'}), 500
 
 
-# Добавьте следующие импорты в начало api.py
-from exponent_server_sdk import DeviceNotRegisteredError, PushClient, PushMessage
-from exponent_server_sdk.errors import PushServerError
-from requests.exceptions import ConnectionError, HTTPError
-
-
-
-# Добавьте эти новые эндпоинты в api.py
-
+# Simplified push notification implementation without exponent_server_sdk
 def send_push_message(token, title, message, extra=None):
     """
-    Отправляет push-уведомление через Expo Push Service
+    Отправляет push-уведомление через HTTP запрос к Expo Push Service
 
     Args:
         token (str): Expo Push Token
@@ -576,35 +568,46 @@ def send_push_message(token, title, message, extra=None):
         bool: Успешность отправки
     """
     try:
-        response = PushClient().publish(
-            PushMessage(
-                to=token,
-                title=title,
-                body=message,
-                data=extra or {},
-                sound="default"
-            )
+        import requests
+        import json
+
+        # Экспо API для push-уведомлений
+        expo_push_url = "https://exp.host/--/api/v2/push/send"
+
+        # Подготовка данных для отправки
+        push_message = {
+            "to": token,
+            "title": title,
+            "body": message,
+            "data": extra or {},
+            "sound": "default",
+            "priority": "high"
+        }
+
+        # Выполнение запроса
+        headers = {
+            "Accept": "application/json",
+            "Accept-encoding": "gzip, deflate",
+            "Content-Type": "application/json",
+        }
+
+        response = requests.post(
+            expo_push_url,
+            data=json.dumps(push_message),
+            headers=headers
         )
 
-        # Проверка на ошибки при отправке
-        if not response.ok:
-            print(f"Push message to {token} failed: {response.reason}")
+        # Проверка ответа
+        if response.status_code != 200:
+            print(f"Push message to {token} failed with status code {response.status_code}: {response.text}")
+            return False
+
+        result = response.json()
+        if result.get("data", {}).get("status") == "error":
+            print(f"Push message to {token} failed: {result}")
             return False
 
         return True
-    except ConnectionError as exc:
-        print(f"Push message failed due to connection error: {exc}")
-        return False
-    except HTTPError as exc:
-        print(f"Push message failed due to HTTP error: {exc}")
-        return False
-    except PushServerError as exc:
-        print(f"Push server error: {exc}")
-        return False
-    except DeviceNotRegisteredError:
-        print(f"Device with token {token} not registered")
-        # Здесь можно удалить недействительный токен из базы
-        return False
     except Exception as exc:
         print(f"Push message failed: {exc}")
         return False
@@ -689,6 +692,7 @@ def test_notification(current_user):
         'message': f'Уведомления отправлены на {success_count} из {len(tokens)} устройств',
         'success': success_count > 0
     }), 200
+
 
 if __name__ == '__main__':
     with app.app_context():

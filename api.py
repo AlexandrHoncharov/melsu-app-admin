@@ -553,7 +553,6 @@ def internal_error(error):
     return jsonify({'message': 'Внутренняя ошибка сервера'}), 500
 
 
-# Simplified push notification implementation without exponent_server_sdk
 def send_push_message(token, title, message, extra=None):
     """
     Отправляет push-уведомление через HTTP запрос к Expo Push Service
@@ -565,7 +564,7 @@ def send_push_message(token, title, message, extra=None):
         extra (dict, optional): Дополнительные данные для уведомления
 
     Returns:
-        bool: Успешность отправки
+        dict: Результат отправки с информацией об успехе/ошибке
     """
     try:
         import requests
@@ -599,18 +598,27 @@ def send_push_message(token, title, message, extra=None):
 
         # Проверка ответа
         if response.status_code != 200:
-            print(f"Push message to {token} failed with status code {response.status_code}: {response.text}")
-            return False
+            error_msg = f"Push message to {token} failed with status code {response.status_code}: {response.text}"
+            print(error_msg)
+            return {"success": False, "error": error_msg}
 
+        # Корректная обработка ответа Expo
+        # Expo возвращает массив объектов с полями id, status
         result = response.json()
-        if result.get("data", {}).get("status") == "error":
-            print(f"Push message to {token} failed: {result}")
-            return False
 
-        return True
+        # Проверка на наличие ошибок в ответе
+        if "errors" in result or "data" in result and "error" in result["data"]:
+            error_msg = f"Push message to {token} failed: {result}"
+            print(error_msg)
+            return {"success": False, "error": error_msg}
+
+        print(f"Successfully sent push notification to {token}")
+        return {"success": True, "receipt": result}
+
     except Exception as exc:
-        print(f"Push message failed: {exc}")
-        return False
+        error_msg = f"Push message failed: {exc}"
+        print(error_msg)
+        return {"success": False, "error": error_msg}
 
 
 # Маршрут для регистрации токена устройства
@@ -665,7 +673,7 @@ def register_device(current_user):
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
-    """Тестовая отправка push-уведомления"""
+    """Тестовая отправка push-уведомления с подробным выводом результатов"""
 
     # Получаем все токены пользователя
     tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
@@ -677,20 +685,33 @@ def test_notification(current_user):
         }), 404
 
     # Отправляем тестовое уведомление на каждое устройство
+    results = []
     success_count = 0
+
     for token_obj in tokens:
-        success = send_push_message(
+        result = send_push_message(
             token_obj.token,
             'Тестовое уведомление',
             'Это тестовое push-уведомление от приложения Университет',
             {'type': 'test'}
         )
-        if success:
+
+        if result["success"]:
             success_count += 1
+
+        # Сохраняем результат для каждого устройства
+        results.append({
+            "device_name": token_obj.device_name,
+            "platform": token_obj.platform,
+            "token_preview": token_obj.token[:10] + "...",
+            "success": result["success"],
+            "details": result.get("receipt") if result["success"] else result.get("error")
+        })
 
     return jsonify({
         'message': f'Уведомления отправлены на {success_count} из {len(tokens)} устройств',
-        'success': success_count > 0
+        'success': success_count > 0,
+        'results': results
     }), 200
 
 
@@ -730,4 +751,4 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Ошибка при обновлении базы данных: {str(e)}")
 
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5001)

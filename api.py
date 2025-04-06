@@ -5,9 +5,11 @@ import jwt
 import datetime
 import os
 import uuid
+import random
+import string
 from functools import wraps
 from db import db
-from models import User, Teacher, Schedule
+from models import User, Teacher, Schedule, VerificationLog
 
 app = Flask(__name__)
 CORS(app)
@@ -24,6 +26,53 @@ STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
 
 # Создаем папки, если их нет
 os.makedirs(STUDENT_CARDS_FOLDER, exist_ok=True)
+
+
+# Helper function to generate username
+def generate_username(full_name, group=None):
+    """Generate a username based on full name and group"""
+    # Remove any non-alphanumeric characters and split the name
+    clean_name = ''.join(c for c in full_name if c.isalnum() or c.isspace())
+    name_parts = clean_name.split()
+
+    if not name_parts:
+        # Fallback if name is empty or has no valid parts
+        return ''.join(random.choices(string.ascii_lowercase, k=6))
+
+    # Take first letter of first name and first letter of last name if available
+    if len(name_parts) >= 2:
+        initials = name_parts[0][0] + name_parts[-1][0]
+    else:
+        initials = name_parts[0][0]
+
+    # Make it lowercase
+    initials = initials.lower()
+
+    # Add group info if available
+    suffix = ""
+    if group:
+        # Clean group and take up to 3 chars
+        clean_group = ''.join(c for c in group if c.isalnum())
+        suffix = clean_group[:3].lower()
+
+    # Add random digits
+    random_digits = ''.join(random.choices(string.digits, k=4))
+
+    # Combine all parts
+    username = f"{initials}{suffix}{random_digits}"
+
+    return username
+
+
+# Helper function to check if username exists
+def username_exists(username):
+    try:
+        return db.session.query(User).filter_by(username=username).first() is not None
+    except Exception as e:
+        print(f"Error checking username: {str(e)}")
+        # In case of any error, return False to allow continuing
+        # The uniqueness will still be enforced at the database level
+        return False
 
 
 # Функция для создания JWT токена
@@ -80,18 +129,31 @@ def register():
     data = request.json
 
     # Проверяем обязательные поля
-    required_fields = ['username', 'password', 'fullName', 'role']
+    required_fields = ['password', 'fullName', 'role']
     for field in required_fields:
         if field not in data:
             return jsonify({'message': f'Поле {field} обязательно'}), 400
 
+    # Генерируем имя пользователя, если оно не предоставлено
+    if 'username' not in data or not data['username']:
+        username = generate_username(data['fullName'], data.get('group'))
+
+        # Проверяем, что username уникален
+        attempt = 0
+        base_username = username
+        while username_exists(username):
+            attempt += 1
+            username = f"{base_username}{attempt}"
+    else:
+        username = data['username']
+
     # Проверяем, существует ли пользователь с таким именем
-    if User.query.filter_by(username=data['username']).first():
+    if username_exists(username):
         return jsonify({'message': 'Пользователь с таким логином уже существует'}), 400
 
     # Создаем нового пользователя
     new_user = User(
-        username=data['username'],
+        username=username,
         password=data['password'],  # Хэширование произойдет в модели
         is_admin=False
     )
@@ -240,9 +302,23 @@ def upload_student_card(current_user):
     # Сохраняем файл
     file.save(file_path)
 
+    # Записываем в лог действие
+    previous_status = current_user.verification_status
+
     # Обновляем данные пользователя
     current_user.student_card_image = filename
     current_user.verification_status = 'pending'
+
+    # Создаем запись в журнале верификации
+    log_entry = VerificationLog(
+        student_id=current_user.id,
+        action='upload',
+        status_before=previous_status,
+        status_after='pending',
+        comment='Загрузка студенческого билета'
+    )
+
+    db.session.add(log_entry)
     db.session.commit()
 
     return jsonify({
@@ -259,8 +335,134 @@ def get_verification_status(current_user):
     if current_user.role != 'student':
         return jsonify({'message': 'Только студенты имеют статус верификации'}), 403
 
+    # Get status message based on verification status
+    status_message = ""
+    if current_user.verification_status == 'pending':
+        status_message = "Ваш студенческий билет находится на проверке. Обычно это занимает 1-2 рабочих дня."
+    elif current_user.verification_status == 'verified':
+        status_message = "Ваш студенческий билет успешно верифицирован."
+    elif current_user.verification_status == 'rejected':
+        status_message = "Верификация студенческого билета отклонена. Пожалуйста, загрузите его снова."
+    else:  # unverified
+        status_message = "Для доступа ко всем функциям приложения необходимо верифицировать студенческий билет."
+
     return jsonify({
-        'status': current_user.verification_status or 'unverified'
+        'status': current_user.verification_status or 'unverified',
+        'message': status_message,
+        'updatedAt': datetime.datetime.now().isoformat()
+    }), 200
+
+
+# Endpoint to cancel a pending verification and reupload
+@app.route('/api/student/cancel-verification', methods=['POST'])
+@token_required
+def cancel_verification(current_user):
+    """Cancel a pending verification to allow reupload"""
+    # Check that the user is a student
+    if current_user.role != 'student':
+        return jsonify({'message': 'Только студенты могут отменить верификацию'}), 403
+
+    # Check that status is pending or rejected
+    if current_user.verification_status not in ['pending', 'rejected']:
+        return jsonify({'message': 'Невозможно отменить верификацию в текущем статусе'}), 400
+
+    # Записываем в лог действие
+    previous_status = current_user.verification_status
+
+    # Delete the current image if it exists
+    if current_user.student_card_image:
+        try:
+            file_path = os.path.join(STUDENT_CARDS_FOLDER, current_user.student_card_image)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            # Log error but continue with status update
+            print(f"Error removing student card image: {str(e)}")
+
+    # Reset verification status
+    current_user.student_card_image = None
+    current_user.verification_status = 'unverified'
+
+    # Создаем запись в журнале верификации
+    log_entry = VerificationLog(
+        student_id=current_user.id,
+        action='cancel',
+        status_before=previous_status,
+        status_after='unverified',
+        comment='Отмена верификации пользователем'
+    )
+
+    db.session.add(log_entry)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Верификация отменена. Вы можете загрузить студенческий билет снова.',
+        'status': 'unverified'
+    }), 200
+
+
+# Endpoint to reupload student card after rejection
+@app.route('/api/student/reupload', methods=['POST'])
+@token_required
+def reupload_student_card(current_user):
+    """Reupload student card after rejection"""
+    # Check that the user is a student
+    if current_user.role != 'student':
+        return jsonify({'message': 'Только студенты могут загружать студенческий билет'}), 403
+
+    # Check if status is rejected or unverified (we already have cancel-verification for pending)
+    if current_user.verification_status not in ['rejected', 'unverified']:
+        return jsonify({'message': 'Загрузка невозможна в текущем статусе верификации'}), 400
+
+    # Check that a file was sent
+    if 'studentCard' not in request.files:
+        return jsonify({'message': 'Файл не отправлен'}), 400
+
+    file = request.files['studentCard']
+
+    # Check that the file is not empty
+    if file.filename == '':
+        return jsonify({'message': 'Файл не выбран'}), 400
+
+    # Записываем в лог действие
+    previous_status = current_user.verification_status
+
+    # Delete the current image if it exists
+    if current_user.student_card_image:
+        try:
+            file_path = os.path.join(STUDENT_CARDS_FOLDER, current_user.student_card_image)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            # Log error but continue with upload
+            print(f"Error removing previous student card image: {str(e)}")
+
+    # Generate unique filename
+    filename = f"{uuid.uuid4()}{os.path.splitext(file.filename)[1]}"
+    file_path = os.path.join(STUDENT_CARDS_FOLDER, filename)
+
+    # Save the file
+    file.save(file_path)
+
+    # Update user data
+    current_user.student_card_image = filename
+    current_user.verification_status = 'pending'
+
+    # Создаем запись в журнале верификации
+    log_entry = VerificationLog(
+        student_id=current_user.id,
+        action='reupload',
+        status_before=previous_status,
+        status_after='pending',
+        comment='Повторная загрузка студенческого билета'
+    )
+
+    db.session.add(log_entry)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Файл успешно загружен',
+        'status': 'pending'
     }), 200
 
 
@@ -350,6 +552,143 @@ def not_found(error):
 def internal_error(error):
     return jsonify({'message': 'Внутренняя ошибка сервера'}), 500
 
+
+# Добавьте следующие импорты в начало api.py
+from exponent_server_sdk import DeviceNotRegisteredError, PushClient, PushMessage
+from exponent_server_sdk.errors import PushServerError
+from requests.exceptions import ConnectionError, HTTPError
+
+
+
+# Добавьте эти новые эндпоинты в api.py
+
+def send_push_message(token, title, message, extra=None):
+    """
+    Отправляет push-уведомление через Expo Push Service
+
+    Args:
+        token (str): Expo Push Token
+        title (str): Заголовок уведомления
+        message (str): Текст уведомления
+        extra (dict, optional): Дополнительные данные для уведомления
+
+    Returns:
+        bool: Успешность отправки
+    """
+    try:
+        response = PushClient().publish(
+            PushMessage(
+                to=token,
+                title=title,
+                body=message,
+                data=extra or {},
+                sound="default"
+            )
+        )
+
+        # Проверка на ошибки при отправке
+        if not response.ok:
+            print(f"Push message to {token} failed: {response.reason}")
+            return False
+
+        return True
+    except ConnectionError as exc:
+        print(f"Push message failed due to connection error: {exc}")
+        return False
+    except HTTPError as exc:
+        print(f"Push message failed due to HTTP error: {exc}")
+        return False
+    except PushServerError as exc:
+        print(f"Push server error: {exc}")
+        return False
+    except DeviceNotRegisteredError:
+        print(f"Device with token {token} not registered")
+        # Здесь можно удалить недействительный токен из базы
+        return False
+    except Exception as exc:
+        print(f"Push message failed: {exc}")
+        return False
+
+
+# Маршрут для регистрации токена устройства
+@app.route('/api/device/register', methods=['POST'])
+@token_required
+def register_device(current_user):
+    """Регистрация токена устройства для push-уведомлений"""
+
+    data = request.json
+    required_fields = ['token', 'platform']
+
+    # Проверяем обязательные поля
+    for field in required_fields:
+        if field not in data:
+            return jsonify({'message': f'Поле {field} обязательно'}), 400
+
+    # Получаем данные из запроса
+    token = data.get('token')
+    platform = data.get('platform')
+    device_name = data.get('device_name', '')
+
+    # Проверяем, существует ли уже такой токен для этого пользователя
+    existing_token = DeviceToken.query.filter_by(
+        user_id=current_user.id,
+        token=token
+    ).first()
+
+    if existing_token:
+        # Обновляем существующий токен
+        existing_token.platform = platform
+        existing_token.device_name = device_name
+        existing_token.updated_at = datetime.datetime.utcnow()
+    else:
+        # Создаем новую запись
+        new_token = DeviceToken(
+            user_id=current_user.id,
+            token=token,
+            platform=platform,
+            device_name=device_name
+        )
+        db.session.add(new_token)
+
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Токен устройства успешно зарегистрирован',
+        'success': True
+    }), 200
+
+
+# Маршрут для тестовой отправки уведомления
+@app.route('/api/device/test-notification', methods=['POST'])
+@token_required
+def test_notification(current_user):
+    """Тестовая отправка push-уведомления"""
+
+    # Получаем все токены пользователя
+    tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
+
+    if not tokens:
+        return jsonify({
+            'message': 'Нет зарегистрированных устройств',
+            'success': False
+        }), 404
+
+    # Отправляем тестовое уведомление на каждое устройство
+    success_count = 0
+    for token_obj in tokens:
+        success = send_push_message(
+            token_obj.token,
+            'Тестовое уведомление',
+            'Это тестовое push-уведомление от приложения Университет',
+            {'type': 'test'}
+        )
+        if success:
+            success_count += 1
+
+    return jsonify({
+        'message': f'Уведомления отправлены на {success_count} из {len(tokens)} устройств',
+        'success': success_count > 0
+    }), 200
 
 if __name__ == '__main__':
     with app.app_context():

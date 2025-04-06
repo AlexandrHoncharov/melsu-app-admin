@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
 // Базовый URL вашего API-сервера
-const API_URL = 'http://192.168.0.106:5000/api';
+const API_URL = 'http://192.168.0.103:5000/api';
 
 // Создаем экземпляр axios с базовыми настройками
 const apiClient = axios.create({

@@ -1,0 +1,135 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto bg-white shadow rounded-lg p-6">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Детали студента</h1>
+        <a href="{{ url_for('student_verification_list') }}" class="text-gray-600 hover:text-gray-800">
+            Вернуться к списку
+        </a>
+    </div>
+
+    {% if student %}
+    <div class="grid md:grid-cols-2 gap-6">
+        <div class="bg-gray-50 p-4 rounded-md">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">Информация о студенте</h2>
+
+            <div class="grid grid-cols-3 gap-4 mb-2">
+                <div class="font-medium text-gray-600">ID:</div>
+                <div class="col-span-2">{{ student.id }}</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 mb-2">
+                <div class="font-medium text-gray-600">Логин:</div>
+                <div class="col-span-2">{{ student.username }}</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 mb-2">
+                <div class="font-medium text-gray-600">ФИО:</div>
+                <div class="col-span-2">{{ student.full_name }}</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 mb-2">
+                <div class="font-medium text-gray-600">Группа:</div>
+                <div class="col-span-2">{{ student.group }}</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 mb-2">
+                <div class="font-medium text-gray-600">Факультет:</div>
+                <div class="col-span-2">{{ student.faculty or 'Не указан' }}</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 mb-2">
+                <div class="font-medium text-gray-600">Дата регистрации:</div>
+                <div class="col-span-2">{{ student.created_at.strftime('%d.%m.%Y %H:%M') }}</div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-4 mb-2">
+                <div class="font-medium text-gray-600">Статус:</div>
+                <div class="col-span-2">
+                    {% if student.verification_status == 'verified' %}
+                        <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Подтвержден</span>
+                    {% elif student.verification_status == 'pending' %}
+                        <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">На проверке</span>
+                    {% elif student.verification_status == 'rejected' %}
+                        <span class="bg-red-100 text-red-800 py-1 px-3 rounded-full text-xs">Отклонен</span>
+                    {% else %}
+                        <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Не верифицирован</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-gray-50 p-4 rounded-md">
+            <h2 class="text-lg font-semibold text-gray-800 mb-3">Студенческий билет</h2>
+
+            {% if student.student_card_image %}
+                <div class="mb-4">
+                    <img src="{{ url_for('get_student_card_admin', filename=student.student_card_image) }}" alt="Студенческий билет" class="w-full rounded-md border border-gray-200">
+                </div>
+
+                <div class="text-sm text-gray-500 mb-4">
+                    Имя файла: {{ student.student_card_image }}
+                </div>
+
+<!-- Обновите эту часть в templates/verification/student_details.html -->
+
+{% if student.verification_status == 'pending' %}
+    <div class="my-4">
+        <h3 class="text-lg font-semibold mb-2">Решение по верификации</h3>
+
+        <div class="bg-gray-50 p-4 rounded-md">
+            <div class="mb-4">
+                <label for="comment" class="block text-sm font-medium text-gray-700 mb-2">Комментарий (необязательно)</label>
+                <textarea id="comment" name="comment" rows="3" class="shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border-gray-300 rounded-md p-2"></textarea>
+            </div>
+
+            <div class="flex gap-4">
+                <form action="{{ url_for('verify_student') }}" method="POST" class="inline" id="approveForm">
+                    <input type="hidden" name="student_id" value="{{ student.id }}">
+                    <input type="hidden" name="action" value="approve">
+                    <input type="hidden" name="comment" id="approveComment">
+                    <button type="button" onclick="submitWithComment('approveForm', 'approveComment')" class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded">
+                        Подтвердить
+                    </button>
+                </form>
+
+                <form action="{{ url_for('verify_student') }}" method="POST" class="inline" id="rejectForm">
+                    <input type="hidden" name="student_id" value="{{ student.id }}">
+                    <input type="hidden" name="action" value="reject">
+                    <input type="hidden" name="comment" id="rejectComment">
+                    <button type="button" onclick="submitWithComment('rejectForm', 'rejectComment')" class="bg-red-600 hover:bg-red-700 text-white py-2 px-4 rounded">
+                        Отклонить
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function submitWithComment(formId, commentFieldId) {
+            // Получаем комментарий из общего поля
+            const comment = document.getElementById('comment').value;
+
+            // Устанавливаем его в скрытое поле соответствующей формы
+            document.getElementById(commentFieldId).value = comment;
+
+            // Отправляем форму
+            document.getElementById(formId).submit();
+        }
+    </script>
+{% endif %}
+            {% else %}
+                <div class="text-center py-8 text-gray-500">
+                    Студенческий билет не загружен
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    {% else %}
+        <div class="text-center py-8 text-gray-500">
+            Студент не найден
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Список студентов</h1>
+        <div class="flex gap-2">
+            <select id="statusFilter" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                <option value="all">Все студенты</option>
+                <option value="verified">Верифицированные</option>
+                <option value="pending">На проверке</option>
+                <option value="rejected">Отклоненные</option>
+                <option value="unverified">Не верифицированные</option>
+            </select>
+            <button id="applyFilter" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 border rounded-md">
+                Применить
+            </button>
+        </div>
+    </div>
+
+    <!-- Поиск и фильтрация -->
+    <div class="mb-6">
+        <form action="{{ url_for('students_list') }}" method="GET" class="flex flex-wrap gap-2">
+            <input type="text" name="search" value="{{ search_query|default('', true) }}"
+                   class="flex-grow px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                   placeholder="Поиск по ФИО, логину или группе">
+
+            <input type="hidden" name="status" value="{{ status }}">
+
+            <button type="submit" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 border rounded-md">
+                Поиск
+            </button>
+
+            {% if search_query or status != 'all' %}
+                <a href="{{ url_for('students_list') }}" class="flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm">
+                    Сбросить
+                </a>
+            {% endif %}
+        </form>
+    </div>
+
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white">
+            <thead>
+                <tr class="bg-gray-100 text-gray-600 uppercase text-sm leading-normal">
+                    <th class="py-3 px-6 text-left">ID</th>
+                    <th class="py-3 px-6 text-left">Логин</th>
+                    <th class="py-3 px-6 text-left">ФИО</th>
+                    <th class="py-3 px-6 text-left">Группа</th>
+                    <th class="py-3 px-6 text-left">Факультет</th>
+                    <th class="py-3 px-6 text-center">Статус</th>
+                    <th class="py-3 px-6 text-center">Действия</th>
+                </tr>
+            </thead>
+            <tbody class="text-gray-600 text-sm">
+                {% if students %}
+                    {% for student in students %}
+                        <tr class="border-b border-gray-200 hover:bg-gray-50">
+                            <td class="py-3 px-6 text-left">{{ student.id }}</td>
+                            <td class="py-3 px-6 text-left">{{ student.username }}</td>
+                            <td class="py-3 px-6 text-left">{{ student.full_name }}</td>
+                            <td class="py-3 px-6 text-left">{{ student.group }}</td>
+                            <td class="py-3 px-6 text-left">{{ student.faculty or '-' }}</td>
+                            <td class="py-3 px-6 text-center">
+                                {% if student.verification_status == 'verified' %}
+                                    <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Подтвержден</span>
+                                {% elif student.verification_status == 'pending' %}
+                                    <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">На проверке</span>
+                                {% elif student.verification_status == 'rejected' %}
+                                    <span class="bg-red-100 text-red-800 py-1 px-3 rounded-full text-xs">Отклонен</span>
+                                {% else %}
+                                    <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Не верифицирован</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-6 text-center">
+                                <div class="flex item-center justify-center gap-2">
+                                    <a href="{{ url_for('view_student_details', student_id=student.id) }}" class="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded text-xs">
+                                        Просмотреть
+                                    </a>
+
+                                    {% if student.verification_status == 'pending' %}
+                                        <form action="{{ url_for('verify_student') }}" method="POST" class="inline">
+                                            <input type="hidden" name="student_id" value="{{ student.id }}">
+                                            <input type="hidden" name="action" value="approve">
+                                            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded text-xs">
+                                                Подтвердить
+                                            </button>
+                                        </form>
+                                        <form action="{{ url_for('verify_student') }}" method="POST" class="inline">
+                                            <input type="hidden" name="student_id" value="{{ student.id }}">
+                                            <input type="hidden" name="action" value="reject">
+                                            <button type="submit" class="bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded text-xs">
+                                                Отклонить
+                                            </button>
+                                        </form>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="7" class="py-8 text-center text-gray-500">
+                            Студенты не найдены
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Пагинация -->
+    {% if pagination and pagination.pages > 1 %}
+    <div class="mt-6 flex justify-center">
+        <div class="flex space-x-2">
+            {% if pagination.has_prev %}
+                <a href="{{ url_for('students_list', page=pagination.prev_num, search=search_query, status=status) }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
+                    &laquo; Предыдущая
+                </a>
+            {% endif %}
+
+            <span class="px-4 py-2 bg-gray-100 rounded">
+                Страница {{ pagination.page }} из {{ pagination.pages }}
+            </span>
+
+            {% if pagination.has_next %}
+                <a href="{{ url_for('students_list', page=pagination.next_num, search=search_query, status=status) }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
+                    Следующая &raquo;
+                </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    document.getElementById('applyFilter').addEventListener('click', function() {
+        const status = document.getElementById('statusFilter').value;
+        const currentUrl = new URL(window.location.href);
+        currentUrl.searchParams.set('status', status);
+        window.location.href = currentUrl.toString();
+    });
+
+    // Set the selected value in the dropdown based on the current status
+    document.addEventListener('DOMContentLoaded', function() {
+        const statusParam = new URLSearchParams(window.location.search).get('status');
+        if (statusParam) {
+            document.getElementById('statusFilter').value = statusParam;
+        }
+    });
+</script>
+{% endblock %}

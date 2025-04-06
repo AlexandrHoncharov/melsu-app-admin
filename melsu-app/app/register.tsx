@@ -46,52 +46,73 @@ export default function RegisterScreen() {
   }, [isAuthenticated]);
 
   // Регистрация
-  const handleRegister = async () => {
-    // Сбрасываем ошибки
-    setErrors({});
-    setGeneralError(null);
+  // Update the handleRegister function in register.tsx
 
-    // Проверяем заполненность полей
-    const newErrors: ValidationErrors = {};
+const handleRegister = async () => {
+  // Сбрасываем ошибки
+  setErrors({});
+  setGeneralError(null);
 
-    if (!fullName.trim()) {
-      newErrors.fullName = 'Введите ФИО';
-    } else if (fullName.trim().split(' ').length < 2) {
-      newErrors.fullName = 'Введите фамилию и имя';
-    }
+  // Проверяем заполненность полей
+  const newErrors: ValidationErrors = {};
 
-    if (!password) {
-      newErrors.password = 'Введите пароль';
-    } else if (password.length < 6) {
-      newErrors.password = 'Пароль должен содержать минимум 6 символов';
-    }
+  if (!fullName.trim()) {
+    newErrors.fullName = 'Введите ФИО';
+  } else if (fullName.trim().split(' ').length < 2) {
+    newErrors.fullName = 'Введите фамилию и имя';
+  }
 
-    if (password !== confirmPassword) {
-      newErrors.confirmPassword = 'Пароли не совпадают';
-    }
+  if (!password) {
+    newErrors.password = 'Введите пароль';
+  } else if (password.length < 6) {
+    newErrors.password = 'Пароль должен содержать минимум 6 символов';
+  }
 
-    if (!group.trim()) {
-      newErrors.group = 'Введите группу';
-    }
+  if (password !== confirmPassword) {
+    newErrors.confirmPassword = 'Пароли не совпадают';
+  }
 
-    // Если есть ошибки, показываем их и прерываем отправку
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
+  if (!group.trim()) {
+    newErrors.group = 'Введите группу';
+  }
 
-    try {
-      // Вызываем API для регистрации
-      await register({
-        fullName,
-        password,
-        group,
-        role: 'student'
-      });
-    } catch (error) {
-      setGeneralError((error as Error).message);
-    }
-  };
+  // Если есть ошибки, показываем их и прерываем отправку
+  if (Object.keys(newErrors).length > 0) {
+    setErrors(newErrors);
+    return;
+  }
+
+  try {
+    // Вызываем API для регистрации
+    const result = await register({
+      fullName,
+      password,
+      group,
+      role: 'student'
+    });
+
+    // Show success message with generated username
+    Alert.alert(
+      'Регистрация успешна',
+      `Ваш логин: ${result.user.username}\nЗапишите его для будущего входа в систему.`,
+      [
+        {
+          text: 'OK',
+          onPress: () => {
+            // Continue with normal flow - either to verification or tabs
+            if (result.user.role === 'student' && result.user.verificationStatus === 'unverified') {
+              router.replace('/verification');
+            } else {
+              router.replace('/(tabs)');
+            }
+          }
+        }
+      ]
+    );
+  } catch (error) {
+    setGeneralError((error as Error).message);
+  }
+};
 
   // Переключение видимости пароля
   const toggleSecureTextEntry = () => {

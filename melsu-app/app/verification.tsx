@@ -18,13 +18,41 @@ import * as ImagePicker from 'expo-image-picker';
 import userApi from '../src/api/userApi';
 
 export default function VerificationScreen() {
-  const { user, isLoading, uploadStudentCard, checkVerificationStatus } = useAuth();
+  const { user, isLoading, uploadStudentCard, checkVerificationStatus, cancelVerification, reuploadStudentCard } = useAuth();
   const [image, setImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
+  const [isReuploading, setIsReuploading] = useState(false);
 
   useEffect(() => {
+    // Check verification status immediately when component mounts
+    checkVerificationStatus().then(status => {
+      if (status !== user?.verificationStatus) {
+        // Status has changed, update UI accordingly
+        if (status === 'verified') {
+          Alert.alert(
+            'Верификация завершена',
+            'Ваш студенческий билет был успешно верифицирован.',
+            [
+              { text: 'OK', onPress: () => router.replace('/(tabs)') }
+            ]
+          );
+        } else if (status === 'rejected' && user?.verificationStatus === 'pending') {
+          setIsReuploading(true);
+          Alert.alert(
+            'Верификация отклонена',
+            'Ваш студенческий билет был отклонен. Пожалуйста, загрузите корректное изображение.',
+            [
+              { text: 'OK' }
+            ]
+          );
+        }
+      }
+    }).catch(error => {
+      console.error('Error checking verification status:', error);
+    });
+
     // Проверяем, верифицирован ли пользователь
     const checkUserStatus = async () => {
       if (user?.verificationStatus === 'verified') {
@@ -47,9 +75,42 @@ export default function VerificationScreen() {
                 { text: 'OK', onPress: () => router.replace('/(tabs)') }
               ]
             );
+          } else if (status === 'rejected') {
+            setIsReuploading(true);
+            Alert.alert(
+              'Верификация отклонена',
+              'Ваш студенческий билет был отклонен. Пожалуйста, загрузите корректное изображение.',
+              [
+                { text: 'OK' }
+              ]
+            );
+
+            // Автоматически сбрасываем предыдущую верификацию
+            try {
+              await cancelVerification();
+            } catch (error) {
+              console.error('Ошибка при отмене верификации:', error);
+            }
           }
         } catch (error) {
           console.error('Ошибка при проверке статуса верификации:', error);
+        }
+      } else if (user?.verificationStatus === 'rejected') {
+        setIsReuploading(true);
+        // Если статус "отклонен", предлагаем загрузить новый
+        Alert.alert(
+          'Верификация отклонена',
+          'Предыдущая загрузка студенческого билета была отклонена. Пожалуйста, загрузите корректное изображение.',
+          [
+            { text: 'OK' }
+          ]
+        );
+
+        // Автоматически отменяем предыдущую верификацию
+        try {
+          await cancelVerification();
+        } catch (error) {
+          console.error('Ошибка при отмене верификации:', error);
         }
       }
     };
@@ -136,8 +197,12 @@ export default function VerificationScreen() {
     setError(null);
 
     try {
-      // Отправляем изображение на сервер
-      await uploadStudentCard(image);
+      // Выбираем метод в зависимости от контекста - новая загрузка или повторная после отклонения
+      if (isReuploading) {
+        await reuploadStudentCard(image);
+      } else {
+        await uploadStudentCard(image);
+      }
 
       // Успешная отправка
       Alert.alert(
@@ -180,7 +245,7 @@ export default function VerificationScreen() {
 
       <Stack.Screen
         options={{
-          title: 'Верификация',
+          title: isReuploading ? 'Повторная верификация' : 'Верификация',
           headerTintColor: '#770002',
         }}
       />
@@ -192,10 +257,14 @@ export default function VerificationScreen() {
           resizeMode="contain"
         />
 
-        <Text style={styles.title}>Верификация студенческого билета</Text>
+        <Text style={styles.title}>
+          {isReuploading ? 'Повторная загрузка студенческого билета' : 'Верификация студенческого билета'}
+        </Text>
 
         <Text style={styles.description}>
-          Для доступа ко всем функциям приложения необходимо подтвердить, что вы являетесь студентом университета. Пожалуйста, загрузите фото вашего студенческого билета.
+          {isReuploading
+            ? 'Ваша предыдущая загрузка была отклонена. Пожалуйста, загрузите более четкую фотографию студенческого билета.'
+            : 'Для доступа ко всем функциям приложения необходимо подтвердить, что вы являетесь студентом университета. Пожалуйста, загрузите фото вашего студенческого билета.'}
         </Text>
 
         {/* Инструкции по фотографии */}
@@ -288,7 +357,7 @@ export default function VerificationScreen() {
           </View>
         )}
 
-        {!image && (
+        {!image && !isReuploading && (
           <TouchableOpacity
             style={styles.skipButton}
             onPress={handleSkip}

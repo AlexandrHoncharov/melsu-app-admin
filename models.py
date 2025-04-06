@@ -18,7 +18,7 @@ class User(db.Model):
 
     # Дополнительные поля для мобильного приложения
     role = db.Column(db.String(20), default=None)  # student / teacher
-    verification_status = db.Column(db.String(20), default=None)  # unverified / pending / verified
+    verification_status = db.Column(db.String(20), default=None)  # unverified / pending / verified / rejected
     student_card_image = db.Column(db.String(255), default=None)
     full_name = db.Column(db.String(255), default=None)
     group = db.Column(db.String(50), default=None)
@@ -112,3 +112,49 @@ class ScheduleTeacher(db.Model):
 
     def __repr__(self):
         return f'<ScheduleTeacher {self.name}>'
+
+
+class VerificationLog(db.Model):
+    """Log for student verification actions"""
+    __tablename__ = 'verification_log'
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    admin_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+
+    # Explicit specification of foreign keys for each relationship
+    student = db.relationship('User', foreign_keys=[student_id], backref='verification_logs')
+    admin = db.relationship('User', foreign_keys=[admin_id], backref='admin_verifications')
+
+    action = db.Column(db.String(20, collation='utf8mb4_unicode_ci'), nullable=False)  # upload, approve, reject, cancel
+    status_before = db.Column(db.String(20, collation='utf8mb4_unicode_ci'))  # Previous status
+    status_after = db.Column(db.String(20, collation='utf8mb4_unicode_ci'), nullable=False)  # New status
+    comment = db.Column(db.Text(collation='utf8mb4_unicode_ci'))  # Optional comment
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<VerificationLog {self.student_id} {self.action} {self.created_at}>'
+
+
+# Добавьте этот класс в models.py
+
+class DeviceToken(db.Model):
+    """Токены устройств для push-уведомлений"""
+    __tablename__ = 'device_token'
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user = db.relationship('User', backref='device_tokens')
+
+    token = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
+    device_name = db.Column(db.String(100, collation='utf8mb4_unicode_ci'))
+    platform = db.Column(db.String(20, collation='utf8mb4_unicode_ci'))  # ios / android
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<DeviceToken {self.token[:10]}... ({self.platform})>'

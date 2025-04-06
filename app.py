@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_from_directory
 import os
 import requests
 import pymysql
@@ -16,7 +16,11 @@ app.config.from_object('config')
 db.init_app(app)
 
 # Импорт моделей ПОСЛЕ инициализации db
-from models import User, Teacher, Schedule, ScheduleTeacher
+from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog
+
+# Папка для хранения загруженных изображений
+UPLOAD_FOLDER = 'uploads'
+STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
 
 
 # Определяем login_required локально
@@ -610,6 +614,196 @@ def find_similar_teachers(hr_teacher_name, schedule_teachers):
 
     # Возвращаем только совпадения с схожестью выше 70%
     return [(teacher, score) for teacher, score in matches if score >= 70]
+
+
+# NEW ROUTES FOR STUDENT VERIFICATION
+
+@app.route('/verification/students')
+@login_required
+def student_verification_list():
+    """List students pending verification"""
+    # Get the status filter from the query parameters
+    status = request.args.get('status', 'pending')
+    search_query = request.args.get('search', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = 20  # Number of records per page
+
+    # Build query
+    query = User.query.filter_by(role='student')
+
+    # Apply status filter if not 'all'
+    if status != 'all':
+        query = query.filter_by(verification_status=status)
+
+    # Apply search filter if provided
+    if search_query:
+        query = query.filter(
+            db.or_(
+                User.username.ilike(f'%{search_query}%'),
+                User.full_name.ilike(f'%{search_query}%'),
+                User.group.ilike(f'%{search_query}%')
+            )
+        )
+
+    # Execute query with pagination
+    pagination = query.order_by(User.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    students = pagination.items
+
+    return render_template(
+        'verification/students.html',
+        students=students,
+        pagination=pagination,
+        status=status
+    )
+
+
+@app.route('/verification/students/<int:student_id>')
+@login_required
+def view_student_details(student_id):
+    """View student verification details"""
+    student = User.query.filter_by(id=student_id, role='student').first_or_404()
+    return render_template('verification/student_details.html', student=student)
+
+
+# Обновите функцию verify_student в app.py
+
+@app.route('/verification/students/verify', methods=['POST'])
+@login_required
+def verify_student():
+    """Approve or reject student verification"""
+    student_id = request.form.get('student_id', type=int)
+    action = request.form.get('action')
+    comment = request.form.get('comment', '')
+
+    if not student_id or action not in ['approve', 'reject']:
+        flash('Неверные параметры', 'error')
+        return redirect(url_for('student_verification_list'))
+
+    student = User.query.filter_by(id=student_id, role='student').first()
+
+    if not student:
+        flash('Студент не найден', 'error')
+        return redirect(url_for('student_verification_list'))
+
+    # Get current admin user
+    admin_id = session.get('user_id')
+
+    # Save previous status for logging
+    previous_status = student.verification_status
+
+    # Update verification status
+    if action == 'approve':
+        student.verification_status = 'verified'
+        flash(f'Верификация студента {student.full_name} подтверждена', 'success')
+        action_name = 'approve'
+        notification_title = 'Верификация подтверждена'
+        notification_body = 'Ваш студенческий билет успешно прошел проверку!'
+        if not comment:
+            comment = 'Верификация одобрена администратором'
+    else:  # reject
+        student.verification_status = 'rejected'
+        flash(f'Верификация студента {student.full_name} отклонена', 'error')
+        action_name = 'reject'
+        notification_title = 'Верификация отклонена'
+        notification_body = 'Ваш студенческий билет не прошел проверку. Пожалуйста, загрузите новую фотографию.'
+        if not comment:
+            comment = 'Верификация отклонена администратором'
+
+    # Create verification log entry
+    log_entry = VerificationLog(
+        student_id=student_id,
+        admin_id=admin_id,
+        action=action_name,
+        status_before=previous_status,
+        status_after=student.verification_status,
+        comment=comment
+    )
+
+    db.session.add(log_entry)
+    db.session.commit()
+
+    # Отправляем push-уведомление на все устройства студента
+    try:
+        # Получаем все токены устройств студента
+        tokens = DeviceToken.query.filter_by(user_id=student_id).all()
+
+        # Доп. данные для push-уведомления
+        extra_data = {
+            'type': 'verification',
+            'status': student.verification_status,
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+
+        # Отправляем уведомления на все устройства
+        for token_obj in tokens:
+            send_push_message(
+                token_obj.token,
+                notification_title,
+                notification_body,
+                extra_data
+            )
+
+        print(f"Отправлено уведомление на {len(tokens)} устройств пользователя {student_id}")
+    except Exception as e:
+        print(f"Ошибка при отправке push-уведомления: {str(e)}")
+
+    # Redirect back to the detail page if coming from there
+    referrer = request.referrer
+    if referrer and 'students/' + str(student_id) in referrer:
+        return redirect(url_for('view_student_details', student_id=student_id))
+
+    return redirect(url_for('student_verification_list'))
+# Add this route to your app.py file
+
+@app.route('/students')
+@login_required
+def students_list():
+    """List all students with filtering options"""
+    # Get the filter parameters
+    status = request.args.get('status', 'all')
+    search_query = request.args.get('search', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = 20  # Number of records per page
+
+    # Build query
+    query = User.query.filter_by(role='student')
+
+    # Apply status filter if not 'all'
+    if status != 'all':
+        query = query.filter_by(verification_status=status)
+
+    # Apply search filter if provided
+    if search_query:
+        query = query.filter(
+            db.or_(
+                User.username.ilike(f'%{search_query}%'),
+                User.full_name.ilike(f'%{search_query}%'),
+                User.group.ilike(f'%{search_query}%')
+            )
+        )
+
+    # Execute query with pagination
+    pagination = query.order_by(User.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    students = pagination.items
+
+    return render_template(
+        'students/list.html',
+        students=students,
+        pagination=pagination,
+        status=status,
+        search_query=search_query
+    )
+
+@app.route('/uploads/student_cards/admin/<filename>')
+@login_required
+def get_student_card_admin(filename):
+    """Admin access to student card images"""
+    # Only allow admin users to view these images
+    return send_from_directory(STUDENT_CARDS_FOLDER, filename)
 
 
 if __name__ == '__main__':

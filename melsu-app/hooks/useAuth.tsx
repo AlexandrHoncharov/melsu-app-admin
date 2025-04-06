@@ -1,13 +1,17 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { router } from 'expo-router';
+import { AppState, AppStateStatus } from 'react-native';
 import authApi from '../src/api/authApi';
 import userApi from '../src/api/userApi';
 
+// Add refresh interval in milliseconds (check every 30 seconds)
+const VERIFICATION_CHECK_INTERVAL = 30000;
+
 // Типы для пользовательских данных
 export type UserRole = 'student' | 'teacher' | 'admin';
-export type VerificationStatus = 'unverified' | 'pending' | 'verified';
+export type VerificationStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
 
 export interface User {
   id: number;
@@ -19,6 +23,7 @@ export interface User {
   group?: string;
   department?: string;
   position?: string;
+  studentCardImage?: string;
 }
 
 // Интерфейс контекста авторизации
@@ -32,6 +37,9 @@ interface AuthContextProps {
   uploadStudentCard: (imageUri: string) => Promise<void>;
   checkVerificationStatus: () => Promise<VerificationStatus>;
   refreshUserProfile: () => Promise<void>;
+  cancelVerification: () => Promise<boolean>;
+  reuploadStudentCard: (imageUri: string) => Promise<void>;
+  manuallyCheckVerificationStatus: () => Promise<void>;
 }
 
 // Данные для регистрации
@@ -50,6 +58,82 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const appState = useRef(AppState.currentState);
+  const checkInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // Function to check verification status and update if changed
+  const checkVerificationUpdate = async () => {
+    // Only check if user is authenticated and is a student
+    if (!isAuthenticated || !user || user.role !== 'student') {
+      return;
+    }
+
+    try {
+      const { status } = await userApi.getVerificationStatus();
+
+      // Update user data if status has changed
+      if (user.verificationStatus !== status) {
+        console.log(`Verification status changed: ${user.verificationStatus} -> ${status}`);
+        const updatedUser = { ...user, verificationStatus: status };
+        setUser(updatedUser);
+        await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+      }
+    } catch (error) {
+      console.error('Error checking verification status:', error);
+    }
+  };
+
+  // Start periodic checking
+  const startPeriodicChecking = () => {
+    if (checkInterval.current) {
+      clearInterval(checkInterval.current);
+    }
+
+    checkInterval.current = setInterval(() => {
+      checkVerificationUpdate();
+    }, VERIFICATION_CHECK_INTERVAL);
+  };
+
+  // Stop periodic checking
+  const stopPeriodicChecking = () => {
+    if (checkInterval.current) {
+      clearInterval(checkInterval.current);
+      checkInterval.current = null;
+    }
+  };
+
+  // Handle app state changes (background/foreground)
+  const handleAppStateChange = (nextAppState: AppStateStatus) => {
+    if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+      // App has come to the foreground - check status immediately
+      checkVerificationUpdate();
+    }
+
+    // Save current state
+    appState.current = nextAppState;
+  };
+
+  // Set up app state change listener
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+    };
+  }, [user]);
+
+  // Start/stop periodic checking based on authentication state
+  useEffect(() => {
+    if (isAuthenticated && user?.role === 'student') {
+      startPeriodicChecking();
+    } else {
+      stopPeriodicChecking();
+    }
+
+    return () => {
+      stopPeriodicChecking();
+    };
+  }, [isAuthenticated, user?.role]);
 
   // Проверка токена при запуске
   useEffect(() => {
@@ -107,6 +191,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         fullName: userData.fullName,
         group: userData.group,
         faculty: userData.faculty,
+        studentCardImage: userData.studentCardImage,
         // Дополнительные поля для преподавателей
         department: userData.department,
         position: userData.position
@@ -152,7 +237,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const register = async (userData: RegisterData) => {
     setIsLoading(true);
     try {
-      // Если нужно генерировать логин на сервере
+      // Формируем данные для регистрации
       const registerData = {
         fullName: userData.fullName,
         password: userData.password,
@@ -238,6 +323,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Повторная загрузка фото студенческого билета
+  const reuploadStudentCard = async (imageUri: string) => {
+    setIsLoading(true);
+    try {
+      // Отправляем фото на сервер
+      await userApi.reuploadStudentCard(imageUri);
+
+      // Обновляем статус верификации
+      if (user) {
+        const newUser = {
+          ...user,
+          verificationStatus: 'pending' as VerificationStatus
+        };
+        setUser(newUser);
+        await AsyncStorage.setItem('userData', JSON.stringify(newUser));
+      }
+
+      return;
+    } catch (error) {
+      console.error('Ошибка при повторной загрузке фото студенческого:', error);
+      throw error;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Отмена верификации для повторной загрузки
+  const cancelVerification = async () => {
+    try {
+      await userApi.cancelVerification();
+
+      // Обновляем статус пользователя
+      if (user) {
+        const updatedUser = { ...user, verificationStatus: 'unverified' as VerificationStatus };
+        setUser(updatedUser);
+        await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Ошибка при отмене верификации:', error);
+      throw error;
+    }
+  };
+
   // Проверка статуса верификации
   const checkVerificationStatus = async (): Promise<VerificationStatus> => {
     try {
@@ -257,6 +387,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Check verification status manually (e.g., on screen focus)
+  const manuallyCheckVerificationStatus = async () => {
+    try {
+      await checkVerificationStatus();
+    } catch (error) {
+      console.error('Error in manual verification check:', error);
+      throw error;
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -268,7 +408,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         logout,
         uploadStudentCard,
         checkVerificationStatus,
-        refreshUserProfile
+        refreshUserProfile,
+        cancelVerification,
+        reuploadStudentCard,
+        manuallyCheckVerificationStatus
       }}
     >
       {children}

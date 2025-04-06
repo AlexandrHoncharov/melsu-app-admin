@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 
 // Генерация списка дней для текущей недели
 const generateWeekDays = () => {
@@ -139,7 +139,7 @@ const generateSchedule = (weekday) => {
 };
 
 export default function ScheduleScreen() {
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, checkVerificationStatus } = useAuth();
   const [selectedDayIndex, setSelectedDayIndex] = useState('0'); // Понедельник по умолчанию
   const [weekDays, setWeekDays] = useState(generateWeekDays());
   const [schedule, setSchedule] = useState([]);
@@ -147,6 +147,16 @@ export default function ScheduleScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
+
+  // Refresh verification status on focus
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.role === 'student') {
+        // Check for verification status updates when screen comes into focus
+        checkVerificationStatus();
+      }
+    }, [user])
+  );
 
   // Получение расписания при изменении выбранного дня
   useEffect(() => {
@@ -189,8 +199,19 @@ export default function ScheduleScreen() {
     setRefreshing(true);
 
     // Имитация обновления данных
-    setTimeout(() => {
+    setTimeout(async () => {
+      // Refresh schedule data
       loadSchedule();
+
+      // Also check verification status if user is a student
+      if (user?.role === 'student') {
+        try {
+          await checkVerificationStatus();
+        } catch (error) {
+          console.error('Error checking verification status:', error);
+        }
+      }
+
       setRefreshing(false);
     }, 1000);
   };
@@ -388,17 +409,28 @@ export default function ScheduleScreen() {
       {/* Плашка для неверифицированных студентов */}
       {user?.role === 'student' && user?.verificationStatus !== 'verified' && (
         <TouchableOpacity
-          style={styles.verificationBanner}
+          style={[
+            styles.verificationBanner,
+            user?.verificationStatus === 'rejected' ? styles.rejectionBanner : null
+          ]}
           onPress={() => router.push('/verification')}
         >
           <Ionicons
-            name={user?.verificationStatus === 'pending' ? 'time-outline' : 'shield-outline'}
+            name={
+              user?.verificationStatus === 'pending'
+                ? 'time-outline'
+                : user?.verificationStatus === 'rejected'
+                ? 'close-circle-outline'
+                : 'shield-outline'
+            }
             size={20}
             color="#fff"
           />
           <Text style={styles.verificationText}>
             {user?.verificationStatus === 'pending'
               ? 'Студенческий билет на проверке'
+              : user?.verificationStatus === 'rejected'
+              ? 'Верификация отклонена. Нажмите для загрузки нового фото.'
               : 'Верифицируйте студенческий билет'}
           </Text>
         </TouchableOpacity>
@@ -632,6 +664,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
+  },
+  rejectionBanner: {
+    backgroundColor: '#C62828',
   },
   verificationText: {
     color: '#fff',

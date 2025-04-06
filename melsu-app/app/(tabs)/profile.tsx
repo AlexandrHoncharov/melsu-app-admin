@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 
 // Демо данные для профиля
 const demoAcademicInfo = {
@@ -26,16 +26,35 @@ const demoAcademicInfo = {
 };
 
 export default function ProfileScreen() {
-  const { user, logout, isLoading } = useAuth();
+  const { user, logout, isLoading, refreshUserProfile, manuallyCheckVerificationStatus } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+
+  // Refresh profile data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.role === 'student') {
+        // Check for verification status updates when screen comes into focus
+        manuallyCheckVerificationStatus();
+      }
+    }, [])
+  );
 
   // Обработка обновления профиля
   const handleRefresh = async () => {
     setRefreshing(true);
-    // Имитация запроса обновления
-    setTimeout(() => {
+    try {
+      // First refresh the user profile completely
+      await refreshUserProfile();
+
+      // Then check specific verification status which might have changed
+      if (user?.role === 'student') {
+        await manuallyCheckVerificationStatus();
+      }
+    } catch (error) {
+      console.error('Error refreshing profile:', error);
+    } finally {
       setRefreshing(false);
-    }, 1000);
+    }
   };
 
   // Обработка выхода из аккаунта
@@ -127,6 +146,8 @@ export default function ProfileScreen() {
                   ? styles.verifiedBadge
                   : user.verificationStatus === 'pending'
                   ? styles.pendingBadge
+                  : user.verificationStatus === 'rejected'
+                  ? styles.rejectedBadge
                   : styles.unverifiedBadge
               ]}>
                 <Ionicons
@@ -135,6 +156,8 @@ export default function ProfileScreen() {
                       ? 'checkmark-circle-outline'
                       : user.verificationStatus === 'pending'
                       ? 'time-outline'
+                      : user.verificationStatus === 'rejected'
+                      ? 'close-circle-outline'
                       : 'alert-circle-outline'
                   }
                   size={14}
@@ -143,6 +166,8 @@ export default function ProfileScreen() {
                       ? '#2E7D32'
                       : user.verificationStatus === 'pending'
                       ? '#0277BD'
+                      : user.verificationStatus === 'rejected'
+                      ? '#C62828'
                       : '#F57C00'
                   }
                 />
@@ -152,12 +177,16 @@ export default function ProfileScreen() {
                     ? styles.verifiedText
                     : user.verificationStatus === 'pending'
                     ? styles.pendingText
+                    : user.verificationStatus === 'rejected'
+                    ? styles.rejectedText
                     : styles.unverifiedText
                 ]}>
                   {user.verificationStatus === 'verified'
                     ? 'Верифицирован'
                     : user.verificationStatus === 'pending'
                     ? 'На проверке'
+                    : user.verificationStatus === 'rejected'
+                    ? 'Отклонен'
                     : 'Не верифицирован'}
                 </Text>
               </View>
@@ -215,17 +244,21 @@ export default function ProfileScreen() {
               <Text style={styles.verificationInfoText}>
                 {user.verificationStatus === 'pending'
                   ? 'Ваш студенческий билет находится на проверке. Обычно это занимает 1-2 рабочих дня.'
+                  : user.verificationStatus === 'rejected'
+                  ? 'Ваш студенческий билет был отклонен. Пожалуйста, загрузите новую фотографию.'
                   : 'Для доступа ко всем функциям приложения необходимо подтвердить, что вы являетесь студентом университета.'}
               </Text>
 
-              {user.verificationStatus === 'unverified' && (
+              {(user.verificationStatus === 'unverified' || user.verificationStatus === 'rejected') && (
                 <TouchableOpacity
                   style={styles.verificationButton}
                   onPress={handleVerification}
                 >
                   <Ionicons name="camera-outline" size={20} color="#fff" />
                   <Text style={styles.verificationButtonText}>
-                    Верифицировать студенческий
+                    {user.verificationStatus === 'rejected'
+                      ? 'Загрузить новый студенческий'
+                      : 'Верифицировать студенческий'}
                   </Text>
                 </TouchableOpacity>
               )}
@@ -326,6 +359,9 @@ const styles = StyleSheet.create({
   unverifiedBadge: {
     backgroundColor: '#FFF3E0',
   },
+  rejectedBadge: {
+    backgroundColor: '#FFEBEE',
+  },
   verificationText: {
     fontSize: 12,
     marginLeft: 4,
@@ -338,6 +374,9 @@ const styles = StyleSheet.create({
   },
   unverifiedText: {
     color: '#F57C00',
+  },
+  rejectedText: {
+    color: '#C62828',
   },
   groupContainer: {
     flexDirection: 'row',

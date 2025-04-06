@@ -13,10 +13,18 @@ class User(db.Model):
     username = db.Column(db.String(80, collation='utf8mb4_unicode_ci'), unique=True, nullable=False)
     password = db.Column(db.String(200, collation='utf8mb4_unicode_ci'), nullable=False)
     password_plain = db.Column(db.String(200, collation='utf8mb4_unicode_ci'), nullable=True)  # Для просмотра пароля
-    is_admin = db.Column(db.Boolean, default=True)
+    is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    def __init__(self, username, password, is_admin=True):
+    # Дополнительные поля для мобильного приложения
+    role = db.Column(db.String(20), default=None)  # student / teacher
+    verification_status = db.Column(db.String(20), default=None)  # unverified / pending / verified
+    student_card_image = db.Column(db.String(255), default=None)
+    full_name = db.Column(db.String(255), default=None)
+    group = db.Column(db.String(50), default=None)
+    faculty = db.Column(db.String(255), default=None)
+
+    def __init__(self, username, password, is_admin=False):
         self.username = username
         self.password_plain = password  # Сохраняем пароль в открытом виде
         self.password = generate_password_hash(password)

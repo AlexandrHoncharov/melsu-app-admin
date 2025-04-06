@@ -5,6 +5,8 @@ import pymysql
 from functools import wraps
 from db import db
 from datetime import datetime
+from sqlalchemy import text
+import re
 
 # Создание экземпляра приложения
 app = Flask(__name__)
@@ -14,7 +16,7 @@ app.config.from_object('config')
 db.init_app(app)
 
 # Импорт моделей ПОСЛЕ инициализации db
-from models import User, Teacher, Schedule
+from models import User, Teacher, Schedule, ScheduleTeacher
 
 
 # Определяем login_required локально
@@ -30,12 +32,17 @@ def login_required(f):
 
 # Создание первого администратора
 def create_initial_admin():
-    with app.app_context():
-        if User.query.count() == 0:
-            admin = User(username='admin', password='admin')
-            db.session.add(admin)
-            db.session.commit()
-            print("Создан начальный админ: admin / admin")
+    try:
+        with app.app_context():
+            # Проверяем наличие администратора по имени пользователя
+            if User.query.filter_by(username='admin').first() is None:
+                admin = User(username='admin', password='admin')
+                db.session.add(admin)
+                db.session.commit()
+                print("Создан начальный админ: admin / admin")
+    except Exception as e:
+        print(f"Ошибка при создании администратора: {str(e)}")
+        # Не возбуждаем исключение дальше, чтобы не прерывать запуск приложения
 
 
 @app.route('/')
@@ -264,7 +271,10 @@ def sync_schedule():
                 user='sanumxxx',
                 password='Yandex200515_',
                 database='timetable',
-                port=3306
+                port=3306,
+                charset='utf8mb4',
+                cursorclass=pymysql.cursors.DictCursor,  # Получаем результаты в виде словарей
+                connect_timeout=30
             )
 
             with connection.cursor() as cursor:
@@ -295,24 +305,21 @@ def sync_schedule():
                 batch_size = 1000
                 total_records = 0
 
-                # Если используются фильтры, удаляем только соответствующие записи
+                # Удаляем записи в соответствии с фильтрами
                 if semester or group:
-                    delete_query = "DELETE FROM schedule WHERE 1=1"
-                    delete_params = []
+                    filters = {}
 
                     if semester:
-                        delete_query += " AND semester = :semester"
-                        delete_params.append({"name": "semester", "value": int(semester)})
+                        filters['semester'] = int(semester)
 
                     if group:
-                        delete_query += " AND group_name = :group"
-                        delete_params.append({"name": "group", "value": group})
+                        filters['group_name'] = group
 
-                    # Выполняем удаление с параметрами
-                    db.session.execute(delete_query, delete_params)
+                    # Используем фильтры для удаления
+                    Schedule.query.filter_by(**filters).delete()
                 else:
-                    # Если фильтров нет, очищаем всю таблицу
-                    Schedule.query.delete()
+                    # Если фильтров нет, очищаем всю таблицу (используем SQL для оптимизации)
+                    db.session.execute(db.text("TRUNCATE TABLE schedule"))
 
                 db.session.commit()
 
@@ -324,24 +331,24 @@ def sync_schedule():
 
                     for record in records:
                         new_schedule = Schedule(
-                            semester=record[0],
-                            week_number=record[1],
-                            group_name=record[2],
-                            course=record[3],
-                            faculty=record[4],
-                            subject=record[5],
-                            lesson_type=record[6],
-                            subgroup=record[7],
-                            date=record[8],
-                            time_start=record[9],
-                            time_end=record[10],
-                            weekday=record[11],
-                            teacher_name=record[12],
-                            auditory=record[13]
+                            semester=record['semester'],
+                            week_number=record['week_number'],
+                            group_name=record['group_name'],
+                            course=record['course'],
+                            faculty=record['faculty'],
+                            subject=record['subject'],
+                            lesson_type=record['lesson_type'],
+                            subgroup=record['subgroup'],
+                            date=record['date'],
+                            time_start=record['time_start'],
+                            time_end=record['time_end'],
+                            weekday=record['weekday'],
+                            teacher_name=record['teacher_name'],
+                            auditory=record['auditory']
                         )
                         db.session.add(new_schedule)
 
-                    # Сохраняем пакет и очищаем сессию
+                    # Сохраняем пакет и очищаем сессию для освобождения памяти
                     db.session.commit()
                     db.session.expire_all()
                     total_records += len(records)
@@ -364,8 +371,267 @@ def sync_schedule():
                            groups=[g[0] for g in groups if g[0] is not None])
 
 
+@app.route('/schedule/teachers')
+@login_required
+def schedule_teachers_list():
+    search_query = request.args.get('search', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+
+    query = ScheduleTeacher.query.filter_by(active=True)
+
+    if search_query:
+        query = query.filter(ScheduleTeacher.name.ilike(f'%{search_query}%'))
+
+    # Применяем сортировку и пагинацию
+    pagination = query.order_by(ScheduleTeacher.name).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    teachers = pagination.items
+
+    return render_template('schedule/teachers_list.html',
+                           teachers=teachers,
+                           pagination=pagination,
+                           search_query=search_query)
+
+
+@app.route('/schedule/teachers/generate', methods=['POST'])
+@login_required
+def generate_schedule_teachers():
+    try:
+        # Получаем уникальный список преподавателей из расписания
+        unique_teachers = db.session.query(Schedule.teacher_name).distinct().all()
+        teacher_names = [t[0] for t in unique_teachers if t[0] and len(t[0].strip()) > 1]
+
+        # Отфильтруем некорректные записи (дефисы, одиночные символы и т.д.)
+        valid_teachers = []
+        for name in teacher_names:
+            name = name.strip()
+            # Пропускаем дефисы, прочерки и очень короткие имена
+            if name == '-' or name == '–' or name == '—' or len(name) < 2:
+                continue
+            valid_teachers.append(name)
+
+        # Добавляем записи в базу данных
+        added_count = 0
+        for name in valid_teachers:
+            # Проверяем, существует ли уже такой преподаватель
+            existing = ScheduleTeacher.query.filter_by(name=name).first()
+            if not existing:
+                teacher = ScheduleTeacher(name=name)
+                db.session.add(teacher)
+                added_count += 1
+
+        db.session.commit()
+        flash(f'Успешно добавлено {added_count} преподавателей из расписания', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при создании списка преподавателей: {str(e)}', 'error')
+
+    return redirect(url_for('schedule_teachers_list'))
+
+
+@app.route('/schedule/teachers/delete/<int:teacher_id>', methods=['POST'])
+@login_required
+def delete_schedule_teacher(teacher_id):
+    try:
+        teacher = ScheduleTeacher.query.get_or_404(teacher_id)
+
+        # Вместо удаления, просто помечаем как неактивный
+        teacher.active = False
+        db.session.commit()
+
+        flash('Преподаватель удален из списка', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при удалении преподавателя: {str(e)}', 'error')
+
+    return redirect(url_for('schedule_teachers_list'))
+
+
+@app.route('/teachers/match/<int:teacher_id>')
+@login_required
+def match_teacher_form(teacher_id):
+    hr_teacher = Teacher.query.get_or_404(teacher_id)
+
+    # Получаем все активные преподаватели из расписания, которые еще не сопоставлены
+    schedule_teachers = ScheduleTeacher.query.filter_by(
+        active=True,
+        mapped_teacher_id=None
+    ).order_by(ScheduleTeacher.name).all()
+
+    # Для уже сопоставленных с данным преподавателем
+    matched_teachers = ScheduleTeacher.query.filter_by(
+        mapped_teacher_id=teacher_id
+    ).all()
+
+    # Попытаемся найти потенциальные совпадения
+    suggested_matches = find_similar_teachers(hr_teacher.name, schedule_teachers)
+
+    return render_template('teachers/match.html',
+                           hr_teacher=hr_teacher,
+                           schedule_teachers=schedule_teachers,
+                           matched_teachers=matched_teachers,
+                           suggested_matches=suggested_matches)
+
+
+@app.route('/teachers/match', methods=['POST'])
+@login_required
+def match_teacher():
+    try:
+        hr_teacher_id = request.form.get('hr_teacher_id', type=int)
+        schedule_teacher_id = request.form.get('schedule_teacher_id', type=int)
+
+        if not hr_teacher_id or not schedule_teacher_id:
+            flash('Не указаны обязательные параметры', 'error')
+            return redirect(url_for('teachers_list'))
+
+        # Получаем объекты из базы
+        hr_teacher = Teacher.query.get_or_404(hr_teacher_id)
+        schedule_teacher = ScheduleTeacher.query.get_or_404(schedule_teacher_id)
+
+        # Устанавливаем связь
+        schedule_teacher.mapped_teacher_id = hr_teacher_id
+        db.session.commit()
+
+        flash(f'Преподаватель "{schedule_teacher.name}" успешно сопоставлен с "{hr_teacher.name}"', 'success')
+
+        # Возвращаемся к форме сопоставления
+        return redirect(url_for('match_teacher_form', teacher_id=hr_teacher_id))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при сопоставлении преподавателей: {str(e)}', 'error')
+        return redirect(url_for('teachers_list'))
+
+
+@app.route('/teachers/unmatch', methods=['POST'])
+@login_required
+def unmatch_teacher():
+    try:
+        schedule_teacher_id = request.form.get('schedule_teacher_id', type=int)
+
+        if not schedule_teacher_id:
+            flash('Не указан ID преподавателя расписания', 'error')
+            return redirect(url_for('teachers_list'))
+
+        schedule_teacher = ScheduleTeacher.query.get_or_404(schedule_teacher_id)
+        hr_teacher_id = schedule_teacher.mapped_teacher_id
+
+        # Удаляем связь
+        schedule_teacher.mapped_teacher_id = None
+        db.session.commit()
+
+        flash('Сопоставление удалено', 'success')
+
+        # Возвращаемся к форме сопоставления, если есть hr_teacher_id
+        if hr_teacher_id:
+            return redirect(url_for('match_teacher_form', teacher_id=hr_teacher_id))
+        else:
+            return redirect(url_for('teachers_list'))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при удалении сопоставления: {str(e)}', 'error')
+        return redirect(url_for('teachers_list'))
+
+
+def find_similar_teachers(hr_teacher_name, schedule_teachers):
+    """
+    Находит потенциальные совпадения между именем преподавателя из отдела кадров
+    и именами преподавателей из расписания.
+    """
+    # Разбиваем полное имя на части
+    name_parts = hr_teacher_name.split()
+    if not name_parts:
+        return []
+
+    # Получаем фамилию и инициалы
+    surname = name_parts[0]
+
+    # Создаем инициалы
+    initials = ""
+    if len(name_parts) > 1:
+        for i in range(1, min(3, len(name_parts))):
+            if name_parts[i]:
+                initials += name_parts[i][0] + "."
+
+    # Варианты написания имени
+    name_variants = [
+        surname,  # Только фамилия
+        f"{surname} {initials}",  # Фамилия и инициалы с пробелом
+        f"{surname} {initials.replace('.', '')}" if initials else "",  # Фамилия и инициалы без точек
+        f"{surname}{initials}",  # Фамилия и инициалы без пробела
+        f"{surname}{initials.replace('.', '')}" if initials else ""  # Фамилия и инициалы без пробела и точек
+    ]
+
+    # Дополнительные варианты с перестановкой инициалов
+    if len(name_parts) > 2:
+        reversed_initials = ""
+        if len(name_parts) >= 3:
+            reversed_initials = name_parts[2][0] + "." + name_parts[1][0] + "."
+            name_variants.append(f"{surname} {reversed_initials}")
+            name_variants.append(f"{surname}{reversed_initials}")
+            name_variants.append(f"{surname} {reversed_initials.replace('.', '')}")
+            name_variants.append(f"{surname}{reversed_initials.replace('.', '')}")
+
+    # Находим потенциальные совпадения
+    matches = []
+    for teacher in schedule_teachers:
+        teacher_name = teacher.name.strip()
+
+        # Прямое совпадение с одним из вариантов
+        if any(variant and teacher_name.lower().startswith(variant.lower()) for variant in name_variants if variant):
+            matches.append((teacher, 100))  # 100% совпадение
+            continue
+
+        # Проверка на фамилию
+        if surname.lower() in teacher_name.lower():
+            # Если содержит фамилию, оцениваем схожесть
+            similarity = 70  # Базовая схожесть, если найдена фамилия
+
+            # Проверка на инициалы
+            if initials:
+                initials_without_dots = initials.replace(".", "")
+                if initials in teacher_name:
+                    similarity += 20
+                elif initials_without_dots in teacher_name:
+                    similarity += 15
+
+                # Проверка на отдельные инициалы
+                for i in range(len(initials_without_dots)):
+                    if initials_without_dots[i] in teacher_name:
+                        similarity += 5
+
+            matches.append((teacher, similarity))
+
+    # Сортируем по убыванию схожести
+    matches.sort(key=lambda x: x[1], reverse=True)
+
+    # Возвращаем только совпадения с схожестью выше 70%
+    return [(teacher, score) for teacher, score in matches if score >= 70]
+
+
 if __name__ == '__main__':
-    with app.app_context():
-        db.create_all()
-        create_initial_admin()
-    app.run(debug=True)
+    try:
+        with app.app_context():
+            # Проверяем соединение с БД
+            db.engine.connect()
+            print("Соединение с базой данных установлено")
+
+            # Проверяем существование таблиц, если нет - создаем
+            from sqlalchemy import inspect
+
+            inspector = inspect(db.engine)
+
+            if not inspector.has_table('user'):
+                print("Таблицы не найдены. Создаем структуру БД...")
+                db.create_all()
+                print("Структура БД создана")
+
+            create_initial_admin()
+
+        app.run(debug=True)
+    except Exception as e:
+        print(f"Ошибка при запуске приложения: {str(e)}")
+        print("Проверьте настройки подключения к базе данных")

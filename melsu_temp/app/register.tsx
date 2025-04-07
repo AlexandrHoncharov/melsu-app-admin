@@ -188,7 +188,7 @@ const handleRegister = async () => {
                 <Ionicons name="people-outline" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="И-194"
+                  placeholder="2211-0101.1"
                   placeholderTextColor="#999"
                   value={group}
                   onChangeText={(text) => {

@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import text
 import re
 
+
 # Создание экземпляра приложения
 app = Flask(__name__)
 app.config.from_object('config')
@@ -16,12 +17,81 @@ app.config.from_object('config')
 db.init_app(app)
 
 # Импорт моделей ПОСЛЕ инициализации db
-from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog
+from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog, DeviceToken
 
 # Папка для хранения загруженных изображений
 UPLOAD_FOLDER = 'uploads'
 STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
 
+# Remove this: from api import send_push_message
+
+# Instead, add the function directly:
+def send_push_message(token, title, message, extra=None):
+    """
+    Отправляет push-уведомление через HTTP запрос к Expo Push Service
+
+    Args:
+        token (str): Expo Push Token
+        title (str): Заголовок уведомления
+        message (str): Текст уведомления
+        extra (dict, optional): Дополнительные данные для уведомления
+
+    Returns:
+        dict: Результат отправки с информацией об успехе/ошибке
+    """
+    try:
+        import requests
+        import json
+
+        # Экспо API для push-уведомлений
+        expo_push_url = "https://exp.host/--/api/v2/push/send"
+
+        # Подготовка данных для отправки
+        push_message = {
+            "to": token,
+            "title": title,
+            "body": message,
+            "data": extra or {},
+            "sound": "default",
+            "priority": "high"
+        }
+
+        # Выполнение запроса
+        headers = {
+            "Accept": "application/json",
+            "Accept-encoding": "gzip, deflate",
+            "Content-Type": "application/json",
+        }
+
+        response = requests.post(
+            expo_push_url,
+            data=json.dumps(push_message),
+            headers=headers
+        )
+
+        # Проверка ответа
+        if response.status_code != 200:
+            error_msg = f"Push message to {token} failed with status code {response.status_code}: {response.text}"
+            print(error_msg)
+            return {"success": False, "error": error_msg}
+
+        # Корректная обработка ответа Expo
+        # Expo возвращает массив объектов с полями id, status
+        result = response.json()
+
+        # Проверка на наличие ошибок в ответе
+        if "errors" in result or "data" in result and "error" in result["data"]:
+            error_msg = f"Push message to {token} failed: {result}"
+            print(error_msg)
+            return {"success": False, "error": error_msg}
+
+        print(f"Successfully sent push notification to {token}")
+        return {"success": True, "receipt": result}
+
+    except Exception as exc:
+        error_msg = f"Push message failed: {exc}"
+        print(error_msg)
+        return {"success": False, "error": error_msg}
 
 # Определяем login_required локально
 def login_required(f):
@@ -733,7 +803,7 @@ def verify_student():
         extra_data = {
             'type': 'verification',
             'status': student.verification_status,
-            'timestamp': datetime.datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat()  # Correct if imported as: from datetime import datetime
         }
 
         # Отправляем уведомления на все устройства

@@ -111,11 +111,7 @@ export default function ProfileScreen() {
       >
         {/* Шапка профиля */}
         <View style={styles.profileHeader}>
-          <Image
-            source={require('../../assets/images/university-logo.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+
 
           <View style={styles.avatarContainer}>
             <Text style={styles.avatarText}>

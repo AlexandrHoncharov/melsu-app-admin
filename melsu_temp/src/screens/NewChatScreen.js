@@ -23,6 +23,10 @@ export default function NewChatScreen() {
   const [processingUser, setProcessingUser] = useState(null);
   const { user } = useAuth();
 
+  // Определяем, кого показывать в списке на основе роли текущего пользователя
+  const targetRole = user?.role === 'student' ? 'teacher' : 'student';
+  const roleTitle = targetRole === 'teacher' ? 'преподавателей' : 'студентов';
+
   useEffect(() => {
     loadUsers();
   }, []);
@@ -31,15 +35,19 @@ export default function NewChatScreen() {
     try {
       setLoading(true);
 
-      // Определяем, кого искать - для студентов преподавателей, для преподавателей студентов
-      const targetRole = user?.role === 'student' ? 'teacher' : 'student';
+      if (!user || !user.role) {
+        throw new Error('Информация о пользователе отсутствует');
+      }
+
+      console.log(`Current user role: ${user.role}, loading users with role: ${targetRole}`);
 
       try {
-        // Получаем пользователей с сервера
+        // Получаем пользователей с сервера ТОЛЬКО с нужной ролью
         const response = await apiClient.get('/users', {
           params: { role: targetRole }
         });
 
+        console.log(`Loaded ${response.data?.length || 0} ${targetRole} from API`);
         setUsers(response.data || []);
       } catch (error) {
         console.error('Error loading users from API:', error);
@@ -48,11 +56,14 @@ export default function NewChatScreen() {
           'Не удалось получить список пользователей. Проверьте подключение к интернету.',
           [{ text: 'OK' }]
         );
-        // Устанавливаем пустой массив пользователей в случае ошибки
         setUsers([]);
       }
     } catch (error) {
       console.error('Error in loadUsers:', error);
+      Alert.alert(
+        'Ошибка',
+        error.message || 'Произошла ошибка при загрузке пользователей'
+      );
     } finally {
       setLoading(false);
     }
@@ -64,9 +75,8 @@ export default function NewChatScreen() {
     try {
       setProcessingUser(selectedUser.id);
 
-      // Проверяем инициализацию сервиса
+      // Инициализируем сервис чата
       const initResult = await chatService.initialize();
-
       if (!initResult) {
         Alert.alert(
           'Ошибка',
@@ -78,7 +88,6 @@ export default function NewChatScreen() {
 
       // Создаем личный чат
       const chatId = await chatService.createPersonalChat(selectedUser.id);
-
       if (!chatId) {
         throw new Error('Failed to create chat - no chat ID returned');
       }
@@ -98,24 +107,44 @@ export default function NewChatScreen() {
   };
 
   const filteredUsers = users.filter(user => {
+    if (!user) return false;
+
     const searchLower = searchText.toLowerCase();
     return (
       (user.fullName?.toLowerCase() || '').includes(searchLower) ||
       (user.username?.toLowerCase() || '').includes(searchLower) ||
       (user.department?.toLowerCase() || '').includes(searchLower) ||
-      (user.group?.toLowerCase() || '').includes(searchLower)
+      (user.group?.toLowerCase() || '').includes(searchLower) ||
+      (user.position?.toLowerCase() || '').includes(searchLower) ||
+      (user.faculty?.toLowerCase() || '').includes(searchLower)
     );
   });
 
   const renderUserItem = ({ item }) => {
+    if (!item) return null;
+
+    // Формируем подзаголовок в зависимости от роли пользователя
     let subtitle = item.role === 'teacher' ? 'Преподаватель' : 'Студент';
-    if (item.department) {
-      subtitle = `${subtitle} • ${item.department}`;
-    } else if (item.group) {
-      subtitle = `${subtitle} • ${item.group}`;
+
+    if (item.role === 'teacher') {
+      if (item.department) {
+        subtitle = `${subtitle} • ${item.department}`;
+      }
+      if (item.position) {
+        subtitle = `${subtitle} • ${item.position}`;
+      }
+    } else { // student
+      if (item.group) {
+        subtitle = `${subtitle} • ${item.group}`;
+      }
+      if (item.faculty) {
+        subtitle = `${subtitle} • ${item.faculty}`;
+      }
     }
 
     const isProcessing = processingUser === item.id;
+    const displayName = item.fullName || item.username || "Пользователь";
+    const initials = (displayName || "??").substring(0, 2).toUpperCase();
 
     return (
       <TouchableOpacity
@@ -123,19 +152,22 @@ export default function NewChatScreen() {
         onPress={() => handleSelectUser(item)}
         disabled={isProcessing}
       >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {(item.fullName || item.username || "??").substring(0, 2).toUpperCase()}
-          </Text>
+        <View style={[
+          styles.avatar,
+          item.role === 'teacher' ? styles.teacherAvatar : styles.studentAvatar
+        ]}>
+          <Text style={styles.avatarText}>{initials}</Text>
         </View>
 
         <View style={styles.userInfo}>
-          <Text style={styles.userName}>{item.fullName || item.username || "Пользователь"}</Text>
+          <Text style={styles.userName}>{displayName}</Text>
           <Text style={styles.userSubtitle}>{subtitle}</Text>
         </View>
 
-        {isProcessing && (
+        {isProcessing ? (
           <ActivityIndicator size="small" color="#770002" />
+        ) : (
+          <Ionicons name="chevron-forward" size={20} color="#999" />
         )}
       </TouchableOpacity>
     );
@@ -150,11 +182,19 @@ export default function NewChatScreen() {
         }}
       />
 
+      <View style={styles.headerContainer}>
+        <Text style={styles.headerText}>
+          {targetRole === 'teacher'
+            ? 'Выберите преподавателя для начала общения'
+            : 'Выберите студента для начала общения'}
+        </Text>
+      </View>
+
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={20} color="#999" />
         <TextInput
           style={styles.searchInput}
-          placeholder="Поиск..."
+          placeholder={`Поиск ${roleTitle}...`}
           value={searchText}
           onChangeText={setSearchText}
         />
@@ -173,14 +213,15 @@ export default function NewChatScreen() {
         <FlatList
           data={filteredUsers}
           renderItem={renderUserItem}
-          keyExtractor={item => String(item.id)}
+          keyExtractor={item => String(item?.id || Math.random())}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
+              <Ionicons name="people-outline" size={48} color="#ccc" />
               <Text style={styles.emptyText}>
                 {searchText
                   ? 'По вашему запросу ничего не найдено'
-                  : 'Нет доступных пользователей'}
+                  : `Нет доступных ${roleTitle} для общения`}
               </Text>
             </View>
           }
@@ -194,6 +235,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  headerContainer: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  headerText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
   },
   searchContainer: {
     flexDirection: 'row',
@@ -215,6 +266,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+    paddingTop: 0,
   },
   userItem: {
     flexDirection: 'row',
@@ -231,6 +283,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+  },
+  teacherAvatar: {
+    backgroundColor: '#2E7D32', // Зеленый для преподавателей
+  },
+  studentAvatar: {
+    backgroundColor: '#0277BD', // Синий для студентов
   },
   avatarText: {
     fontSize: 18,
@@ -251,12 +309,14 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   emptyContainer: {
-    padding: 20,
+    padding: 40,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   emptyText: {
     fontSize: 16,
     color: '#999',
     textAlign: 'center',
+    marginTop: 16,
   },
 });

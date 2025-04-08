@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   SafeAreaView,
-  RefreshControl
+  RefreshControl,
+  Alert
 } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,26 +23,49 @@ export default function ChatScreen() {
   const chatId = Array.isArray(id) ? id[0] : id;
 
   const [messages, setMessages] = useState([]);
-  const [chatInfo, setChatInfo] = useState(null);
   const [chatTitle, setChatTitle] = useState('Чат');
   const [messageText, setMessageText] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [lastSent, setLastSent] = useState(null);
 
   const { user } = useAuth();
   const flatListRef = useRef(null);
 
+  // Сохраняем ID текущего пользователя в ref для надежного доступа
+  const currentUserIdRef = useRef(user ? String(user.id) : null);
+
+  // При изменении user обновляем ref
+  useEffect(() => {
+    if (user && user.id) {
+      currentUserIdRef.current = String(user.id);
+      console.log(`📱 Current user ID set to: ${currentUserIdRef.current}`);
+    }
+  }, [user]);
+
   // Загрузка данных чата
-  const loadChatData = async () => {
-    console.log(`Loading chat data for chat ${chatId}...`);
+  const loadChatData = async (isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
+
+    console.log(`📱 Loading chat data for chat ${chatId}...`);
     try {
+      // Важно! Сначала проверяем текущего пользователя
+      if (!user || !user.id) {
+        throw new Error('User data not available');
+      }
+
       // Инициализируем сервис
       await chatService.initialize();
 
-      // Получаем информацию о чате из Firebase
-      const info = await chatService.getChatInfo(chatId);
-      setChatInfo(info);
+      // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Принудительно устанавливаем правильный ID пользователя
+      // Это гарантирует, что chatService использует тот же ID, что и компонент
+      if (typeof chatService.forceCurrentUserId === 'function') {
+        await chatService.forceCurrentUserId(user.id);
+      } else {
+        console.warn('⚠️ forceCurrentUserId method not found in chatService - your messages may appear incorrectly');
+      }
 
       // Получаем чаты пользователя для определения имени собеседника
       const userChats = await chatService.getUserChats();
@@ -56,25 +80,62 @@ export default function ChatScreen() {
         }
       }
 
+      // ВАЖНО: сохраняем текущий user ID снова для надежности
+      if (user && user.id) {
+        currentUserIdRef.current = String(user.id);
+      }
+
       // Получаем сообщения
-      const chatMessages = await chatService.getChatMessages(chatId);
+      let chatMessages = await chatService.getChatMessages(chatId);
+
+      // КРИТИЧЕСКИ ВАЖНО: Обрабатываем сообщения локально, чтобы убедиться, что владелец определен правильно
+      chatMessages = chatMessages.map(msg => {
+        const msgSenderId = String(msg.senderId || '');
+        const myUserId = String(currentUserIdRef.current);
+
+        // Явное сравнение строковых ID
+        const isOwn = msgSenderId === myUserId;
+
+        // Выводим подробную информацию о каждом сообщении для отладки
+        console.log(`📱 Message processing: ID=${msg.id}, sender=${msgSenderId}, currentUser=${myUserId}, isOwn=${isOwn}`);
+
+        return {
+          ...msg,
+          senderId: msgSenderId,
+          // ПРИНУДИТЕЛЬНО устанавливаем isFromCurrentUser на основе сравнения ID
+          isFromCurrentUser: isOwn
+        };
+      });
+
+      // Отладочная информация
+      console.log(`📱 Processed ${chatMessages.length} messages, my ID: ${currentUserIdRef.current}`);
+      if (chatMessages.length > 0) {
+        const lastMsg = chatMessages[chatMessages.length - 1];
+        console.log(`📱 Last message: sender=${lastMsg.senderId}, text="${lastMsg.text.substring(0, 20)}...", isOwn=${lastMsg.isFromCurrentUser}`);
+      }
+
       setMessages(chatMessages);
 
       // Отмечаем сообщения как прочитанные
       await chatService.markMessagesAsRead(chatId);
 
-      console.log(`Chat data loaded: ${chatMessages.length} messages`);
     } catch (error) {
-      console.error('Error loading chat data:', error);
+      console.error('📱 Error loading chat data:', error);
+      if (!isRefresh) {
+        Alert.alert(
+          "Ошибка",
+          "Не удалось загрузить сообщения. Проверьте подключение к интернету."
+        );
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setIsInitialLoad(false);
     }
   };
 
   // Загрузка при первом рендере
   useEffect(() => {
-    setLoading(true);
     loadChatData();
 
     // Отписка от слушателей при уходе с экрана
@@ -85,9 +146,8 @@ export default function ChatScreen() {
 
   // Обработчик pull-to-refresh
   const handleRefresh = () => {
-    console.log('Refreshing chat messages...');
     setRefreshing(true);
-    loadChatData();
+    loadChatData(true);
   };
 
   // Отправка сообщения
@@ -96,27 +156,64 @@ export default function ChatScreen() {
 
     try {
       setSending(true);
-      console.log(`Sending message to chat ${chatId}: ${messageText}`);
+
+      // ПРОВЕРКА! Убедимся, что используется правильный ID
+      if (!user || !user.id) {
+        throw new Error('User data not available');
+      }
+
+      // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Принудительно устанавливаем правильный ID пользователя
+      if (typeof chatService.forceCurrentUserId === 'function') {
+        await chatService.forceCurrentUserId(user.id);
+      }
 
       // Создаем копию текста (чтобы очистить поле сразу)
       const messageToSend = messageText.trim();
       setMessageText('');
 
-      // Отправляем сообщение
-      await chatService.sendMessage(chatId, messageToSend);
+      // Для принудительной перезагрузки после отправки
+      const timestamp = Date.now();
+      setLastSent(timestamp);
 
-      // Перезагружаем сообщения (для надежности)
-      const updatedMessages = await chatService.getChatMessages(chatId);
-      setMessages(updatedMessages);
+      console.log(`📱 Sending message from ${currentUserIdRef.current}: "${messageToSend.substring(0, 20)}..."`);
 
-      // Прокручиваем к последнему сообщению
-      if (flatListRef.current && updatedMessages.length > 0) {
-        setTimeout(() => {
+      // ВАЖНО: Сначала добавляем "фейковое" сообщение локально, чтобы оно сразу появилось
+      const tempMessageId = `temp_${Date.now()}`;
+      const tempMessage = {
+        id: tempMessageId,
+        senderId: currentUserIdRef.current,
+        senderName: user?.fullName || user?.username || 'Я',
+        text: messageToSend,
+        timestamp: Date.now(),
+        isFromCurrentUser: true, // ВАЖНО: Принудительно устанавливаем, что это от текущего пользователя
+        isTempMessage: true
+      };
+
+      // Добавляем временное сообщение в список
+      setMessages(prevMessages => [...prevMessages, tempMessage]);
+
+      // Прокручиваем вниз к новому сообщению
+      setTimeout(() => {
+        if (flatListRef.current) {
           flatListRef.current.scrollToEnd({ animated: true });
-        }, 200);
-      }
+        }
+      }, 100);
+
+      // Отправляем сообщение в Firebase
+      await chatService.sendMessage(chatId, messageToSend);
+      console.log(`📱 Message sent successfully`);
+
+      // Перезагружаем сообщения после отправки для синхронизации с сервером
+      setTimeout(() => {
+        loadChatData(true);
+      }, 500);
+
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('📱 Error sending message:', error);
+      Alert.alert(
+        "Ошибка при отправке",
+        "Не удалось отправить сообщение. Попробуйте еще раз."
+      );
       // Восстанавливаем текст сообщения в случае ошибки
       setMessageText(messageText);
     } finally {
@@ -134,8 +231,8 @@ export default function ChatScreen() {
 
   // Рендер сообщения
   const renderMessage = ({ item }) => {
-    // Строгое сравнение ID в виде строк
-    const isOwnMessage = String(item.senderId) === String(user?.id);
+    // КРИТИЧЕСКИ ВАЖНО: используем явно указанное свойство
+    const isOwnMessage = item.isFromCurrentUser;
 
     return (
       <View style={[
@@ -148,7 +245,8 @@ export default function ChatScreen() {
 
         <View style={[
           styles.messageBubble,
-          isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble
+          isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
+          item.isTempMessage && styles.tempMessageBubble
         ]}>
           <Text style={[
             styles.messageText,
@@ -164,6 +262,17 @@ export default function ChatScreen() {
       </View>
     );
   };
+
+  // При изменении messages, прокручиваем вниз
+  useEffect(() => {
+    if (messages.length > 0 && (!isInitialLoad || lastSent)) {
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 200);
+    }
+  }, [messages, isInitialLoad, lastSent]);
 
   // Состояние загрузки
   if (loading) {
@@ -193,11 +302,6 @@ export default function ChatScreen() {
           renderItem={renderMessage}
           keyExtractor={item => item.id}
           contentContainerStyle={styles.messagesContainer}
-          onContentSizeChange={() => {
-            if (messages.length > 0) {
-              flatListRef.current?.scrollToEnd({ animated: false });
-            }
-          }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -286,6 +390,9 @@ const styles = StyleSheet.create({
   otherMessageBubble: {
     borderBottomLeftRadius: 4,
     borderBottomRightRadius: 16,
+  },
+  tempMessageBubble: {
+    opacity: 0.7,
   },
   messageText: {
     fontSize: 16,

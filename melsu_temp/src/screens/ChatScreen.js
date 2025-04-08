@@ -1,100 +1,195 @@
-// src/screens/ChatScreen.js
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
-  FlatList,
   TextInput,
   TouchableOpacity,
+  FlatList,
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  SafeAreaView
+  StyleSheet,
+  SafeAreaView,
+  RefreshControl,
+  Alert
 } from 'react-native';
+import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
-import chatService from '../../services/chatService';
+import chatService from '../../src/services/chatService';
 
-const ChatScreen = ({ route, navigation }) => {
-  const { chatId, chatName, chatType } = route.params;
-  const { user } = useAuth();
+export default function ChatScreen() {
+  const { id } = useLocalSearchParams();
+  const chatId = Array.isArray(id) ? id[0] : id;
+
   const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [chatTitle, setChatTitle] = useState('Чат');
   const [messageText, setMessageText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [lastSent, setLastSent] = useState(null);
+
+  const { user } = useAuth();
   const flatListRef = useRef(null);
 
-  // Добавляем chatInfo в заголовок
+  // Сохраняем ID текущего пользователя в ref для надежного доступа
+  const currentUserIdRef = useRef(user ? String(user.id) : null);
+
+  // При изменении user обновляем ref
   useEffect(() => {
-    navigation.setOptions({
-      title: chatName,
-      headerRight: () => (
-        <TouchableOpacity
-          style={styles.headerButton}
-          onPress={() => navigation.navigate('ChatInfo', { chatId, chatName, chatType })}
-        >
-          <Ionicons name="information-circle-outline" size={24} color="#770002" />
-        </TouchableOpacity>
-      )
-    });
-  }, [navigation, chatId, chatName, chatType]);
-
-  // Загружаем сообщения и подписываемся на обновления
-  useEffect(() => {
-    if (!user || !chatId) return;
-
-    // Отмечаем чат как прочитанный
-    const markAsRead = async () => {
-      try {
-        await chatService.markChatAsRead(chatId, user.id.toString());
-      } catch (error) {
-        console.error('Error marking chat as read:', error);
-      }
-    };
-
-    markAsRead();
-
-    // Получаем и подписываемся на сообщения
-    const unsubscribe = chatService.getChatMessages(chatId, (newMessages) => {
-      setMessages(newMessages);
-      setLoading(false);
-    });
-
-    // Отписываемся при размонтировании
-    return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
-    };
-  }, [chatId, user]);
-
-  // Прокрутка к последнему сообщению
-  useEffect(() => {
-    if (messages.length > 0 && flatListRef.current) {
-      setTimeout(() => {
-        flatListRef.current.scrollToEnd({ animated: true });
-      }, 100);
+    if (user && user.id) {
+      currentUserIdRef.current = String(user.id);
+      console.log(`📱 Current user ID set to: ${currentUserIdRef.current}`);
     }
-  }, [messages]);
+  }, [user]);
+
+  // Загрузка данных чата
+  const loadChatData = async (isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
+
+    console.log(`📱 Loading chat data for chat ${chatId}...`);
+    try {
+      // Инициализируем сервис
+      await chatService.initialize();
+
+      // Получаем чаты пользователя для определения имени собеседника
+      const userChats = await chatService.getUserChats();
+      const thisChat = userChats.find(chat => chat.id === chatId);
+
+      // Устанавливаем заголовок чата
+      if (thisChat) {
+        if (thisChat.type === 'personal') {
+          setChatTitle(thisChat.withUserName || 'Личный чат');
+        } else if (thisChat.type === 'group') {
+          setChatTitle(thisChat.name || 'Групповой чат');
+        }
+      }
+
+      // ВАЖНО: сохраняем текущий user ID снова для надежности
+      if (user && user.id) {
+        currentUserIdRef.current = String(user.id);
+      }
+
+      // Получаем сообщения
+      let chatMessages = await chatService.getChatMessages(chatId);
+
+      // КРИТИЧЕСКИ ВАЖНО: Обрабатываем сообщения локально, чтобы убедиться, что владелец определен правильно
+      chatMessages = chatMessages.map(msg => {
+        const msgSenderId = String(msg.senderId || '');
+        const isOwn = msgSenderId === currentUserIdRef.current;
+
+        // Выводим подробную информацию о каждом сообщении для отладки
+        console.log(`📱 Message processing: ID=${msg.id}, sender=${msgSenderId}, currentUser=${currentUserIdRef.current}, isOwn=${isOwn}`);
+
+        return {
+          ...msg,
+          senderId: msgSenderId,
+          // ПРИНУДИТЕЛЬНО устанавливаем isFromCurrentUser на основе сравнения ID
+          isFromCurrentUser: isOwn
+        };
+      });
+
+      // Отладочная информация
+      console.log(`📱 Processed ${chatMessages.length} messages, my ID: ${currentUserIdRef.current}`);
+      if (chatMessages.length > 0) {
+        const lastMsg = chatMessages[chatMessages.length - 1];
+        console.log(`📱 Last message: sender=${lastMsg.senderId}, text="${lastMsg.text.substring(0, 20)}...", isOwn=${lastMsg.isFromCurrentUser}`);
+      }
+
+      setMessages(chatMessages);
+
+      // Отмечаем сообщения как прочитанные
+      await chatService.markMessagesAsRead(chatId);
+
+    } catch (error) {
+      console.error('📱 Error loading chat data:', error);
+      if (!isRefresh) {
+        Alert.alert(
+          "Ошибка",
+          "Не удалось загрузить сообщения. Проверьте подключение к интернету."
+        );
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+      setIsInitialLoad(false);
+    }
+  };
+
+  // Загрузка при первом рендере
+  useEffect(() => {
+    loadChatData();
+
+    // Отписка от слушателей при уходе с экрана
+    return () => {
+      chatService.cleanup();
+    };
+  }, [chatId]);
+
+  // Обработчик pull-to-refresh
+  const handleRefresh = () => {
+    setRefreshing(true);
+    loadChatData(true);
+  };
 
   // Отправка сообщения
-  const sendMessage = async () => {
-    if (!messageText.trim() || !user || sending) {
-      return;
-    }
-
-    const trimmedMessage = messageText.trim();
-    setMessageText('');
-    setSending(true);
+  const handleSendMessage = async () => {
+    if (!messageText.trim() || sending) return;
 
     try {
-      await chatService.sendMessage(chatId, user.id.toString(), trimmedMessage);
+      setSending(true);
+
+      // Создаем копию текста (чтобы очистить поле сразу)
+      const messageToSend = messageText.trim();
+      setMessageText('');
+
+      // Для принудительной перезагрузки после отправки
+      const timestamp = Date.now();
+      setLastSent(timestamp);
+
+      console.log(`📱 Sending message from ${currentUserIdRef.current}: "${messageToSend.substring(0, 20)}..."`);
+
+      // ВАЖНО: Сначала добавляем "фейковое" сообщение локально, чтобы оно сразу появилось
+      const tempMessageId = `temp_${Date.now()}`;
+      const tempMessage = {
+        id: tempMessageId,
+        senderId: currentUserIdRef.current,
+        senderName: user?.fullName || user?.username || 'Я',
+        text: messageToSend,
+        timestamp: Date.now(),
+        isFromCurrentUser: true, // ВАЖНО: Принудительно устанавливаем, что это от текущего пользователя
+        isTempMessage: true
+      };
+
+      // Добавляем временное сообщение в список
+      setMessages(prevMessages => [...prevMessages, tempMessage]);
+
+      // Прокручиваем вниз к новому сообщению
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 100);
+
+      // Отправляем сообщение в Firebase
+      await chatService.sendMessage(chatId, messageToSend);
+      console.log(`📱 Message sent successfully`);
+
+      // Перезагружаем сообщения после отправки для синхронизации с сервером
+      setTimeout(() => {
+        loadChatData(true);
+      }, 500);
+
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('📱 Error sending message:', error);
+      Alert.alert(
+        "Ошибка при отправке",
+        "Не удалось отправить сообщение. Попробуйте еще раз."
+      );
       // Восстанавливаем текст сообщения в случае ошибки
-      setMessageText(trimmedMessage);
-      alert('Не удалось отправить сообщение. Попробуйте еще раз.');
+      setMessageText(messageText);
     } finally {
       setSending(false);
     }
@@ -109,63 +204,91 @@ const ChatScreen = ({ route, navigation }) => {
   };
 
   // Рендер сообщения
-  const renderMessage = ({ item, index }) => {
-    const isCurrentUser = item.senderId === user.id.toString();
-    const showAvatar = index === 0 ||
-                      messages[index - 1].senderId !== item.senderId;
+  const renderMessage = ({ item }) => {
+    // КРИТИЧЕСКИ ВАЖНО: используем явно указанное свойство
+    const isOwnMessage = item.isFromCurrentUser;
 
     return (
       <View style={[
         styles.messageContainer,
-        isCurrentUser ? styles.currentUserMessage : styles.otherUserMessage
+        isOwnMessage ? styles.ownMessageContainer : {}
       ]}>
-        {!isCurrentUser && showAvatar && (
-          <View style={styles.avatarContainer}>
-            <Ionicons name="person" size={20} color="#fff" />
-          </View>
+        {!isOwnMessage && (
+          <Text style={styles.messageSender}>{item.senderName || `Пользователь ${item.senderId}`}</Text>
         )}
 
         <View style={[
           styles.messageBubble,
-          isCurrentUser ? styles.currentUserBubble : styles.otherUserBubble
+          isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
+          item.isTempMessage && styles.tempMessageBubble
         ]}>
-          <Text style={styles.messageText}>{item.text}</Text>
-          <Text style={styles.messageTime}>{formatMessageTime(item.createdAt)}</Text>
+          <Text style={[
+            styles.messageText,
+            isOwnMessage ? styles.ownMessageText : {}
+          ]}>
+            {item.text}
+          </Text>
         </View>
+
+        <Text style={styles.messageTime}>
+          {formatMessageTime(item.timestamp)}
+        </Text>
       </View>
     );
   };
 
+  // При изменении messages, прокручиваем вниз
+  useEffect(() => {
+    if (messages.length > 0 && (!isInitialLoad || lastSent)) {
+      setTimeout(() => {
+        if (flatListRef.current) {
+          flatListRef.current.scrollToEnd({ animated: true });
+        }
+      }, 200);
+    }
+  }, [messages, isInitialLoad, lastSent]);
+
+  // Состояние загрузки
   if (loading) {
     return (
-      <View style={styles.loaderContainer}>
+      <SafeAreaView style={styles.loadingContainer}>
+        <Stack.Screen options={{ title: 'Загрузка...' }} />
         <ActivityIndicator size="large" color="#770002" />
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
+      <Stack.Screen options={{
+        title: chatTitle,
+        headerTintColor: '#770002'
+      }} />
+
       <KeyboardAvoidingView
-        style={styles.keyboardAvoid}
-        behavior={Platform.OS === 'ios' ? 'padding' : null}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.container}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
         <FlatList
           ref={flatListRef}
           data={messages}
-          keyExtractor={(item) => item.id}
           renderItem={renderMessage}
-          contentContainerStyle={styles.messagesList}
-          onContentSizeChange={() => {
-            if (messages.length > 0) {
-              flatListRef.current.scrollToEnd({ animated: false });
-            }
-          }}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.messagesContainer}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={['#770002']}
+              tintColor="#770002"
+            />
+          }
           ListEmptyComponent={
             <View style={styles.emptyContainer}>
-              <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
-              <Text style={styles.emptyText}>Нет сообщений. Начните общение!</Text>
+              <Text style={styles.emptyText}>
+                Нет сообщений. Начните общение прямо сейчас!
+              </Text>
             </View>
           }
         />
@@ -177,14 +300,14 @@ const ChatScreen = ({ route, navigation }) => {
             value={messageText}
             onChangeText={setMessageText}
             multiline
-            maxLength={500}
           />
+
           <TouchableOpacity
             style={[
               styles.sendButton,
               (!messageText.trim() || sending) && styles.disabledButton
             ]}
-            onPress={sendMessage}
+            onPress={handleSendMessage}
             disabled={!messageText.trim() || sending}
           >
             {sending ? (
@@ -197,156 +320,105 @@ const ChatScreen = ({ route, navigation }) => {
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
-  keyboardAvoid: {
-    flex: 1,
-  },
-  loaderContainer: {
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  headerButton: {
-    padding: 8,
-  },
-  messagesList: {
-    padding: 10,
-    paddingBottom: 20,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 40,
-    marginTop: 100,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#888',
-    marginTop: 16,
-    textAlign: 'center',
+  messagesContainer: {
+    padding: 16,
+    paddingBottom: 8,
   },
   messageContainer: {
-    flexDirection: 'row',
-    marginVertical: 4,
     maxWidth: '80%',
-  },
-  currentUserMessage: {
-    alignSelf: 'flex-end',
-  },
-  otherUserMessage: {
+    marginBottom: 12,
     alignSelf: 'flex-start',
   },
-  avatarContainer: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#770002',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
+  ownMessageContainer: {
+    alignSelf: 'flex-end',
+  },
+  messageSender: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 2,
+    marginLeft: 8,
   },
   messageBubble: {
-    padding: 10,
+    padding: 12,
     borderRadius: 16,
-    maxWidth: '100%',
-  },
-  currentUserBubble: {
-    backgroundColor: '#770002',
-    borderTopRightRadius: 4,
-  },
-  otherUserBubble: {
     backgroundColor: '#fff',
-    borderTopLeftRadius: 4,
+    borderBottomLeftRadius: 4,
+  },
+  ownMessageBubble: {
+    backgroundColor: '#770002',
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 4,
+  },
+  otherMessageBubble: {
+    borderBottomLeftRadius: 4,
+    borderBottomRightRadius: 16,
+  },
+  tempMessageBubble: {
+    opacity: 0.7,
   },
   messageText: {
     fontSize: 16,
     color: '#333',
   },
-  currentUserBubble: {
-    backgroundColor: '#770002',
-    borderTopRightRadius: 4,
-  },
-  otherUserBubble: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 4,
-  },
-  messageText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  messageText: {
-    fontSize: 16,
-  },
-  currentUserBubble: {
-    backgroundColor: '#770002',
-    borderTopRightRadius: 4,
-  },
-  otherUserBubble: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 4,
-  },
-  messageText: {
-    fontSize: 16,
-    color: '#000',
+  ownMessageText: {
+    color: '#fff',
   },
   messageTime: {
     fontSize: 10,
-    color: '#888',
+    color: '#999',
     alignSelf: 'flex-end',
-    marginTop: 4,
-  },
-  currentUserBubble: {
-    backgroundColor: '#770002',
-    borderTopRightRadius: 4,
-  },
-  otherUserBubble: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 4,
-  },
-  messageText: {
-    fontSize: 16,
-    color: props => props.isCurrentUser ? '#fff' : '#333',
-  },
-  messageTime: {
-    fontSize: 10,
-    color: props => props.isCurrentUser ? 'rgba(255,255,255,0.7)' : '#888',
-    alignSelf: 'flex-end',
+    marginRight: 8,
     marginTop: 4,
   },
   inputContainer: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    alignItems: 'center',
     padding: 8,
+    backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#eee',
   },
   input: {
     flex: 1,
-    backgroundColor: '#f0f0f0',
+    minHeight: 40,
+    maxHeight: 120,
+    backgroundColor: '#f5f5f5',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    maxHeight: 100,
+    fontSize: 16,
   },
   sendButton: {
-    backgroundColor: '#770002',
-    borderRadius: 20,
     width: 40,
     height: 40,
+    borderRadius: 20,
+    backgroundColor: '#770002',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
   },
   disabledButton: {
-    backgroundColor: '#aaa',
+    backgroundColor: '#ccc',
   },
+  emptyContainer: {
+    padding: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    color: '#999',
+    textAlign: 'center',
+  }
 });
-
-export default ChatScreen;

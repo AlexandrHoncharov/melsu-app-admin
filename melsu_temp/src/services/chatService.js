@@ -1,3 +1,4 @@
+// Исправленный chatService.js - устранена рекурсия и добавлен метод forceCurrentUserId
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { database, auth } from '../config/firebase';
 import {
@@ -21,24 +22,95 @@ class ChatService {
     this.currentUser = null;
     this.initialized = false;
     this.listeners = {};
+    this.forcedUserId = null; // Для принудительного задания ID пользователя
+    this.initializationInProgress = false; // Флаг для предотвращения рекурсии
+  }
+
+  // Принудительно установить ID текущего пользователя (для исправления ошибок идентификации)
+  forceCurrentUserId(userId) {
+    if (!userId) {
+      console.warn('Cannot force empty user ID');
+      return;
+    }
+
+    // Преобразуем в строку и сохраняем
+    this.forcedUserId = String(userId);
+    console.log(`🔧 Forced user ID set to: ${this.forcedUserId}`);
+
+    // Если пользователь уже инициализирован, обновляем его ID
+    if (this.currentUser) {
+      this.currentUser.id = this.forcedUserId;
+      console.log(`🔧 Updated current user ID to forced value: ${this.currentUser.id}`);
+    }
+  }
+
+  // Получить ID текущего пользователя (с учетом принудительно заданного)
+  getCurrentUserId() {
+    // Используем принудительно заданный ID, если он есть
+    if (this.forcedUserId) {
+      return this.forcedUserId;
+    }
+
+    // Иначе используем ID текущего пользователя
+    if (this.currentUser && this.currentUser.id) {
+      return String(this.currentUser.id);
+    }
+
+    return null;
   }
 
   // Инициализация сервиса с данными пользователя
   async initialize() {
-    if (this.initialized && this.currentUser) return true;
+    // Предотвращаем рекурсию - если инициализация уже выполняется, просто ждем её завершения
+    if (this.initializationInProgress) {
+      console.log('Initialization already in progress, waiting...');
+      // Ждем небольшую паузу и проверяем статус
+      await new Promise(resolve => setTimeout(resolve, 500));
+      return this.initialized;
+    }
+
+    // Если уже инициализированы и у нас есть пользователь, просто возвращаем true
+    if (this.initialized && this.currentUser) {
+      return true;
+    }
 
     try {
-      // Получаем данные пользователя из AsyncStorage
+      // Устанавливаем флаг, что инициализация в процессе
+      this.initializationInProgress = true;
+
+      // Очищаем пользователя перед новой инициализацией
+      this.currentUser = null;
+
+      // Загружаем данные пользователя из AsyncStorage
       const userDataString = await AsyncStorage.getItem('userData');
       if (!userDataString) {
         console.error('No user data in AsyncStorage');
+        this.initializationInProgress = false;
         return false;
       }
 
       // Парсим данные пользователя
-      this.currentUser = JSON.parse(userDataString);
+      let userData = JSON.parse(userDataString);
 
-      // Пробуем аутентифицироваться в Firebase
+      // КРИТИЧЕСКИ ВАЖНО: Всегда преобразуем ID в строку
+      if (userData && userData.id !== undefined) {
+        userData.id = String(userData.id);
+      } else {
+        console.error('User ID is missing in async storage data');
+        this.initializationInProgress = false;
+        return false;
+      }
+
+      // Если принудительно задан ID, используем его
+      if (this.forcedUserId) {
+        console.log(`🔧 Using forced user ID: ${this.forcedUserId} instead of ${userData.id}`);
+        userData.id = this.forcedUserId;
+      }
+
+      this.currentUser = userData;
+      console.log(`ChatService: Initialized with user: ID=${this.currentUser.id}, Name=${this.currentUser.fullName || this.currentUser.username}, Role=${this.currentUser.role}`);
+
+      // Пробуем аутентифицироваться в Firebase без рекурсивных вызовов
       try {
         const response = await apiClient.post('/auth/firebase-token');
         const { token } = response.data;
@@ -56,27 +128,28 @@ class ChatService {
       }
 
       // Записываем основную информацию о пользователе в Firebase
-      if (this.currentUser && this.currentUser.id) {
-        try {
-          const userRef = ref(database, `users/${this.currentUser.id}`);
-          await set(userRef, {
-            id: this.currentUser.id,
-            username: this.currentUser.username,
-            displayName: this.currentUser.fullName || this.currentUser.username,
-            role: this.currentUser.role,
-            group: this.currentUser.group,
-            department: this.currentUser.department,
-            lastActive: serverTimestamp()
-          });
-        } catch (dbError) {
-          console.warn('Error writing user data to database:', dbError);
-        }
+      try {
+        const userRef = ref(database, `users/${this.currentUser.id}`);
+        await set(userRef, {
+          id: this.currentUser.id,
+          username: this.currentUser.username,
+          displayName: this.currentUser.fullName || this.currentUser.username,
+          role: this.currentUser.role,
+          group: this.currentUser.group,
+          department: this.currentUser.department,
+          lastActive: serverTimestamp()
+        });
+      } catch (dbError) {
+        console.warn('Error writing user data to database:', dbError);
       }
 
       this.initialized = true;
+      this.initializationInProgress = false;
       return true;
     } catch (error) {
       console.error('Error initializing chat service:', error);
+      this.initialized = false;
+      this.initializationInProgress = false;
       return false;
     }
   }
@@ -84,9 +157,15 @@ class ChatService {
   // Очистка ресурсов и отписка от слушателей
   cleanup() {
     // Отписываемся от всех слушателей
-    Object.values(this.listeners).forEach(listener => {
+    Object.keys(this.listeners).forEach(key => {
+      const listener = this.listeners[key];
       if (listener && listener.path && listener.event) {
-        off(ref(database, listener.path), listener.event);
+        try {
+          off(ref(database, listener.path), listener.event);
+          console.log(`Unsubscribed from ${listener.path}`);
+        } catch (e) {
+          console.warn(`Error unsubscribing from ${listener.path}:`, e);
+        }
       }
     });
 
@@ -96,6 +175,7 @@ class ChatService {
 
   // Создание личного чата между двумя пользователями
   async createPersonalChat(otherUserId) {
+    // Инициализируем, если не инициализированы
     if (!this.initialized || !this.currentUser) {
       const initResult = await this.initialize();
       if (!initResult) {
@@ -107,64 +187,93 @@ class ChatService {
       throw new Error('Current user ID is not available');
     }
 
-    if (!otherUserId) {
-      throw new Error('Other user ID is not provided');
-    }
+    // ВСЕГДА преобразуем в строку
+    otherUserId = String(otherUserId);
+    const myUserId = this.getCurrentUserId();
+
+    console.log(`Creating personal chat between ${myUserId} and ${otherUserId}`);
 
     try {
       // Определяем ID чата как комбинацию ID пользователей
-      const chatUsers = [String(this.currentUser.id), String(otherUserId)].sort();
+      const chatUsers = [myUserId, otherUserId].sort();
       const chatId = `personal_${chatUsers.join('_')}`;
 
-      console.log(`Creating/accessing personal chat ${chatId} between ${this.currentUser.id} and ${otherUserId}`);
+      // Запоминаем информацию о пользователях
+      let otherUserInfo = null;
+      let currentUserInfo = {
+        id: myUserId,
+        displayName: this.currentUser.fullName || this.currentUser.username || `Пользователь ${myUserId}`,
+        role: this.currentUser.role || 'unknown',
+        group: this.currentUser.group,
+        department: this.currentUser.department
+      };
+
+      // Получаем данные о другом пользователе из API
+      try {
+        const response = await apiClient.get(`/users/${otherUserId}`);
+        otherUserInfo = response.data;
+        console.log(`Got other user info from API:`, otherUserInfo);
+      } catch (apiError) {
+        console.warn(`Failed to get user ${otherUserId} data from API:`, apiError);
+
+        // Пробуем Firebase в качестве резервного варианта
+        try {
+          const userSnapshot = await get(ref(database, `users/${otherUserId}`));
+          if (userSnapshot.exists()) {
+            otherUserInfo = userSnapshot.val();
+            console.log(`Got other user info from Firebase:`, otherUserInfo);
+          }
+        } catch (fbError) {
+          console.warn(`Failed to get user ${otherUserId} data from Firebase:`, fbError);
+        }
+      }
+
+      // Если не удалось получить информацию, создаем заглушку
+      if (!otherUserInfo) {
+        otherUserInfo = {
+          id: otherUserId,
+          displayName: `Пользователь ${otherUserId}`,
+          role: 'unknown'
+        };
+      }
 
       // Проверяем, существует ли уже такой чат
       const chatRef = ref(database, `chats/${chatId}`);
       const snapshot = await get(chatRef);
 
       if (!snapshot.exists()) {
-        console.log(`Chat ${chatId} doesn't exist, creating new one`);
+        console.log(`Creating new chat ${chatId}`);
 
         // Создаем новый чат
         await set(chatRef, {
+          id: chatId,
           type: 'personal',
           createdAt: serverTimestamp(),
           participants: {
-            [this.currentUser.id]: true,
+            [myUserId]: true,
             [otherUserId]: true
           }
         });
 
-        // Получаем информацию о другом пользователе через API
-        let otherUserInfo = null;
-        try {
-          const response = await apiClient.get(`/api/users/${otherUserId}`);
-          otherUserInfo = response.data;
-          console.log('Got other user info from API:', otherUserInfo);
-        } catch (apiError) {
-          console.warn('Failed to get other user data from API, trying Firebase:', apiError);
-
-          // Если API не доступен, пробуем получить из Firebase
-          try {
-            const userSnapshot = await get(ref(database, `users/${otherUserId}`));
-            otherUserInfo = userSnapshot.val();
-            console.log('Got other user info from Firebase:', otherUserInfo);
-          } catch (fbError) {
-            console.warn('Failed to get user data from Firebase:', fbError);
-          }
-        }
-
         // Формируем имя другого пользователя для отображения
-        let otherUserName = otherUserInfo?.name || otherUserInfo?.fullName || otherUserInfo?.displayName;
-        if (!otherUserName) {
+        // ВАЖНО: Для студента показываем полное имя преподавателя
+        let otherUserName = '';
+
+        if (otherUserInfo.fullName) {
+          otherUserName = otherUserInfo.fullName;
+        } else if (otherUserInfo.displayName) {
+          otherUserName = otherUserInfo.displayName;
+        } else if (otherUserInfo.name) {
+          otherUserName = otherUserInfo.name;
+        } else {
           otherUserName = `Пользователь ${otherUserId}`;
         }
 
         // Добавляем дополнительную информацию зависящую от роли
         let otherUserDetails = '';
-        if (otherUserInfo?.role === 'student' && otherUserInfo?.group) {
+        if (otherUserInfo.role === 'student' && otherUserInfo.group) {
           otherUserDetails = ` (${otherUserInfo.group})`;
-        } else if (otherUserInfo?.role === 'teacher' && otherUserInfo?.department) {
+        } else if (otherUserInfo.role === 'teacher' && otherUserInfo.department) {
           otherUserDetails = ` (${otherUserInfo.department})`;
         }
 
@@ -174,11 +283,12 @@ class ChatService {
         console.log(`Other user display name: ${otherUserDisplayName}`);
 
         // Добавляем чат в список чатов текущего пользователя
-        await set(ref(database, `userChats/${this.currentUser.id}/${chatId}`), {
+        await set(ref(database, `userChats/${myUserId}/${chatId}`), {
+          id: chatId,
           type: 'personal',
           withUser: otherUserId,
+          withUserRole: otherUserInfo.role || 'unknown',
           withUserName: otherUserDisplayName,
-          withUserRole: otherUserInfo?.role || 'unknown',
           updatedAt: serverTimestamp()
         });
 
@@ -197,8 +307,9 @@ class ChatService {
 
         // Добавляем чат в список чатов другого пользователя
         await set(ref(database, `userChats/${otherUserId}/${chatId}`), {
+          id: chatId,
           type: 'personal',
-          withUser: this.currentUser.id,
+          withUser: myUserId,
           withUserName: currentUserDisplayName,
           withUserRole: this.currentUser.role || 'unknown',
           updatedAt: serverTimestamp()
@@ -206,7 +317,33 @@ class ChatService {
 
         console.log(`Personal chat ${chatId} successfully created`);
       } else {
-        console.log(`Chat ${chatId} already exists`);
+        console.log(`Chat ${chatId} already exists, updating`);
+
+        // Обновляем имена пользователей, если чат уже существует
+        // Получаем текущие данные чата
+        try {
+          const myUserChatRef = ref(database, `userChats/${myUserId}/${chatId}`);
+          const myUserChatSnapshot = await get(myUserChatRef);
+
+          if (myUserChatSnapshot.exists()) {
+            const chatData = myUserChatSnapshot.val();
+            const otherUserName = otherUserInfo.fullName ||
+                                 otherUserInfo.displayName ||
+                                 otherUserInfo.name ||
+                                 `Пользователь ${otherUserId}`;
+
+            // Если имя поменялось или отсутствует, обновляем
+            if (!chatData.withUserName || chatData.withUserName === `Пользователь ${otherUserId}`) {
+              console.log(`Updating other user name to: ${otherUserName}`);
+              await update(myUserChatRef, {
+                withUserName: otherUserName,
+                updatedAt: serverTimestamp()
+              });
+            }
+          }
+        } catch (updateError) {
+          console.warn('Error updating chat name:', updateError);
+        }
       }
 
       return chatId;
@@ -218,10 +355,11 @@ class ChatService {
 
   // Отправка сообщения в чат
   async sendMessage(chatId, text) {
+    // Инициализируем, если не инициализированы
     if (!this.initialized || !this.currentUser) {
       const initResult = await this.initialize();
       if (!initResult) {
-        throw new Error('Failed to initialize chat service');
+        throw new Error('User not initialized. Cannot send message.');
       }
     }
 
@@ -229,32 +367,35 @@ class ChatService {
       throw new Error('Chat ID or message text is empty');
     }
 
+    // ВСЕГДА используем строковый ID
+    const myUserId = this.getCurrentUserId();
+    const senderName = this.currentUser.fullName || this.currentUser.username || `Пользователь ${myUserId}`;
+
+    console.log(`Sending message from ${myUserId} (${senderName}) to chat ${chatId}`);
+
     try {
       // Создаем новое сообщение
       const newMessageRef = push(ref(database, `messages/${chatId}`));
       const messageId = newMessageRef.key;
 
-      // Убедимся, что ID пользователя сохраняется как строка
-      const senderId = String(this.currentUser.id);
-      const senderName = this.currentUser.fullName || this.currentUser.username;
-
-      console.log(`Sending message from ${senderId} (${senderName}): ${text}`);
-
       // Сохраняем сообщение
-      await set(newMessageRef, {
+      const messageData = {
         id: messageId,
-        senderId: senderId,
+        senderId: myUserId,  // Всегда строка
         senderName: senderName,
         text,
         timestamp: serverTimestamp(),
-        read: { [senderId]: true }
-      });
+        read: { [myUserId]: true }
+      };
+
+      await set(newMessageRef, messageData);
+      console.log(`Message data:`, messageData);
 
       // Обновляем информацию о последнем сообщении в чате
       const lastMessageInfo = {
         id: messageId,
         text: text.length > 30 ? `${text.substring(0, 30)}...` : text,
-        senderId: senderId,
+        senderId: myUserId,  // Всегда строка
         timestamp: serverTimestamp()
       };
 
@@ -283,12 +424,22 @@ class ChatService {
 
   // Получение списка чатов пользователя
   async getUserChats() {
+    // Инициализируем, если не инициализированы
     if (!this.initialized || !this.currentUser) {
       const initResult = await this.initialize();
       if (!initResult) {
+        console.error('Failed to initialize when getting user chats');
         return [];
       }
     }
+
+    if (!this.currentUser || !this.currentUser.id) {
+      console.error('No current user available');
+      return [];
+    }
+
+    // ВСЕГДА используем строковый ID
+    const myUserId = this.getCurrentUserId();
 
     try {
       // Отписываемся от предыдущего слушателя, если он был
@@ -296,8 +447,8 @@ class ChatService {
         off(ref(database, this.listeners.userChats.path), this.listeners.userChats.event);
       }
 
-      const userId = String(this.currentUser.id);
-      const path = `userChats/${userId}`;
+      const path = `userChats/${myUserId}`;
+      console.log(`Getting chats for user ${myUserId}`);
 
       return new Promise((resolve) => {
         const userChatsRef = ref(database, path);
@@ -306,10 +457,17 @@ class ChatService {
           const chatsData = snapshot.val() || {};
 
           // Преобразуем в массив
-          const chats = Object.entries(chatsData).map(([id, data]) => ({
-            id,
-            ...data
-          }));
+          const chats = Object.entries(chatsData).map(([id, data]) => {
+            // Гарантируем, что withUser всегда строка
+            if (data.withUser) {
+              data.withUser = String(data.withUser);
+            }
+
+            return {
+              id,
+              ...data
+            };
+          });
 
           // Сортируем по времени (сначала новые)
           chats.sort((a, b) => {
@@ -318,25 +476,11 @@ class ChatService {
             return timeB - timeA;
           });
 
-          console.log(`Loaded ${chats.length} chats for user ${userId}`);
+          console.log(`Loaded ${chats.length} chats for user ${myUserId}`);
           resolve(chats);
         }, (error) => {
           console.error('Error getting user chats:', error);
-          // В случае ошибки возвращаем тестовые данные
-          resolve([
-            {
-              id: 'test_chat_1',
-              type: 'personal',
-              withUser: '999',
-              withUserName: 'Тестовый пользователь (offline)',
-              lastMessage: {
-                text: 'Это тестовое сообщение для отладки',
-                senderId: '999',
-                timestamp: Date.now()
-              },
-              updatedAt: Date.now()
-            }
-          ]);
+          resolve([]);
         });
 
         // Сохраняем слушателя для последующей отписки
@@ -355,6 +499,23 @@ class ChatService {
       return [];
     }
 
+    // Инициализируем, если не инициализированы
+    if (!this.initialized || !this.currentUser) {
+      const initResult = await this.initialize();
+      if (!initResult) {
+        console.error('Failed to initialize when getting chat messages');
+        return [];
+      }
+    }
+
+    if (!this.currentUser || !this.currentUser.id) {
+      console.error('Current user is not initialized');
+      return [];
+    }
+
+    // ВСЕГДА используем строковый ID
+    const myUserId = this.getCurrentUserId();
+
     try {
       // Отписываемся от предыдущего слушателя, если он был
       const listenerKey = `messages_${chatId}`;
@@ -363,6 +524,7 @@ class ChatService {
       }
 
       const path = `messages/${chatId}`;
+      console.log(`Getting messages for chat ${chatId}`);
 
       return new Promise((resolve) => {
         const messagesQuery = query(
@@ -378,8 +540,25 @@ class ChatService {
           const messages = Object.values(messagesData);
           messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-          console.log(`Loaded ${messages.length} messages for chat ${chatId}`);
-          resolve(messages);
+          // КРИТИЧЕСКИ ВАЖНО: Обрабатываем каждое сообщение
+          const processedMessages = messages.map(message => {
+            // 1. Преобразуем senderId в строку
+            const senderId = String(message.senderId || '');
+
+            // 2. Определяем владельца сообщения
+            const isFromCurrentUser = senderId === myUserId;
+
+            return {
+              ...message,
+              senderId,
+              isFromCurrentUser,
+              // 3. Гарантируем наличие имени отправителя
+              senderName: message.senderName || `Пользователь ${senderId}`
+            };
+          });
+
+          console.log(`Loaded ${processedMessages.length} messages for chat ${chatId}`);
+          resolve(processedMessages);
         }, (error) => {
           console.error(`Error getting messages for chat ${chatId}:`, error);
           resolve([]);
@@ -415,6 +594,12 @@ class ChatService {
 
         const handler = onValue(chatRef, (snapshot) => {
           const chatData = snapshot.val() || null;
+
+          // Если есть данные о последнем сообщении, преобразуем senderId
+          if (chatData && chatData.lastMessage && chatData.lastMessage.senderId) {
+            chatData.lastMessage.senderId = String(chatData.lastMessage.senderId);
+          }
+
           resolve(chatData);
         }, (error) => {
           console.error(`Error getting chat info for ${chatId}:`, error);
@@ -432,40 +617,49 @@ class ChatService {
 
   // Отметить сообщения как прочитанные
   async markMessagesAsRead(chatId) {
+    // Инициализируем, если не инициализированы
     if (!this.initialized || !this.currentUser) {
       const initResult = await this.initialize();
       if (!initResult) return;
     }
 
+    if (!this.currentUser || !this.currentUser.id) return;
     if (!chatId) return;
 
+    // ВСЕГДА используем строковый ID
+    const myUserId = this.getCurrentUserId();
+
     try {
-      const userId = String(this.currentUser.id);
       const messagesRef = ref(database, `messages/${chatId}`);
       const snapshot = await get(messagesRef);
 
       if (!snapshot.exists()) return;
 
       const updates = {};
+      let updateCount = 0;
 
       // Отмечаем все непрочитанные сообщения
       snapshot.forEach((childSnapshot) => {
         const message = childSnapshot.val() || {};
 
+        // Преобразуем ID отправителя в строку
+        const messageSenderId = String(message.senderId || '');
+
         // Пропускаем свои сообщения или уже прочитанные
-        if (String(message.senderId) === userId ||
-            (message.read && message.read[userId])) {
+        if (messageSenderId === myUserId ||
+            (message.read && message.read[myUserId])) {
           return;
         }
 
         // Добавляем в очередь на обновление
-        updates[`messages/${chatId}/${childSnapshot.key}/read/${userId}`] = true;
+        updates[`messages/${chatId}/${childSnapshot.key}/read/${myUserId}`] = true;
+        updateCount++;
       });
 
       // Если есть что обновлять
-      if (Object.keys(updates).length > 0) {
+      if (updateCount > 0) {
         await update(ref(database), updates);
-        console.log(`Marked ${Object.keys(updates).length} messages as read in chat ${chatId}`);
+        console.log(`Marked ${updateCount} messages as read in chat ${chatId}`);
       }
     } catch (error) {
       console.warn('Error marking messages as read:', error);

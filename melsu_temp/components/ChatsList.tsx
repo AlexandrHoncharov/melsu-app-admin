@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  FlatList,
+  TouchableOpacity,
+  StyleSheet,
+  ActivityIndicator,
+  RefreshControl
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
@@ -12,13 +20,19 @@ export default function ChatsList() {
   const { user } = useAuth();
 
   // Загрузка списка чатов
-  const loadChats = async () => {
-    console.log('Loading chats...');
+  const loadChats = async (withRefreshing = false) => {
     try {
+      if (!withRefreshing) {
+        setLoading(true);
+      }
+
+      console.log('Loading chats...');
+
       // Инициализируем сервис и загружаем чаты
       await chatService.initialize();
       const userChats = await chatService.getUserChats();
       setChats(userChats);
+
       console.log(`Loaded ${userChats.length} chats`);
     } catch (error) {
       console.error('Error loading chats:', error);
@@ -30,7 +44,6 @@ export default function ChatsList() {
 
   // Загрузка при первом рендере
   useEffect(() => {
-    setLoading(true);
     loadChats();
 
     // Отписка от слушателей при размонтировании
@@ -43,7 +56,7 @@ export default function ChatsList() {
   const handleRefresh = () => {
     console.log('Refreshing chats...');
     setRefreshing(true);
-    loadChats();
+    loadChats(true);
   };
 
   // Форматирование времени
@@ -69,15 +82,33 @@ export default function ChatsList() {
     return `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}`;
   };
 
+  // Получаем инициалы для аватара
+  const getInitials = (name) => {
+    if (!name) return "??";
+
+    const parts = name.split(' ');
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+
+    return name.substring(0, 2).toUpperCase();
+  };
+
   // Рендер элемента чата
   const renderChatItem = ({ item }) => {
     // Определяем отображаемое имя чата
     let chatName = 'Чат';
+    let chatRole = '';
+
     if (item.type === 'personal') {
       chatName = item.withUserName || 'Личный чат';
+      chatRole = item.withUserRole || '';
     } else if (item.type === 'group') {
       chatName = item.name || 'Групповой чат';
     }
+
+    // Получаем инициалы для аватара
+    const initials = getInitials(chatName);
 
     return (
       <TouchableOpacity
@@ -86,19 +117,18 @@ export default function ChatsList() {
       >
         <View style={[
           styles.avatarContainer,
-          item.type === 'group' && { backgroundColor: '#4CAF50' }
+          item.type === 'group' ? styles.groupAvatar :
+          (chatRole === 'teacher' ? styles.teacherAvatar : styles.studentAvatar)
         ]}>
           {item.type === 'group' ? (
             <Ionicons name="people" size={22} color="#fff" />
           ) : (
-            <Text style={styles.avatarText}>
-              {chatName.substring(0, 2).toUpperCase()}
-            </Text>
+            <Text style={styles.avatarText}>{initials}</Text>
           )}
         </View>
 
         <View style={styles.chatInfo}>
-          <Text style={styles.chatName}>{chatName}</Text>
+          <Text style={styles.chatName} numberOfLines={1}>{chatName}</Text>
 
           {item.lastMessage && (
             <Text style={styles.lastMessage} numberOfLines={1}>
@@ -134,7 +164,10 @@ export default function ChatsList() {
           <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
           <Text style={styles.emptyTitle}>У вас пока нет чатов</Text>
           <Text style={styles.emptySubtitle}>
-            Начните общение с преподавателем или группой
+            {user?.role === 'student'
+              ? 'Начните общение с преподавателем'
+              : 'Начните общение со студентом'
+            }
           </Text>
         </View>
       ) : (
@@ -175,7 +208,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   listContent: {
-    padding: 16
+    padding: 16,
   },
   chatItem: {
     flexDirection: 'row',
@@ -192,6 +225,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+  },
+  teacherAvatar: {
+    backgroundColor: '#2E7D32', // Зеленый для преподавателей
+  },
+  studentAvatar: {
+    backgroundColor: '#0277BD', // Синий для студентов
+  },
+  groupAvatar: {
+    backgroundColor: '#4CAF50', // Зеленый для групповых чатов
   },
   avatarText: {
     color: '#fff',

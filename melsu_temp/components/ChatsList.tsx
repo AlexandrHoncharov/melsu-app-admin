@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+// File: melsu_temp/components/ChatsList.tsx
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import {
   View,
   Text,
@@ -6,36 +7,62 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  RefreshControl
+  RefreshControl,
+  ScrollView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
 import chatService from '../src/services/chatService';
 
-export default function ChatsList() {
+// Changed to a forwardRef component
+const ChatsList = forwardRef((props, ref) => {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
 
-  // Загрузка списка чатов
+  // Expose handleRefresh to parent component
+  useImperativeHandle(ref, () => ({
+    handleRefresh: () => {
+      if (!refreshing) {
+        handleRefresh();
+      }
+    }
+  }));
+
+  // Загрузка списка чатов с принудительной инициализацией
   const loadChats = async (withRefreshing = false) => {
     try {
       if (!withRefreshing) {
         setLoading(true);
       }
 
-      console.log('Loading chats...');
+      console.log('Loading chats with fresh initialization...');
+
+      // Force clean up of previous listeners before initializing
+      chatService.cleanup();
+
+      // Сбрасываем флаг initialized, чтобы заставить сервис полностью реинициализироваться
+      chatService.initialized = false;
 
       // Инициализируем сервис и загружаем чаты
       await chatService.initialize();
+
+      // Принудительно устанавливаем ID текущего пользователя, если он доступен
+      if (user?.id) {
+        chatService.forceCurrentUserId(String(user.id));
+      }
+
       const userChats = await chatService.getUserChats();
       setChats(userChats);
 
       console.log(`Loaded ${userChats.length} chats`);
     } catch (error) {
       console.error('Error loading chats:', error);
+
+      // При ошибке очищаем список чатов
+      setChats([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -52,10 +79,24 @@ export default function ChatsList() {
     };
   }, []);
 
-  // Обработчик pull-to-refresh
+  // Обработчик pull-to-refresh с полной очисткой кэша
   const handleRefresh = () => {
-    console.log('Refreshing chats...');
+    console.log('Refreshing chats with full cache clear...');
     setRefreshing(true);
+
+    // Полностью очищаем слушатели перед загрузкой
+    chatService.cleanup();
+
+    // Сбрасываем состояние сервиса, но сохраняем пользователя
+    const tempUser = chatService.currentUser;
+    chatService.initialized = false;
+
+    // Восстанавливаем пользователя, если он был
+    if (tempUser) {
+      chatService.currentUser = tempUser;
+    }
+
+    // Загружаем чаты заново
     loadChats(true);
   };
 
@@ -160,7 +201,18 @@ export default function ChatsList() {
   return (
     <View style={styles.container}>
       {chats.length === 0 ? (
-        <View style={styles.emptyContainer}>
+        // Wrap empty state in ScrollView with RefreshControl
+        <ScrollView
+          contentContainerStyle={styles.emptyContainer}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={['#770002']}
+              tintColor="#770002"
+            />
+          }
+        >
           <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
           <Text style={styles.emptyTitle}>У вас пока нет чатов</Text>
           <Text style={styles.emptySubtitle}>
@@ -169,7 +221,7 @@ export default function ChatsList() {
               : 'Начните общение со студентом'
             }
           </Text>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={chats}
@@ -195,7 +247,7 @@ export default function ChatsList() {
       </TouchableOpacity>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -261,7 +313,7 @@ const styles = StyleSheet.create({
     color: '#999',
   },
   emptyContainer: {
-    flex: 1,
+    flexGrow: 1, // Use flexGrow instead of flex
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -295,3 +347,5 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
 });
+
+export default ChatsList;

@@ -1,3 +1,4 @@
+// File: melsu_temp/hooks/useAuth.tsx
 import { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -5,6 +6,7 @@ import { router } from 'expo-router';
 import { AppState, AppStateStatus } from 'react-native';
 import authApi from '../src/api/authApi';
 import userApi from '../src/api/userApi';
+import chatService from '../src/services/chatService'; // Импортируем chatService
 
 // Add refresh interval in milliseconds (check every 30 seconds)
 const VERIFICATION_CHECK_INTERVAL = 30000;
@@ -209,10 +211,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Авторизация
+  // Авторизация с полной очисткой кэша
   const login = async (username: string, password: string) => {
     setIsLoading(true);
     try {
+      // Перед входом в новый аккаунт сбрасываем сервис чатов
+      console.log('Resetting chat service before login');
+
+      // Полный сброс chatService
+      if (typeof chatService.reset === 'function') {
+        chatService.reset();
+      } else {
+        chatService.cleanup(); // Используем cleanup, если reset не доступен
+        chatService.initialized = false;
+        chatService.currentUser = null;
+      }
+
       const { token, user } = await authApi.login({ username, password });
 
       // Сохраняем токен
@@ -261,6 +275,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         router.replace('/(tabs)');
       }
+
+      return { token, user };
     } catch (error) {
       console.error('Ошибка при регистрации:', error);
       throw error;
@@ -269,16 +285,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Выход из аккаунта
+  // Выход из аккаунта с полной очисткой кэша
   const logout = async () => {
     setIsLoading(true);
     try {
       // Вызываем API для выхода
       await authApi.logout();
 
+      // ВАЖНО: Полностью сбрасываем состояние сервиса чатов перед выходом
+      console.log('Resetting chat service and clearing all cached data');
+
+      // Полный сброс chatService
+      if (typeof chatService.reset === 'function') {
+        chatService.reset();
+      } else {
+        chatService.cleanup(); // Используем cleanup, если reset не доступен
+        chatService.initialized = false;
+        chatService.currentUser = null;
+      }
+
       // Удаляем данные сессии
       await SecureStore.deleteItemAsync('userToken');
       await AsyncStorage.removeItem('userData');
+
+      // Очищаем кэш AsyncStorage - РАДИКАЛЬНОЕ РЕШЕНИЕ
+      const keys = await AsyncStorage.getAllKeys();
+      await AsyncStorage.multiRemove(keys);
+      console.log('AsyncStorage cache completely cleared');
+
+      // Сбрасываем состояние
       setUser(null);
       setIsAuthenticated(false);
 
@@ -286,11 +321,28 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       router.replace('/login');
     } catch (error) {
       console.error('Ошибка при выходе:', error);
-      // Даже при ошибке, удаляем данные сессии
+
+      // Даже при ошибке, выполняем сброс кэша и чатов
+      if (typeof chatService.reset === 'function') {
+        chatService.reset();
+      } else {
+        chatService.cleanup();
+      }
+
       await SecureStore.deleteItemAsync('userToken');
-      await AsyncStorage.removeItem('userData');
+
+      // Радикальная очистка AsyncStorage
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        await AsyncStorage.multiRemove(keys);
+        console.log('AsyncStorage cache cleared despite error');
+      } catch (storageError) {
+        console.error('Error clearing AsyncStorage:', storageError);
+      }
+
       setUser(null);
       setIsAuthenticated(false);
+
       router.replace('/login');
     } finally {
       setIsLoading(false);

@@ -1,4 +1,5 @@
-// Исправленный chatService.js - устранена рекурсия и добавлен метод forceCurrentUserId
+// File: melsu_temp/src/services/chatService.js
+// Полная версия с методом reset() для очистки кэша
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { database, auth } from '../config/firebase';
 import {
@@ -169,8 +170,42 @@ class ChatService {
       }
     });
 
-    // Очищаем список слушателей
+    // Очищаем список слушателей и сбрасываем кэш
     this.listeners = {};
+
+    // Log cleanup
+    console.log('ChatService cleanup completed, all listeners removed');
+  }
+
+  // Полный сброс состояния сервиса (вызывается при выходе из аккаунта)
+  reset() {
+    console.log('Full reset of ChatService initiated');
+
+    // Отписываемся от всех слушателей Firebase
+    this.cleanup();
+
+    // Сбрасываем внутреннее состояние
+    this.currentUser = null;
+    this.initialized = false;
+    this.forcedUserId = null;
+    this.initializationInProgress = false;
+
+    // Выход из Firebase Auth
+    try {
+      if (auth.currentUser) {
+        auth.signOut();
+        console.log('Successfully signed out from Firebase Auth');
+      }
+    } catch (error) {
+      console.warn('Error signing out from Firebase Auth:', error);
+    }
+
+    // Очищаем все обработчики событий
+    this.listeners = {};
+
+    console.log('ChatService completely reset - all state cleared, listeners removed, user signed out');
+
+    return true;
   }
 
   // Создание личного чата между двумя пользователями
@@ -445,6 +480,7 @@ class ChatService {
       // Отписываемся от предыдущего слушателя, если он был
       if (this.listeners.userChats) {
         off(ref(database, this.listeners.userChats.path), this.listeners.userChats.event);
+        delete this.listeners.userChats;
       }
 
       const path = `userChats/${myUserId}`;
@@ -521,6 +557,7 @@ class ChatService {
       const listenerKey = `messages_${chatId}`;
       if (this.listeners[listenerKey]) {
         off(ref(database, this.listeners[listenerKey].path), this.listeners[listenerKey].event);
+        delete this.listeners[listenerKey];
       }
 
       const path = `messages/${chatId}`;
@@ -585,6 +622,7 @@ class ChatService {
       const listenerKey = `chatInfo_${chatId}`;
       if (this.listeners[listenerKey]) {
         off(ref(database, this.listeners[listenerKey].path), this.listeners[listenerKey].event);
+        delete this.listeners[listenerKey];
       }
 
       const path = `chats/${chatId}`;

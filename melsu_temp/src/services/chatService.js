@@ -1,5 +1,4 @@
-// File: melsu_temp/src/services/chatService.js
-// Полная версия с методом reset() для очистки кэша
+// Полная версия chatService.js с поддержкой групповых чатов и улучшенными push-уведомлениями
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {auth, database} from '../config/firebase';
 import {
@@ -17,6 +16,7 @@ import {
 } from 'firebase/database';
 import {signInAnonymously, signInWithCustomToken} from 'firebase/auth';
 import apiClient from '../api/apiClient';
+import * as Device from 'expo-device';
 
 class ChatService {
     constructor() {
@@ -25,6 +25,7 @@ class ChatService {
         this.listeners = {};
         this.forcedUserId = null; // Для принудительного задания ID пользователя
         this.initializationInProgress = false; // Флаг для предотвращения рекурсии
+        this.deviceToken = null; // Токен устройства для push-уведомлений
     }
 
     // Принудительно установить ID текущего пользователя (для исправления ошибок идентификации)
@@ -144,6 +145,16 @@ class ChatService {
                 console.warn('Error writing user data to database:', dbError);
             }
 
+            // Загружаем сохраненный токен устройства, если есть
+            try {
+                const deviceTokenString = await AsyncStorage.getItem('devicePushToken');
+                if (deviceTokenString) {
+                    this.deviceToken = deviceTokenString;
+                }
+            } catch (tokenError) {
+                console.warn('Error loading device token:', tokenError);
+            }
+
             this.initialized = true;
             this.initializationInProgress = false;
             return true;
@@ -177,9 +188,116 @@ class ChatService {
         console.log('ChatService cleanup completed, all listeners removed');
     }
 
+    // Устанавливает токен устройства для push-уведомлений
+    async setDeviceToken(token) {
+        if (!token) return false;
+
+        this.deviceToken = token;
+
+        // Сохраняем токен в AsyncStorage
+        try {
+            await AsyncStorage.setItem('devicePushToken', token);
+        } catch (error) {
+            console.warn('Error saving device token to AsyncStorage:', error);
+        }
+
+        // Если пользователь инициализирован, регистрируем токен на сервере
+        if (this.initialized && this.currentUser) {
+            try {
+                await this.registerDeviceToken(token);
+                return true;
+            } catch (error) {
+                console.warn('Error registering device token:', error);
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Регистрирует токен устройства на сервере
+    async registerDeviceToken(token) {
+        if (!token || !this.initialized || !this.currentUser) {
+            return false;
+        }
+
+        try {
+            const response = await apiClient.post('/device/register', {
+                token: token,
+                platform: Platform.OS,
+                device_name: Device.modelName || 'Unknown device'
+            });
+
+            console.log('Device token registered successfully:', response.data);
+            return true;
+        } catch (error) {
+            console.warn('Error registering device token on server:', error);
+            return false;
+        }
+    }
+
+    // Удаляет токен устройства с сервера
+    // Исправленный метод unregisterDeviceToken с расширенным логированием
+// Замените этот метод в chatService.js
+
+// Удаляет токен устройства с сервера
+// Исправленный метод unregisterDeviceToken для chatService.js
+// Замените существующий метод на этот:
+
+// Удаляет токен устройства с сервера
+async unregisterDeviceToken() {
+    if (!this.deviceToken) {
+        console.log('No device token to unregister');
+        return false;
+    }
+
+    try {
+        console.log(`Attempting to unregister device token: ${this.deviceToken.substring(0, 10)}...`);
+
+        // Вызов API для удаления токена
+        const response = await apiClient.post('/device/unregister', {
+            token: this.deviceToken
+        });
+
+        console.log('Device token unregistration response:', response.data);
+
+        // Удаляем токен из AsyncStorage
+        try {
+            await AsyncStorage.removeItem('devicePushToken');
+        } catch (storageError) {
+            console.warn('Error removing device token from AsyncStorage:', storageError);
+        }
+
+        this.deviceToken = null;
+
+        return true;
+    } catch (error) {
+        console.warn('Error unregistering device token from server:', error);
+
+        // Даже при ошибке, очищаем локальные данные
+        try {
+            await AsyncStorage.removeItem('devicePushToken');
+            this.deviceToken = null;
+        } catch (storageError) {
+            console.warn('Error removing device token from AsyncStorage:', storageError);
+        }
+
+        return false;
+    }
+}
+
     // Полный сброс состояния сервиса (вызывается при выходе из аккаунта)
-    reset() {
+    async reset() {
         console.log('Full reset of ChatService initiated');
+
+        // Важно: сначала отменяем регистрацию токена устройства
+        if (this.deviceToken) {
+            try {
+                await this.unregisterDeviceToken();
+            } catch (tokenError) {
+                console.warn('Error unregistering device token during reset:', tokenError);
+            }
+        }
 
         // Отписываемся от всех слушателей Firebase
         this.cleanup();
@@ -189,11 +307,12 @@ class ChatService {
         this.initialized = false;
         this.forcedUserId = null;
         this.initializationInProgress = false;
+        this.deviceToken = null;
 
         // Выход из Firebase Auth
         try {
             if (auth.currentUser) {
-                auth.signOut();
+                await auth.signOut();
                 console.log('Successfully signed out from Firebase Auth');
             }
         } catch (error) {
@@ -378,12 +497,134 @@ class ChatService {
         }
     }
 
-    // Отправка сообщения в чат
-    // Update the sendMessage method in chatService.js
+    // Создание группового чата для студенческой группы
+    async createGroupChat(groupName) {
+        // Инициализируем, если не инициализированы
+        if (!this.initialized || !this.currentUser) {
+            const initResult = await this.initialize();
+            if (!initResult) {
+                throw new Error('Failed to initialize chat service');
+            }
+        }
 
-// Original method with notification functionality added
+        if (!this.currentUser || !this.currentUser.id) {
+            throw new Error('Current user ID is not available');
+        }
+
+        // Только преподаватели могут создавать групповые чаты
+        if (this.currentUser.role !== 'teacher') {
+            throw new Error('Only teachers can create group chats');
+        }
+
+        if (!groupName) {
+            throw new Error('Group name is required');
+        }
+
+        const myUserId = this.getCurrentUserId();
+        console.log(`Creating group chat for group ${groupName} by teacher ${myUserId}`);
+
+        try {
+            // Генерируем уникальный ID для группового чата
+            const chatId = `group_${groupName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+            const displayName = `Группа ${groupName}`;
+
+            // Сначала получаем всех студентов этой группы
+            let students = [];
+            try {
+                const response = await apiClient.get('/users', { params: { role: 'student', group: groupName } });
+                students = response.data || [];
+                console.log(`Found ${students.length} students in group ${groupName}`);
+            } catch (error) {
+                console.warn(`Error fetching students for group ${groupName}:`, error);
+                // Продолжаем даже если не можем получить студентов - мы создадим пустой групповой чат,
+                // к которому студенты смогут присоединиться позже, когда войдут в приложение
+            }
+
+            // Подготавливаем объект участников
+            const participants = { [myUserId]: true };
+            students.forEach(student => {
+                if (student.id) {
+                    participants[String(student.id)] = true;
+                }
+            });
+
+            // Создаем групповой чат в Firebase
+            const chatRef = ref(database, `chats/${chatId}`);
+            await set(chatRef, {
+                id: chatId,
+                type: 'group',
+                name: displayName,
+                groupCode: groupName,
+                createdBy: myUserId,
+                createdAt: serverTimestamp(),
+                participants: participants
+            });
+
+            // Добавляем чат в список чатов создателя
+            await set(ref(database, `userChats/${myUserId}/${chatId}`), {
+                id: chatId,
+                type: 'group',
+                name: displayName,
+                groupCode: groupName,
+                updatedAt: serverTimestamp()
+            });
+
+            // Добавляем чат в списки чатов всех студентов
+            for (const student of students) {
+                if (student.id) {
+                    await set(ref(database, `userChats/${String(student.id)}/${chatId}`), {
+                        id: chatId,
+                        type: 'group',
+                        name: displayName,
+                        groupCode: groupName,
+                        updatedAt: serverTimestamp()
+                    });
+                }
+            }
+
+            // Отправляем приветственное сообщение
+            const messageData = {
+                id: push(ref(database, `messages/${chatId}`)).key,
+                senderId: myUserId,
+                senderName: this.currentUser.fullName || this.currentUser.username || `Преподаватель`,
+                text: `Добро пожаловать в групповой чат для группы ${groupName}!`,
+                timestamp: serverTimestamp(),
+                read: { [myUserId]: true }
+            };
+
+            await set(ref(database, `messages/${chatId}/${messageData.id}`), messageData);
+
+            // Обновляем информацию о последнем сообщении
+            const lastMessageInfo = {
+                id: messageData.id,
+                text: messageData.text.length > 30 ? `${messageData.text.substring(0, 30)}...` : messageData.text,
+                senderId: myUserId,
+                timestamp: serverTimestamp()
+            };
+
+            await update(chatRef, {
+                lastMessage: lastMessageInfo
+            });
+
+            // Обновляем информацию о чате у всех участников
+            for (const userId of Object.keys(participants)) {
+                await update(ref(database, `userChats/${userId}/${chatId}`), {
+                    lastMessage: lastMessageInfo,
+                    updatedAt: serverTimestamp()
+                });
+            }
+
+            console.log(`Group chat ${chatId} successfully created for group ${groupName}`);
+            return chatId;
+        } catch (error) {
+            console.error('Error creating group chat:', error);
+            throw error;
+        }
+    }
+
+    // Отправка сообщения в чат
     async sendMessage(chatId, text) {
-        // Initialization code remains the same
+        // Инициализация, если не инициализированы
         if (!this.initialized || !this.currentUser) {
             const initResult = await this.initialize();
             if (!initResult) {
@@ -395,18 +636,18 @@ class ChatService {
             throw new Error('Chat ID or message text is empty');
         }
 
-        // ALWAYS use string ID
+        // ВСЕГДА используем строковый ID
         const myUserId = this.getCurrentUserId();
         const senderName = this.currentUser.fullName || this.currentUser.username || `Пользователь ${myUserId}`;
 
         console.log(`Sending message from ${myUserId} (${senderName}) to chat ${chatId}`);
 
         try {
-            // Create new message
+            // Создаем новое сообщение
             const newMessageRef = push(ref(database, `messages/${chatId}`));
             const messageId = newMessageRef.key;
 
-            // Save message
+            // Сохраняем сообщение
             const messageData = {
                 id: messageId,
                 senderId: myUserId,
@@ -418,7 +659,7 @@ class ChatService {
 
             await set(newMessageRef, messageData);
 
-            // Update last message info in chat
+            // Обновляем информацию о последнем сообщении в чате
             const lastMessageInfo = {
                 id: messageId,
                 text: text.length > 30 ? `${text.substring(0, 30)}...` : text,
@@ -430,29 +671,56 @@ class ChatService {
                 lastMessage: lastMessageInfo
             });
 
-            // Get chat participants and update their chat info
+            // Получаем участников чата и обновляем их информацию о чате
             const chatSnapshot = await get(ref(database, `chats/${chatId}/participants`));
             const participants = chatSnapshot.val() || {};
 
-            // Process each participant
+            // Получаем информацию о чате для уведомлений
+            let chatName = '';
+            if (chatId.startsWith('group_')) {
+                const chatSnapshot = await get(ref(database, `chats/${chatId}`));
+                const chatData = chatSnapshot.val();
+                chatName = chatData?.name || 'Групповой чат';
+            } else {
+                chatName = 'Личный чат';
+            }
+
+            // Обработка каждого участника
+            const notificationPromises = [];
+
             for (const userId of Object.keys(participants)) {
-                // Update user's chat info
+                // Обновляем информацию о чате у пользователя
                 await update(ref(database, `userChats/${userId}/${chatId}`), {
                     lastMessage: lastMessageInfo, updatedAt: serverTimestamp()
                 });
 
-                // Send push notification to other participants
+                // Отправляем push-уведомление другим участникам
                 if (userId !== myUserId) {
-                    try {
-                        // Create a preview of the message (shorter version for notification)
-                        const messagePreview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+                    // Создаем превью сообщения (укороченная версия для уведомления)
+                    const messagePreview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
 
-                        // Call the notification API endpoint
-                        await this.sendNotificationToUser(userId, chatId, messagePreview, senderName);
-                    } catch (notifError) {
-                        console.warn(`Failed to send notification to user ${userId}:`, notifError);
-                        // Continue even if notification fails
-                    }
+                    // Добавляем имя чата к уведомлению
+                    const notificationSenderName = `${senderName} (${chatName})`;
+
+                    // Отправляем уведомление асинхронно, не ожидая завершения
+                    notificationPromises.push(
+                        this.sendNotificationToUser(userId, chatId, messagePreview, notificationSenderName)
+                            .catch(e => {
+                                // Эта ошибка уже будет обработана внутри sendNotificationToUser
+                                // Здесь мы просто предотвращаем распространение исключения дальше
+                                return { success: false, error: e.message };
+                            })
+                    );
+                }
+            }
+
+            // Ждем завершения всех уведомлений, но игнорируем ошибки
+            if (notificationPromises.length > 0) {
+                try {
+                    await Promise.allSettled(notificationPromises);
+                } catch (notifError) {
+                    // Игнорируем любые ошибки от уведомлений
+                    console.log('Some notifications may have failed, but message was sent successfully');
                 }
             }
 
@@ -464,18 +732,59 @@ class ChatService {
         }
     }
 
-// Add this new method to chatService.js
+    // Отправка уведомления пользователю
     async sendNotificationToUser(recipientId, chatId, messagePreview, senderName) {
         try {
+            // Проверяем, что аргументы переданы корректно
+            if (!recipientId || !chatId || !messagePreview) {
+                console.log(`Skipping notification: Invalid arguments for user ${recipientId}`);
+                return {success: false, skipped: true, reason: 'invalid_arguments'};
+            }
+
+            // Проверяем, не отправляем ли мы сообщение самому себе
+            const myUserId = this.getCurrentUserId();
+            if (recipientId === myUserId) {
+                console.log(`Skipping notification: Cannot send to self (${recipientId})`);
+                return {success: false, skipped: true, reason: 'self_notification'};
+            }
+
+            // Предотвращаем отправку уведомлений в эмуляторах/симуляторах в режиме разработки
+            // Это можно сделать, если есть способ определить режим разработки
+            /*
+            if (__DEV__ && simulatorRegex.test(Device.modelName)) {
+                console.log(`Skipping notification in dev/simulator for user ${recipientId}`);
+                return {success: false, skipped: true, reason: 'dev_simulator'};
+            }
+            */
+
+            // Отправляем запрос на сервер
             const response = await apiClient.post('/chat/send-notification', {
-                recipient_id: recipientId, chat_id: chatId, message_preview: messagePreview, sender_name: senderName
+                recipient_id: recipientId,
+                chat_id: chatId,
+                message_preview: messagePreview,
+                sender_name: senderName
             });
 
-            console.log('Push notification result:', response.data);
-            return response.data;
+            // Если ответ успешный, но получатель не найден или у него нет токенов
+            if (response.data?.status === 'no_tokens') {
+                console.log(`User ${recipientId} has no registered devices for notifications`);
+                return {success: false, skipped: true, reason: 'no_tokens'};
+            }
+
+            // Успешная отправка
+            return {success: true, receipt: response.data};
         } catch (error) {
-            console.error('Error sending push notification:', error);
-            // Don't throw - this should not interrupt the message sending process
+            // Проверка на специфическую ошибку "No device tokens"
+            if (error.message && (
+                error.message.includes('No device tokens') ||
+                error.message.includes('not found for recipient')
+            )) {
+                console.log(`User ${recipientId} has no registered devices for notifications`);
+                return {success: false, skipped: true, reason: 'no_tokens'};
+            }
+
+            // Для остальных ошибок - логирование, но без бросания исключения
+            console.log(`Failed to send notification to user ${recipientId}: ${error.message}`);
             return {success: false, error: error.message};
         }
     }

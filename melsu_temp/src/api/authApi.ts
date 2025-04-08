@@ -68,18 +68,21 @@ register: async (userData: RegisterRequest): Promise<AuthResponse> => {
   },
 
   /**
-   * Выход из системы (если требуется на сервере)
-   * @returns Результат выхода
-   */
-  logout: async () => {
-    try {
-      await apiClient.post('/auth/logout');
-      return { success: true };
-    } catch (error) {
-      // Даже если запрос не удался, мы все равно хотим выйти из системы
-      return { success: true };
-    }
-  },
+ * Выход из системы
+ * @returns Результат выхода
+ */
+logout: async () => {
+  try {
+    // Поскольку на сервере нет эндпоинта /auth/logout, не делаем запрос
+    // а просто возвращаем успешный результат
+    console.log('Performing client-side logout...');
+    return { success: true };
+  } catch (error) {
+    // Даже если запрос не удался, мы все равно хотим выйти из системы
+    console.warn('Error during logout API call (ignored):', error);
+    return { success: true };
+  }
+},
 
   /**
    * Проверка доступности логина

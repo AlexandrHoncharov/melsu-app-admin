@@ -135,20 +135,47 @@ def get_firebase_token(current_user):
         return jsonify({'message': 'Ошибка создания токена'}), 500
 
 
+# Add these endpoints to your api.py file
+
+@app.route('/api/schedule/groups', methods=['GET'])
+@token_required
+def get_schedule_groups(current_user):
+    """Get unique groups from the schedule"""
+    try:
+        # Get unique groups directly from schedule table
+        groups = db.session.query(db.distinct(Schedule.group_name)) \
+            .filter(Schedule.group_name.isnot(None)) \
+            .order_by(Schedule.group_name).all()
+
+        # Format response
+        groups_list = [{"name": group[0]} for group in groups if group[0]]
+
+        return jsonify(groups_list), 200
+    except Exception as e:
+        print(f"Error getting groups: {str(e)}")
+        return jsonify({"message": f"Error getting groups: {str(e)}"}), 500
+
+
 @app.route('/api/users', methods=['GET'])
 @token_required
 def get_users(current_user):
+    """Get users filtered by role and optionally by group"""
     role = request.args.get('role')
+    group = request.args.get('group')
 
     query = User.query
     if role:
         query = query.filter_by(role=role)
 
+    # Add filter by group if specified
+    if group:
+        query = query.filter_by(group=group)
+
     users = query.all()
 
     result = []
     for user in users:
-        if user.id != current_user.id:  # Исключаем текущего пользователя
+        if user.id != current_user.id:  # Exclude current user
             user_data = {
                 'id': user.id,
                 'username': user.username,
@@ -168,6 +195,58 @@ def get_users(current_user):
             result.append(user_data)
 
     return jsonify(result)
+
+
+@app.route('/api/device/unregister', methods=['POST'])
+@token_required
+def unregister_device(current_user):
+    """Отмена регистрации токена устройства при выходе из аккаунта"""
+
+    try:
+        data = request.json
+
+        # Проверяем наличие токена в запросе
+        if 'token' not in data or not data['token']:
+            return jsonify({
+                'message': 'Токен устройства не предоставлен',
+                'success': False
+            }), 400
+
+        # Получаем токен из запроса
+        device_token = data['token']
+
+        # Ищем запись с этим токеном для текущего пользователя
+        token_record = DeviceToken.query.filter_by(
+            user_id=current_user.id,
+            token=device_token
+        ).first()
+
+        # Если такой токен найден, удаляем его
+        if token_record:
+            db.session.delete(token_record)
+            db.session.commit()
+
+            return jsonify({
+                'message': 'Токен устройства успешно удален',
+                'success': True
+            }), 200
+        else:
+            # Если токен не найден, сообщаем об этом, но возвращаем успех
+            # чтобы клиент мог продолжить процесс выхода
+            return jsonify({
+                'message': 'Токен устройства не найден для данного пользователя',
+                'success': True
+            }), 200
+
+    except Exception as e:
+        print(f"Error unregistering device token: {str(e)}")
+
+        # Даже при ошибке возвращаем успех, чтобы не блокировать процесс выхода
+        return jsonify({
+            'message': f'Произошла ошибка, но процесс выхода может быть продолжен',
+            'error': str(e),
+            'success': True
+        }), 200
 
 
 @app.route('/api/users/<int:user_id>', methods=['GET'])

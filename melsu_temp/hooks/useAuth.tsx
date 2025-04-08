@@ -286,68 +286,75 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // Выход из аккаунта с полной очисткой кэша
-  const logout = async () => {
-    setIsLoading(true);
+  // Обновление функции logout в useAuth.tsx
+// Найдите метод logout и замените его на следующую версию
+
+// В файле useAuth.tsx:
+
+// Обновленный метод logout с отменой регистрации токена устройства
+const logout = async () => {
+  setIsLoading(true);
+  try {
+    // Вызываем API для выхода
+    await authApi.logout();
+
+    // ВАЖНО: сначала отменяем регистрацию токена устройства через chatService
+    console.log('Unregistering device token before logout...');
     try {
-      // Вызываем API для выхода
-      await authApi.logout();
+      // Если chatService инициализирован, вызываем сброс состояния
+      // который также отменит регистрацию токена
+      await chatService.reset();
+    } catch (chatError) {
+      console.error('Error resetting chat service during logout:', chatError);
+    }
 
-      // ВАЖНО: Полностью сбрасываем состояние сервиса чатов перед выходом
-      console.log('Resetting chat service and clearing all cached data');
+    // ВАЖНО: Полностью сбрасываем состояние сервиса чатов перед выходом
+    console.log('Resetting chat service and clearing all cached data');
 
-      // Полный сброс chatService
-      if (typeof chatService.reset === 'function') {
-        chatService.reset();
-      } else {
-        chatService.cleanup(); // Используем cleanup, если reset не доступен
-        chatService.initialized = false;
-        chatService.currentUser = null;
-      }
+    // Удаляем данные сессии
+    await SecureStore.deleteItemAsync('userToken');
+    await AsyncStorage.removeItem('userData');
 
-      // Удаляем данные сессии
-      await SecureStore.deleteItemAsync('userToken');
-      await AsyncStorage.removeItem('userData');
+    // Очищаем кэш AsyncStorage - РАДИКАЛЬНОЕ РЕШЕНИЕ
+    const keys = await AsyncStorage.getAllKeys();
+    await AsyncStorage.multiRemove(keys);
+    console.log('AsyncStorage cache completely cleared');
 
-      // Очищаем кэш AsyncStorage - РАДИКАЛЬНОЕ РЕШЕНИЕ
+    // Сбрасываем состояние
+    setUser(null);
+    setIsAuthenticated(false);
+
+    // Перенаправляем на экран входа
+    router.replace('/login');
+  } catch (error) {
+    console.error('Ошибка при выходе:', error);
+
+    // Даже при ошибке выполняем сброс кэша и чатов
+    try {
+      await chatService.reset();
+    } catch (chatError) {
+      console.error('Error resetting chat service during error handling:', chatError);
+    }
+
+    await SecureStore.deleteItemAsync('userToken');
+
+    // Радикальная очистка AsyncStorage
+    try {
       const keys = await AsyncStorage.getAllKeys();
       await AsyncStorage.multiRemove(keys);
-      console.log('AsyncStorage cache completely cleared');
-
-      // Сбрасываем состояние
-      setUser(null);
-      setIsAuthenticated(false);
-
-      // Перенаправляем на экран входа
-      router.replace('/login');
-    } catch (error) {
-      console.error('Ошибка при выходе:', error);
-
-      // Даже при ошибке, выполняем сброс кэша и чатов
-      if (typeof chatService.reset === 'function') {
-        chatService.reset();
-      } else {
-        chatService.cleanup();
-      }
-
-      await SecureStore.deleteItemAsync('userToken');
-
-      // Радикальная очистка AsyncStorage
-      try {
-        const keys = await AsyncStorage.getAllKeys();
-        await AsyncStorage.multiRemove(keys);
-        console.log('AsyncStorage cache cleared despite error');
-      } catch (storageError) {
-        console.error('Error clearing AsyncStorage:', storageError);
-      }
-
-      setUser(null);
-      setIsAuthenticated(false);
-
-      router.replace('/login');
-    } finally {
-      setIsLoading(false);
+      console.log('AsyncStorage cache cleared despite error');
+    } catch (storageError) {
+      console.error('Error clearing AsyncStorage:', storageError);
     }
-  };
+
+    setUser(null);
+    setIsAuthenticated(false);
+
+    router.replace('/login');
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   // Загрузка фото студенческого билета
   const uploadStudentCard = async (imageUri: string) => {

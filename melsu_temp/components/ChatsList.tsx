@@ -15,7 +15,7 @@ import { router } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
 import chatService from '../src/services/chatService';
 
-// Changed to a forwardRef component
+// ChatsList as a forwardRef component
 const ChatsList = forwardRef((props, ref) => {
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -31,7 +31,7 @@ const ChatsList = forwardRef((props, ref) => {
     }
   }));
 
-  // Загрузка списка чатов с принудительной инициализацией
+  // Load chat list with forced initialization
   const loadChats = async (withRefreshing = false) => {
     try {
       if (!withRefreshing) {
@@ -43,13 +43,13 @@ const ChatsList = forwardRef((props, ref) => {
       // Force clean up of previous listeners before initializing
       chatService.cleanup();
 
-      // Сбрасываем флаг initialized, чтобы заставить сервис полностью реинициализироваться
+      // Reset initialized flag to force service to fully reinitialize
       chatService.initialized = false;
 
-      // Инициализируем сервис и загружаем чаты
+      // Initialize service and load chats
       await chatService.initialize();
 
-      // Принудительно устанавливаем ID текущего пользователя, если он доступен
+      // Force current user ID if available
       if (user?.id) {
         chatService.forceCurrentUserId(String(user.id));
       }
@@ -61,7 +61,7 @@ const ChatsList = forwardRef((props, ref) => {
     } catch (error) {
       console.error('Error loading chats:', error);
 
-      // При ошибке очищаем список чатов
+      // Clear chat list on error
       setChats([]);
     } finally {
       setLoading(false);
@@ -69,61 +69,61 @@ const ChatsList = forwardRef((props, ref) => {
     }
   };
 
-  // Загрузка при первом рендере
+  // Load on first render
   useEffect(() => {
     loadChats();
 
-    // Отписка от слушателей при размонтировании
+    // Unsubscribe from listeners when unmounting
     return () => {
       chatService.cleanup();
     };
   }, []);
 
-  // Обработчик pull-to-refresh с полной очисткой кэша
+  // Pull-to-refresh handler with full cache clear
   const handleRefresh = () => {
     console.log('Refreshing chats with full cache clear...');
     setRefreshing(true);
 
-    // Полностью очищаем слушатели перед загрузкой
+    // Completely clear listeners before loading
     chatService.cleanup();
 
-    // Сбрасываем состояние сервиса, но сохраняем пользователя
+    // Reset service state while preserving user
     const tempUser = chatService.currentUser;
     chatService.initialized = false;
 
-    // Восстанавливаем пользователя, если он был
+    // Restore user if it existed
     if (tempUser) {
       chatService.currentUser = tempUser;
     }
 
-    // Загружаем чаты заново
+    // Reload chats
     loadChats(true);
   };
 
-  // Форматирование времени
+  // Format time
   const formatTime = (timestamp) => {
     if (!timestamp) return '';
 
     const date = new Date(timestamp);
     const now = new Date();
 
-    // Сегодня - только время
+    // Today - only time
     if (date.toDateString() === now.toDateString()) {
       return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
-    // В течение недели - день недели
+    // Within the week - day of week
     const days = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
     const diff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
     if (diff < 7) {
       return days[date.getDay()];
     }
 
-    // Иначе - дата
+    // Otherwise - date
     return `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}`;
   };
 
-  // Получаем инициалы для аватара
+  // Get initials for avatar
   const getInitials = (name) => {
     if (!name) return "??";
 
@@ -135,9 +135,9 @@ const ChatsList = forwardRef((props, ref) => {
     return name.substring(0, 2).toUpperCase();
   };
 
-  // Рендер элемента чата
+  // Render chat item
   const renderChatItem = ({ item }) => {
-    // Определяем отображаемое имя чата
+    // Determine display chat name
     let chatName = 'Чат';
     let chatRole = '';
 
@@ -148,7 +148,7 @@ const ChatsList = forwardRef((props, ref) => {
       chatName = item.name || 'Групповой чат';
     }
 
-    // Получаем инициалы для аватара
+    // Get initials for avatar
     const initials = getInitials(chatName);
 
     return (
@@ -218,7 +218,7 @@ const ChatsList = forwardRef((props, ref) => {
           <Text style={styles.emptySubtitle}>
             {user?.role === 'student'
               ? 'Начните общение с преподавателем'
-              : 'Начните общение со студентом'
+              : 'Начните общение со студентом или создайте групповой чат'
             }
           </Text>
         </ScrollView>
@@ -279,13 +279,13 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   teacherAvatar: {
-    backgroundColor: '#2E7D32', // Зеленый для преподавателей
+    backgroundColor: '#2E7D32', // Green for teachers
   },
   studentAvatar: {
-    backgroundColor: '#0277BD', // Синий для студентов
+    backgroundColor: '#0277BD', // Blue for students
   },
   groupAvatar: {
-    backgroundColor: '#4CAF50', // Зеленый для групповых чатов
+    backgroundColor: '#4CAF50', // Green for group chats
   },
   avatarText: {
     color: '#fff',

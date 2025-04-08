@@ -196,6 +196,73 @@ def get_user(current_user, user_id):
 
     return jsonify(user_data)
 
+
+@app.route('/api/chat/send-notification', methods=['POST'])
+@token_required
+def send_chat_notification(current_user):
+    """Send a push notification about a new chat message"""
+    try:
+        data = request.json
+        required_fields = ['recipient_id', 'chat_id', 'message_preview', 'sender_name']
+
+        # Verify all required fields are present
+        for field in required_fields:
+            if field not in data:
+                return jsonify({'message': f'Field {field} is required'}), 400
+
+        recipient_id = data['recipient_id']
+        chat_id = data['chat_id']
+        message_preview = data['message_preview']
+        sender_name = data['sender_name']
+
+        # Get recipient's device tokens
+        device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
+
+        if not device_tokens:
+            return jsonify({
+                'message': 'No device tokens found for recipient',
+                'success': False
+            }), 404
+
+        # Send notification to all recipient's devices
+        notification_title = f'Новое сообщение от {sender_name}'
+        notification_body = message_preview
+
+        results = []
+        success_count = 0
+
+        for token_obj in device_tokens:
+            result = send_push_message(
+                token_obj.token,
+                notification_title,
+                notification_body,
+                {
+                    'type': 'chat_message',
+                    'chat_id': chat_id,
+                    'sender_name': sender_name,
+                    'timestamp': datetime.datetime.now().isoformat()
+                }
+            )
+
+            if result.get("success", False):
+                success_count += 1
+
+            results.append({
+                "device": token_obj.device_name,
+                "platform": token_obj.platform,
+                "success": result.get("success", False)
+            })
+
+        return jsonify({
+            'message': f'Notifications sent to {success_count} of {len(device_tokens)} devices',
+            'success': success_count > 0,
+            'results': results
+        })
+
+    except Exception as e:
+        print(f"Error sending chat notification: {str(e)}")
+        return jsonify({'message': f'Error: {str(e)}', 'success': False}), 500
+
 # Helper function to check if username exists
 def username_exists(username):
     try:

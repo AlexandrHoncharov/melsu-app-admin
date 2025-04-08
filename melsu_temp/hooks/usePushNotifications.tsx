@@ -1,12 +1,13 @@
-// Enhanced version of usePushNotifications.tsx
+// File: hooks/usePushNotifications.tsx
 import { useState, useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform, Alert } from 'react-native';
 import { useAuth } from './useAuth';
 import userApi from '../src/api/userApi';
+import { router } from 'expo-router';
 
-// Настраиваем обработчик уведомлений
+// Set up notification handler
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -15,7 +16,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Убедитесь, что это ваш актуальный ID проекта Expo
+// Make sure this is your actual Expo project ID
 const EXPO_PROJECT_ID = 'd9591f01-e110-4918-8b09-c422bd23baaf';
 
 export function usePushNotifications() {
@@ -77,7 +78,7 @@ export function usePushNotifications() {
     }
   }
 
-  // Регистрация токена на сервере с улучшенной обработкой ошибок
+  // Register token with server with improved error handling
   const registerTokenWithServer = async (token: string) => {
     try {
       if (!isAuthenticated || !user) {
@@ -101,7 +102,7 @@ export function usePushNotifications() {
     }
   };
 
-  // Отправка тестового уведомления с подробной информацией
+  // Send test notification with detailed feedback
   const sendTestNotification = async () => {
     try {
       if (!isAuthenticated) {
@@ -140,7 +141,7 @@ export function usePushNotifications() {
     }
   };
 
-  // Проверка статуса push-уведомлений
+  // Check push notification status
   const getNotificationStatus = async () => {
     const permissionStatus = await Notifications.getPermissionsAsync();
     return {
@@ -152,12 +153,38 @@ export function usePushNotifications() {
     };
   };
 
+  // Set up notification categories for iOS
+  const configurePushNotifications = async () => {
+    // Set notification categories for iOS
+    if (Platform.OS === 'ios') {
+      await Notifications.setNotificationCategoryAsync('chat', [
+        {
+          identifier: 'reply',
+          buttonTitle: 'Ответить',
+          options: {
+            opensAppToForeground: true,
+          },
+        },
+        {
+          identifier: 'view',
+          buttonTitle: 'Просмотреть',
+          options: {
+            opensAppToForeground: true,
+          },
+        },
+      ]);
+    }
+  };
+
   useEffect(() => {
-    // Регистрируем токен только если пользователь авторизован
+    // Register token only if user is authenticated
     let isMounted = true;
 
     const registerToken = async () => {
       if (isAuthenticated) {
+        // Configure notification categories first
+        await configurePushNotifications();
+
         const token = await registerForPushNotificationsAsync();
         if (token && isMounted) {
           setExpoPushToken(token);
@@ -168,20 +195,26 @@ export function usePushNotifications() {
 
     registerToken();
 
-    // Настраиваем слушатели уведомлений
+    // Set up notification listeners
     notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-      console.log('Notification received:', notification);
+      console.log('Notification received in foreground:', notification);
       setNotification(notification);
     });
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
       console.log('Notification clicked:', response);
-      // Здесь можно обработать нажатие на уведомление
+      // Handle notification click
       const data = response.notification.request.content.data;
 
-      if (data?.type === 'verification') {
-        // Можно выполнить навигацию на соответствующий экран
+      // Handle notification based on type
+      if (data?.type === 'chat_message' && data?.chat_id) {
+        // Navigate to chat screen
+        console.log('Navigating to chat:', data.chat_id);
+        router.push(`/chat/${data.chat_id}`);
+      } else if (data?.type === 'verification') {
+        // Navigate to verification screen
         console.log('Verification notification clicked:', data);
+        router.push('/verification');
       }
     });
 

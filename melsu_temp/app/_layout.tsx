@@ -1,14 +1,14 @@
-// Обновите файл app/_layout.tsx для интеграции Push-уведомлений
-
+// File: app/_layout.tsx
 import React from 'react';
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../hooks/useAuth';
 import { StatusBar } from 'expo-status-bar';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { NotificationProvider } from '../hooks/useNotifications';
 
-// Компонент для инициализации push-уведомлений
+// Component for initializing push notifications
 const PushNotificationsInitializer = () => {
-  // Просто вызываем хук, который установит все необходимые слушатели
+  // Just call the hook to set up all necessary listeners
   usePushNotifications();
   return null;
 };
@@ -16,26 +16,63 @@ const PushNotificationsInitializer = () => {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <StatusBar style="dark" />
-      {/* Компонент инициализации уведомлений */}
-      <PushNotificationsInitializer />
+      <NotificationProvider>
+        <StatusBar style="dark" />
+        {/* Push notifications initializer */}
+        <PushNotificationsInitializer />
 
-      <Stack>
-        <Stack.Screen
-          name="(tabs)"
-          options={{
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="login"
-          options={{
-            headerShown: false,
-            // Отключаем жест возврата для экрана входа
-            gestureEnabled: false,
-          }}
-        />
-      </Stack>
+        <Stack>
+          <Stack.Screen
+            name="(tabs)"
+            options={{
+              headerShown: false,
+            }}
+          />
+          <Stack.Screen
+            name="login"
+            options={{
+              headerShown: false,
+              // Disable back gesture for login screen
+              gestureEnabled: false,
+            }}
+          />
+          <Stack.Screen
+            name="register"
+            options={{
+              title: 'Регистрация',
+              headerTintColor: '#770002',
+            }}
+          />
+          <Stack.Screen
+            name="verification"
+            options={{
+              title: 'Верификация',
+              headerTintColor: '#770002',
+            }}
+          />
+          <Stack.Screen
+            name="chat/[id]"
+            options={{
+              title: 'Чат',
+              headerTintColor: '#770002',
+            }}
+          />
+          <Stack.Screen
+            name="new-chat"
+            options={{
+              title: 'Новый чат',
+              headerTintColor: '#770002',
+            }}
+          />
+          <Stack.Screen
+            name="notification-settings"
+            options={{
+              title: 'Настройки уведомлений',
+              headerTintColor: '#770002',
+            }}
+          />
+        </Stack>
+      </NotificationProvider>
     </AuthProvider>
   );
 }

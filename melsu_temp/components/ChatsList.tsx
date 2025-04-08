@@ -1,0 +1,255 @@
+import React, { useState, useEffect } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { useAuth } from '../hooks/useAuth';
+import chatService from '../src/services/chatService';
+
+export default function ChatsList() {
+  const [chats, setChats] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const { user } = useAuth();
+
+  // Загрузка списка чатов
+  const loadChats = async () => {
+    console.log('Loading chats...');
+    try {
+      // Инициализируем сервис и загружаем чаты
+      await chatService.initialize();
+      const userChats = await chatService.getUserChats();
+      setChats(userChats);
+      console.log(`Loaded ${userChats.length} chats`);
+    } catch (error) {
+      console.error('Error loading chats:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Загрузка при первом рендере
+  useEffect(() => {
+    setLoading(true);
+    loadChats();
+
+    // Отписка от слушателей при размонтировании
+    return () => {
+      chatService.cleanup();
+    };
+  }, []);
+
+  // Обработчик pull-to-refresh
+  const handleRefresh = () => {
+    console.log('Refreshing chats...');
+    setRefreshing(true);
+    loadChats();
+  };
+
+  // Форматирование времени
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '';
+
+    const date = new Date(timestamp);
+    const now = new Date();
+
+    // Сегодня - только время
+    if (date.toDateString() === now.toDateString()) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    // В течение недели - день недели
+    const days = ['ВС', 'ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ'];
+    const diff = Math.floor((now - date) / (1000 * 60 * 60 * 24));
+    if (diff < 7) {
+      return days[date.getDay()];
+    }
+
+    // Иначе - дата
+    return `${date.getDate().toString().padStart(2, '0')}.${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+  };
+
+  // Рендер элемента чата
+  const renderChatItem = ({ item }) => {
+    // Определяем отображаемое имя чата
+    let chatName = 'Чат';
+    if (item.type === 'personal') {
+      chatName = item.withUserName || 'Личный чат';
+    } else if (item.type === 'group') {
+      chatName = item.name || 'Групповой чат';
+    }
+
+    return (
+      <TouchableOpacity
+        style={styles.chatItem}
+        onPress={() => router.push(`/chat/${item.id}`)}
+      >
+        <View style={[
+          styles.avatarContainer,
+          item.type === 'group' && { backgroundColor: '#4CAF50' }
+        ]}>
+          {item.type === 'group' ? (
+            <Ionicons name="people" size={22} color="#fff" />
+          ) : (
+            <Text style={styles.avatarText}>
+              {chatName.substring(0, 2).toUpperCase()}
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.chatInfo}>
+          <Text style={styles.chatName}>{chatName}</Text>
+
+          {item.lastMessage && (
+            <Text style={styles.lastMessage} numberOfLines={1}>
+              {String(item.lastMessage.senderId) === String(user?.id) ? 'Вы: ' : ''}
+              {item.lastMessage.text}
+            </Text>
+          )}
+        </View>
+
+        {item.lastMessage && (
+          <View style={styles.metaInfo}>
+            <Text style={styles.timeText}>
+              {formatTime(item.lastMessage.timestamp)}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#770002" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {chats.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Ionicons name="chatbubbles-outline" size={64} color="#ccc" />
+          <Text style={styles.emptyTitle}>У вас пока нет чатов</Text>
+          <Text style={styles.emptySubtitle}>
+            Начните общение с преподавателем или группой
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={chats}
+          renderItem={renderChatItem}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={['#770002']}
+              tintColor="#770002"
+            />
+          }
+        />
+      )}
+
+      <TouchableOpacity
+        style={styles.newChatButton}
+        onPress={() => router.push('/new-chat')}
+      >
+        <Ionicons name="add" size={24} color="#fff" />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  listContent: {
+    padding: 16
+  },
+  chatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  avatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#770002',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  chatInfo: {
+    flex: 1,
+  },
+  chatName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  lastMessage: {
+    fontSize: 14,
+    color: '#666',
+  },
+  metaInfo: {
+    alignItems: 'flex-end',
+  },
+  timeText: {
+    fontSize: 12,
+    color: '#999',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+  },
+  newChatButton: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#770002',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+});

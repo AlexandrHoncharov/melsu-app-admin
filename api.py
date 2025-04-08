@@ -10,6 +10,8 @@ import string
 from functools import wraps
 from db import db
 from models import User, Teacher, Schedule, VerificationLog, DeviceToken
+import firebase_admin
+from firebase_admin import credentials, auth
 
 app = Flask(__name__)
 CORS(app)
@@ -27,6 +29,42 @@ STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
 # Создаем папки, если их нет
 os.makedirs(STUDENT_CARDS_FOLDER, exist_ok=True)
 
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate('firebase.json')
+    firebase_admin.initialize_app(cred)
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+
+        # Получаем токен из заголовка
+        if 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith('Bearer '):
+                token = auth_header.split(' ')[1]
+
+        if not token:
+            return jsonify({'message': 'Токен не предоставлен'}), 401
+
+        try:
+            # Декодируем токен
+            payload = jwt.decode(token, app.config.get('SECRET_KEY'), algorithms=['HS256'])
+            user_id = payload['sub']
+            current_user = User.query.get(user_id)
+
+            if not current_user:
+                return jsonify({'message': 'Пользователь не найден'}), 401
+
+        except jwt.ExpiredSignatureError:
+            return jsonify({'message': 'Токен истек'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'message': 'Недействительный токен'}), 401
+
+        return f(current_user, *args, **kwargs)
+
+    return decorated
 
 # Helper function to generate username
 def generate_username(full_name, group=None):
@@ -64,6 +102,100 @@ def generate_username(full_name, group=None):
     return username
 
 
+@app.route('/api/auth/firebase-token', methods=['POST'])
+@token_required
+def get_firebase_token(current_user):
+    try:
+        # Создаем кастомный токен для Firebase
+        firebase_token = auth.create_custom_token(str(current_user.id))
+
+        # Подготавливаем данные пользователя
+        user_data = {
+            'id': current_user.id,
+            'username': current_user.username,
+            'fullName': current_user.full_name,
+            'role': current_user.role
+        }
+
+        if current_user.role == 'student':
+            user_data['group'] = current_user.group
+            user_data['faculty'] = current_user.faculty
+        elif current_user.role == 'teacher':
+            teacher = Teacher.query.filter_by(user_id=current_user.id).first()
+            if teacher:
+                user_data['department'] = teacher.department
+                user_data['position'] = teacher.position
+
+        return jsonify({
+            'token': firebase_token.decode('utf-8'),
+            'userData': user_data
+        })
+    except Exception as e:
+        print(f"Error creating Firebase token: {str(e)}")
+        return jsonify({'message': 'Ошибка создания токена'}), 500
+
+
+@app.route('/api/users', methods=['GET'])
+@token_required
+def get_users(current_user):
+    role = request.args.get('role')
+
+    query = User.query
+    if role:
+        query = query.filter_by(role=role)
+
+    users = query.all()
+
+    result = []
+    for user in users:
+        if user.id != current_user.id:  # Исключаем текущего пользователя
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'fullName': user.full_name,
+                'role': user.role
+            }
+
+            if user.role == 'student':
+                user_data['group'] = user.group
+                user_data['faculty'] = user.faculty
+            elif user.role == 'teacher':
+                teacher = Teacher.query.filter_by(user_id=user.id).first()
+                if teacher:
+                    user_data['department'] = teacher.department
+                    user_data['position'] = teacher.position
+
+            result.append(user_data)
+
+    return jsonify(result)
+
+
+@app.route('/api/users/<int:user_id>', methods=['GET'])
+@token_required
+def get_user(current_user, user_id):
+    user = User.query.get(user_id)
+
+    if not user:
+        return jsonify({'message': 'Пользователь не найден'}), 404
+
+    user_data = {
+        'id': user.id,
+        'username': user.username,
+        'name': user.full_name,
+        'role': user.role,
+        'group': user.group,
+        'faculty': user.faculty
+    }
+
+    # Для преподавателей добавляем информацию о кафедре
+    if user.role == 'teacher':
+        teacher = Teacher.query.filter_by(user_id=user.id).first()
+        if teacher:
+            user_data['department'] = teacher.department
+            user_data['position'] = teacher.position
+
+    return jsonify(user_data)
+
 # Helper function to check if username exists
 def username_exists(username):
     try:
@@ -90,37 +222,7 @@ def create_token(user_id):
 
 
 # Декоратор для проверки токена
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
 
-        # Получаем токен из заголовка
-        if 'Authorization' in request.headers:
-            auth_header = request.headers['Authorization']
-            if auth_header.startswith('Bearer '):
-                token = auth_header.split(' ')[1]
-
-        if not token:
-            return jsonify({'message': 'Токен не предоставлен'}), 401
-
-        try:
-            # Декодируем токен
-            payload = jwt.decode(token, app.config.get('SECRET_KEY'), algorithms=['HS256'])
-            user_id = payload['sub']
-            current_user = User.query.get(user_id)
-
-            if not current_user:
-                return jsonify({'message': 'Пользователь не найден'}), 401
-
-        except jwt.ExpiredSignatureError:
-            return jsonify({'message': 'Токен истек'}), 401
-        except jwt.InvalidTokenError:
-            return jsonify({'message': 'Недействительный токен'}), 401
-
-        return f(current_user, *args, **kwargs)
-
-    return decorated
 
 
 # Маршрут для регистрации студента

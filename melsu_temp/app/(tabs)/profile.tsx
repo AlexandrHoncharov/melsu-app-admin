@@ -1,3 +1,5 @@
+// File: app/(tabs)/profile.tsx
+// Обновленная версия без статичных данных
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -14,16 +16,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { router, useFocusEffect } from 'expo-router';
-
-// Демо данные для профиля
-const demoAcademicInfo = {
-  faculty: 'Факультет информационных технологий',
-  specialization: 'Программная инженерия',
-  semester: 5,
-  courseYear: 3,
-  educationForm: 'Очная',
-  enrollmentYear: 2021
-};
 
 export default function ProfileScreen() {
   const { user, logout, isLoading, refreshUserProfile, manuallyCheckVerificationStatus } = useAuth();
@@ -74,6 +66,11 @@ export default function ProfileScreen() {
     router.push('/verification');
   };
 
+  // Переход в раздел справок
+  const handleDocuments = () => {
+    router.push('/under-development?title=Справки&message=Раздел справок пока находится в разработке. Здесь будет возможность запросить различные виды справок и отслеживать статус их готовности.');
+  };
+
   if (isLoading) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -111,8 +108,6 @@ export default function ProfileScreen() {
       >
         {/* Шапка профиля */}
         <View style={styles.profileHeader}>
-
-
           <View style={styles.avatarContainer}>
             <Text style={styles.avatarText}>
               {user.fullName
@@ -197,7 +192,7 @@ export default function ProfileScreen() {
           )}
         </View>
 
-        {/* Основная информация */}
+        {/* Основная информация - только логин */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Основная информация</Text>
           <View style={styles.infoContainer}>
@@ -206,30 +201,63 @@ export default function ProfileScreen() {
               <Text style={styles.infoValue}>{user.username}</Text>
             </View>
 
-            {user.role === 'student' && user.verificationStatus === 'verified' && (
+            {user.role === 'student' && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Группа:</Text>
+                <Text style={styles.infoValue}>{user.group || 'Не указана'}</Text>
+              </View>
+            )}
+
+            {user.role === 'teacher' && (
               <>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Факультет:</Text>
-                  <Text style={styles.infoValue}>{demoAcademicInfo.faculty}</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Специальность:</Text>
-                  <Text style={styles.infoValue}>{demoAcademicInfo.specialization}</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Курс:</Text>
-                  <Text style={styles.infoValue}>{demoAcademicInfo.courseYear}</Text>
-                </View>
-
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Форма обучения:</Text>
-                  <Text style={styles.infoValue}>{demoAcademicInfo.educationForm}</Text>
-                </View>
+                {user.department && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Кафедра:</Text>
+                    <Text style={styles.infoValue}>{user.department}</Text>
+                  </View>
+                )}
+                {user.position && (
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Должность:</Text>
+                    <Text style={styles.infoValue}>{user.position}</Text>
+                  </View>
+                )}
               </>
             )}
           </View>
+        </View>
+
+        {/* Меню дополнительных разделов */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Дополнительно</Text>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={handleDocuments}
+          >
+            <Ionicons name="document-text-outline" size={22} color="#555" />
+            <View style={styles.menuItemTextContainer}>
+              <Text style={styles.menuItemText}>Справки</Text>
+              <Text style={styles.menuItemDescription}>
+                Заказ и получение справок
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#aaa" />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => router.push('/notification-settings')}
+          >
+            <Ionicons name="notifications-outline" size={22} color="#555" />
+            <View style={styles.menuItemTextContainer}>
+              <Text style={styles.menuItemText}>Уведомления</Text>
+              <Text style={styles.menuItemDescription}>
+                Настройки push-уведомлений
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color="#aaa" />
+          </TouchableOpacity>
         </View>
 
         {/* Секция верификации для неверифицированных студентов */}
@@ -278,6 +306,7 @@ export default function ProfileScreen() {
   );
 }
 
+// Оставляем стили без изменений
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -417,6 +446,28 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#333',
+  },
+  // Стили для меню
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  menuItemTextContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  menuItemText: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  menuItemDescription: {
+    fontSize: 12,
+    color: '#777',
+    marginTop: 2,
   },
   verificationContainer: {
     padding: 16,

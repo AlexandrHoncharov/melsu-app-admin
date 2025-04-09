@@ -1,3 +1,4 @@
+// File: app/(tabs)/_layout.tsx
 import React, { useEffect } from 'react';
 import { Tabs, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -43,16 +44,26 @@ export default function TabLayout() {
         }}
       />
 
+      {/* Новая вкладка "Мероприятия" */}
+      <Tabs.Screen
+        name="events"
+        options={{
+          title: 'Мероприятия',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="tennisball-outline" color={color} size={size} />
+          ),
+        }}
+      />
 
-        <Tabs.Screen
-  name="chats"
-  options={{
-    title: 'Чаты',
-    tabBarIcon: ({ color, size }) => (
-      <Ionicons name="chatbubbles-outline" color={color} size={size} />
-    ),
-  }}
-/>
+      <Tabs.Screen
+        name="chats"
+        options={{
+          title: 'Чаты',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="chatbubbles-outline" color={color} size={size} />
+          ),
+        }}
+      />
 
       <Tabs.Screen
         name="profile"

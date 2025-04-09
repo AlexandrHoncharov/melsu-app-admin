@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "melsu_temp",
+    "name": "Университет",
     "slug": "melsu",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -8,19 +8,45 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.melsu.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.melsu.app"
     },
     "web": {
       "bundler": "metro",
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Университет",
+      "shortName": "Универ",
+      "description": "Мобильное приложение университета",
+      "lang": "ru",
+      "themeColor": "#770002",
+      "backgroundColor": "#ffffff",
+      "startUrl": "/?utm_source=pwa",
+      "scope": "/",
+      "crossorigin": "use-credentials",
+      "display": "standalone",
+      "orientation": "portrait",
+      "relatedApplications": [],
+      "preferRelatedApplications": false
     },
     "plugins": [
       "expo-router",
@@ -36,7 +62,8 @@
       "expo-secure-store"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "tsconfigPaths": true
     },
     "extra": {
       "router": {

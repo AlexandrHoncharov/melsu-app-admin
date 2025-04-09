@@ -197,6 +197,7 @@ def get_users(current_user):
     return jsonify(result)
 
 
+# Update the unregister_device function in api.py
 @app.route('/api/device/unregister', methods=['POST'])
 @token_required
 def unregister_device(current_user):
@@ -205,38 +206,44 @@ def unregister_device(current_user):
     try:
         data = request.json
 
-        # Проверяем наличие токена в запросе
-        if 'token' not in data or not data['token']:
-            return jsonify({
-                'message': 'Токен устройства не предоставлен',
-                'success': False
-            }), 400
+        # Если токен предоставлен, пытаемся удалить конкретный токен
+        if 'token' in data and data['token'] and data['token'] != 'force_all_tokens_removal':
+            device_token = data['token']
 
-        # Получаем токен из запроса
-        device_token = data['token']
+            # Ищем запись с этим токеном для текущего пользователя
+            token_record = DeviceToken.query.filter_by(
+                user_id=current_user.id,
+                token=device_token
+            ).first()
 
-        # Ищем запись с этим токеном для текущего пользователя
-        token_record = DeviceToken.query.filter_by(
-            user_id=current_user.id,
-            token=device_token
-        ).first()
+            # Если токен найден, удаляем его
+            if token_record:
+                db.session.delete(token_record)
+                db.session.commit()
 
-        # Если такой токен найден, удаляем его
-        if token_record:
-            db.session.delete(token_record)
-            db.session.commit()
+                return jsonify({
+                    'message': 'Токен устройства успешно удален',
+                    'success': True,
+                    'deleted_count': 1
+                }), 200
 
-            return jsonify({
-                'message': 'Токен устройства успешно удален',
-                'success': True
-            }), 200
-        else:
-            # Если токен не найден, сообщаем об этом, но возвращаем успех
-            # чтобы клиент мог продолжить процесс выхода
-            return jsonify({
-                'message': 'Токен устройства не найден для данного пользователя',
-                'success': True
-            }), 200
+        # Если токен не предоставлен или запрошено удаление всех токенов,
+        # удаляем ВСЕ токены пользователя
+        # Находим все токены пользователя
+        user_tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
+        token_count = len(user_tokens)
+
+        # Удаляем все найденные токены
+        for token in user_tokens:
+            db.session.delete(token)
+
+        db.session.commit()
+
+        return jsonify({
+            'message': f'Удалено {token_count} токенов устройств пользователя',
+            'success': True,
+            'deleted_count': token_count
+        }), 200
 
     except Exception as e:
         print(f"Error unregistering device token: {str(e)}")
@@ -869,52 +876,121 @@ def send_push_message(token, title, message, extra=None):
         return {"success": False, "error": error_msg}
 
 
-# Маршрут для регистрации токена устройства
+# Упрощенная и более надежная версия endpoint'а для регистрации токенов
+# Заменяет существующий метод в api.py
+
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Регистрация токена устройства для push-уведомлений"""
+    """Регистрация токена устройства для push-уведомлений с улучшенной обработкой ошибок"""
 
-    data = request.json
-    required_fields = ['token', 'platform']
+    try:
+        data = request.json
+        required_fields = ['token', 'platform']
 
-    # Проверяем обязательные поля
-    for field in required_fields:
-        if field not in data:
-            return jsonify({'message': f'Поле {field} обязательно'}), 400
+        # Проверяем обязательные поля
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'message': f'Поле {field} обязательно',
+                    'success': False
+                }), 400
 
-    # Получаем данные из запроса
-    token = data.get('token')
-    platform = data.get('platform')
-    device_name = data.get('device_name', '')
+        # Получаем данные из запроса
+        token = data.get('token')
+        platform = data.get('platform')
+        device_name = data.get('device_name', '')
 
-    # Проверяем, существует ли уже такой токен для этого пользователя
-    existing_token = DeviceToken.query.filter_by(
-        user_id=current_user.id,
-        token=token
-    ).first()
+        print(f"Registering device token for user {current_user.id}, device: {device_name}")
 
-    if existing_token:
-        # Обновляем существующий токен
-        existing_token.platform = platform
-        existing_token.device_name = device_name
-        existing_token.updated_at = datetime.datetime.utcnow()
-    else:
-        # Создаем новую запись
-        new_token = DeviceToken(
+        # Шаг 1: Проверяем, существует ли уже такой токен
+        existing_token = DeviceToken.query.filter_by(
             user_id=current_user.id,
-            token=token,
-            platform=platform,
-            device_name=device_name
-        )
-        db.session.add(new_token)
+            token=token
+        ).first()
 
-    db.session.commit()
+        if existing_token:
+            # Обновляем существующий токен
+            existing_token.platform = platform
+            existing_token.device_name = device_name
+            existing_token.updated_at = datetime.datetime.utcnow()
+            db.session.commit()
 
-    return jsonify({
-        'message': 'Токен устройства успешно зарегистрирован',
-        'success': True
-    }), 200
+            print(f"Updated existing token for user {current_user.id}")
+            return jsonify({
+                'message': 'Токен устройства успешно обновлен',
+                'success': True,
+                'action': 'updated'
+            }), 200
+
+        # Шаг 2: Если заданно имя устройства, удаляем старые токены для этого устройства
+        if device_name:
+            try:
+                # Находим и удаляем токены для того же устройства
+                same_device_tokens = DeviceToken.query.filter_by(
+                    user_id=current_user.id,
+                    device_name=device_name
+                ).all()
+
+                for old_token in same_device_tokens:
+                    print(f"Removing old token for user {current_user.id}, device: {device_name}")
+                    db.session.delete(old_token)
+
+                if same_device_tokens:
+                    db.session.commit()
+                    print(f"Removed {len(same_device_tokens)} old tokens for device {device_name}")
+            except Exception as e:
+                print(f"Error removing old tokens: {str(e)}")
+                # Продолжаем выполнение даже при ошибке
+                db.session.rollback()
+
+        # Шаг 3: Создаем новую запись токена
+        try:
+            new_token = DeviceToken(
+                user_id=current_user.id,
+                token=token,
+                platform=platform,
+                device_name=device_name
+            )
+            db.session.add(new_token)
+            db.session.commit()
+
+            print(f"Successfully registered new token for user {current_user.id}")
+            return jsonify({
+                'message': 'Токен устройства успешно зарегистрирован',
+                'success': True,
+                'action': 'created'
+            }), 201
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error creating token record: {str(e)}")
+
+            # Даже при ошибке проверяем, был ли токен все же создан
+            check_token = DeviceToken.query.filter_by(
+                user_id=current_user.id,
+                token=token
+            ).first()
+
+            if check_token:
+                return jsonify({
+                    'message': 'Токен уже существует несмотря на ошибку создания',
+                    'success': True,
+                    'action': 'exists'
+                }), 200
+            else:
+                return jsonify({
+                    'message': f'Ошибка при регистрации токена: {str(e)}',
+                    'success': False,
+                    'error': str(e)
+                }), 500
+
+    except Exception as e:
+        print(f"Unexpected error in register_device: {str(e)}")
+        return jsonify({
+            'message': f'Произошла непредвиденная ошибка: {str(e)}',
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 # Маршрут для тестовой отправки уведомления

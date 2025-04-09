@@ -215,26 +215,59 @@ class ChatService {
         return true;
     }
 
-    // Регистрирует токен устройства на сервере
-    async registerDeviceToken(token) {
-        if (!token || !this.initialized || !this.currentUser) {
-            return false;
-        }
+    // Улучшенная версия метода registerDeviceToken в chatService.js
+// Добавляет проверку на существующие токены перед регистрацией
 
+async registerDeviceToken(token) {
+    if (!token || !this.initialized || !this.currentUser) {
+        return false;
+    }
+
+    // Проверяем, не такой ли же токен у нас уже сохранен
+    if (this.deviceToken === token) {
+        console.log('Token already registered in memory, skipping registration');
+
+        // Проверяем токен в AsyncStorage
         try {
-            const response = await apiClient.post('/device/register', {
-                token: token,
-                platform: Platform.OS,
-                device_name: Device.modelName || 'Unknown device'
-            });
-
-            console.log('Device token registered successfully:', response.data);
-            return true;
+            const storedToken = await AsyncStorage.getItem('devicePushToken');
+            if (storedToken === token) {
+                console.log('Token already stored in AsyncStorage');
+                return true; // Токен уже зарегистрирован
+            }
         } catch (error) {
-            console.warn('Error registering device token on server:', error);
-            return false;
+            console.warn('Error checking stored token:', error);
         }
     }
+
+    try {
+        console.log(`Registering device token: ${token.substring(0, 10)}...`);
+
+        // Добавляем флаг для сервера, чтобы он заменил существующие токены
+        const response = await apiClient.post('/device/register', {
+            token: token,
+            platform: Platform.OS,
+            device_name: Device.modelName || 'Unknown device',
+            replace_existing: true // Этот флаг будет использован на сервере
+        });
+
+        // Запоминаем успешный токен в памяти
+        this.deviceToken = token;
+
+        // Сохраняем в AsyncStorage
+        try {
+            await AsyncStorage.setItem('devicePushToken', token);
+            console.log('Device token saved to AsyncStorage');
+        } catch (storageError) {
+            console.warn('Error saving token to AsyncStorage:', storageError);
+        }
+
+        console.log('Device token registered successfully:', response.data);
+        return true;
+    } catch (error) {
+        console.warn('Error registering device token on server:', error);
+        return false;
+    }
+}
 
     // Удаляет токен устройства с сервера
     // Исправленный метод unregisterDeviceToken с расширенным логированием
@@ -244,40 +277,50 @@ class ChatService {
 // Исправленный метод unregisterDeviceToken для chatService.js
 // Замените существующий метод на этот:
 
-// Удаляет токен устройства с сервера
+// Improved unregisterDeviceToken method in chatService.js
+// Replace the existing method with this one
+
+// Udated method for unregistering device tokens
 async unregisterDeviceToken() {
-    if (!this.deviceToken) {
-        console.log('No device token to unregister');
-        return false;
-    }
-
     try {
-        console.log(`Attempting to unregister device token: ${this.deviceToken.substring(0, 10)}...`);
+        console.log('Attempting to unregister ALL device tokens for the current user...');
 
-        // Вызов API для удаления токена
+        // Even if we don't have a device token in memory, we should still
+        // attempt to clear tokens from the server to be safe
+        if (!this.deviceToken) {
+            console.log('No device token in memory, but still clearing server tokens');
+        } else {
+            console.log(`Local device token to unregister: ${this.deviceToken.substring(0, 10)}...`);
+        }
+
+        // Always make the API call to unregister tokens
+        // Send the current token if we have it, but the server will remove ALL tokens for this user
         const response = await apiClient.post('/device/unregister', {
-            token: this.deviceToken
+            token: this.deviceToken || 'force_all_tokens_removal'
         });
 
         console.log('Device token unregistration response:', response.data);
 
-        // Удаляем токен из AsyncStorage
+        // Clear tokens from local storage regardless of API response
         try {
             await AsyncStorage.removeItem('devicePushToken');
+            console.log('Device token removed from AsyncStorage');
         } catch (storageError) {
             console.warn('Error removing device token from AsyncStorage:', storageError);
         }
 
+        // Reset our local reference
         this.deviceToken = null;
 
         return true;
     } catch (error) {
         console.warn('Error unregistering device token from server:', error);
 
-        // Даже при ошибке, очищаем локальные данные
+        // Even on error, clear local data
         try {
             await AsyncStorage.removeItem('devicePushToken');
             this.deviceToken = null;
+            console.log('Local device token cleared despite server error');
         } catch (storageError) {
             console.warn('Error removing device token from AsyncStorage:', storageError);
         }

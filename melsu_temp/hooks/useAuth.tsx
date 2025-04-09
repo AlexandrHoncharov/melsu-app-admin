@@ -211,41 +211,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Авторизация с полной очисткой кэша
-  const login = async (username: string, password: string) => {
-    setIsLoading(true);
-    try {
-      // Перед входом в новый аккаунт сбрасываем сервис чатов
-      console.log('Resetting chat service before login');
+const login = async (username: string, password: string) => {
+  setIsLoading(true);
+  try {
+    console.log('Starting login process...');
 
-      // Полный сброс chatService
-      if (typeof chatService.reset === 'function') {
-        chatService.reset();
-      } else {
-        chatService.cleanup(); // Используем cleanup, если reset не доступен
-        chatService.initialized = false;
-        chatService.currentUser = null;
-      }
+    // Перед входом в новый аккаунт сбрасываем сервис чатов
+    console.log('Resetting chat service before login');
 
-      const { token, user } = await authApi.login({ username, password });
-
-      // Сохраняем токен
-      await SecureStore.setItemAsync('userToken', token);
-
-      // Сохраняем данные пользователя
-      await AsyncStorage.setItem('userData', JSON.stringify(user));
-      setUser(user);
-      setIsAuthenticated(true);
-
-      // Перенаправление в зависимости от роли и статуса верификации
-      router.replace('/(tabs)');
-    } catch (error) {
-      console.error('Ошибка при авторизации:', error);
-      throw error;
-    } finally {
-      setIsLoading(false);
+    // Полный сброс chatService
+    if (typeof chatService.reset === 'function') {
+      chatService.reset();
+    } else {
+      chatService.cleanup(); // Используем cleanup, если reset не доступен
+      chatService.initialized = false;
+      chatService.currentUser = null;
     }
-  };
+
+    const { token, user } = await authApi.login({ username, password });
+    console.log('Login successful, storing tokens...');
+
+    // Сохраняем токен
+    await SecureStore.setItemAsync('userToken', token);
+
+    // Сохраняем данные пользователя
+    await AsyncStorage.setItem('userData', JSON.stringify(user));
+    setUser(user);
+    setIsAuthenticated(true);
+
+    // Ожидаем малую паузу для инициализации состояния
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    console.log('Login complete, redirecting to main app');
+
+    // Перенаправление в зависимости от роли и статуса верификации
+    router.replace('/(tabs)');
+
+    // Явно возвращаем данные для возможности использования в компонентах
+    return { user, token };
+  } catch (error) {
+    console.error('Error during login:', error);
+    throw error;
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   // Регистрация
   const register = async (userData: RegisterData) => {
@@ -284,75 +294,86 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setIsLoading(false);
     }
   };
+// Updated logout function in useAuth.tsx
+// Replace the existing function with this improved version
 
-  // Выход из аккаунта с полной очисткой кэша
-  // Обновление функции logout в useAuth.tsx
-// Найдите метод logout и замените его на следующую версию
-
-// В файле useAuth.tsx:
-
-// Обновленный метод logout с отменой регистрации токена устройства
 const logout = async () => {
   setIsLoading(true);
   try {
-    // Вызываем API для выхода
-    await authApi.logout();
+    console.log('Starting logout process...');
 
-    // ВАЖНО: сначала отменяем регистрацию токена устройства через chatService
-    console.log('Unregistering device token before logout...');
-    try {
-      // Если chatService инициализирован, вызываем сброс состояния
-      // который также отменит регистрацию токена
-      await chatService.reset();
-    } catch (chatError) {
-      console.error('Error resetting chat service during logout:', chatError);
+    // CRITICAL: First unregister device tokens before any other logout actions
+    console.log('Unregistering device tokens before logout...');
+    if (chatService) {
+      try {
+        // First, force unregistration of ALL device tokens
+        const tokenUnregistered = await chatService.unregisterDeviceToken();
+        console.log(`Device token unregistration ${tokenUnregistered ? 'successful' : 'failed'}`);
+
+        // Then, reset the entire chat service state
+        await chatService.reset();
+        console.log('Chat service reset completed');
+      } catch (chatError) {
+        console.error('Error during chat service cleanup:', chatError);
+        // Continue with logout even if this fails
+      }
     }
 
-    // ВАЖНО: Полностью сбрасываем состояние сервиса чатов перед выходом
-    console.log('Resetting chat service and clearing all cached data');
-
-    // Удаляем данные сессии
-    await SecureStore.deleteItemAsync('userToken');
-    await AsyncStorage.removeItem('userData');
-
-    // Очищаем кэш AsyncStorage - РАДИКАЛЬНОЕ РЕШЕНИЕ
-    const keys = await AsyncStorage.getAllKeys();
-    await AsyncStorage.multiRemove(keys);
-    console.log('AsyncStorage cache completely cleared');
-
-    // Сбрасываем состояние
-    setUser(null);
-    setIsAuthenticated(false);
-
-    // Перенаправляем на экран входа
-    router.replace('/login');
-  } catch (error) {
-    console.error('Ошибка при выходе:', error);
-
-    // Даже при ошибке выполняем сброс кэша и чатов
+    // Only after token cleanup, call the API logout endpoint
     try {
-      await chatService.reset();
-    } catch (chatError) {
-      console.error('Error resetting chat service during error handling:', chatError);
+      await authApi.logout();
+      console.log('API logout successful');
+    } catch (apiError) {
+      console.warn('API logout error (continuing):', apiError);
+      // Continue with local logout regardless of API result
     }
 
-    await SecureStore.deleteItemAsync('userToken');
-
-    // Радикальная очистка AsyncStorage
+    // Now handle local session data cleanup
     try {
+      await SecureStore.deleteItemAsync('userToken');
+      await AsyncStorage.removeItem('userData');
+      console.log('Auth tokens removed');
+
+      // Full AsyncStorage cleanup
       const keys = await AsyncStorage.getAllKeys();
       await AsyncStorage.multiRemove(keys);
-      console.log('AsyncStorage cache cleared despite error');
+      console.log('All AsyncStorage data cleared');
     } catch (storageError) {
-      console.error('Error clearing AsyncStorage:', storageError);
+      console.error('Error clearing storage:', storageError);
+      // Continue with logout even if storage cleanup fails
     }
 
+    // Final state reset
     setUser(null);
     setIsAuthenticated(false);
 
+    console.log('Logout process complete, redirecting to login screen');
+    router.replace('/login');
+  } catch (error) {
+    console.error('Unexpected error during logout:', error);
+
+    // Emergency cleanup
+    try {
+      // One more attempt to reset chat service
+      if (chatService) await chatService.reset();
+
+      // Force token removal
+      await SecureStore.deleteItemAsync('userToken');
+
+      // Emergency AsyncStorage cleanup
+      const keys = await AsyncStorage.getAllKeys();
+      await AsyncStorage.multiRemove(keys);
+    } catch (finalError) {
+      console.error('Critical error during emergency cleanup:', finalError);
+    }
+
+    // Force state reset and navigation regardless of errors
+    setUser(null);
+    setIsAuthenticated(false);
     router.replace('/login');
   } finally {
     setIsLoading(false);
+    console.log('Logout process finished');
   }
 };
 

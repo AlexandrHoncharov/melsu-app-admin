@@ -3,9 +3,12 @@ import React, { useEffect } from 'react';
 import { Tabs, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
+import { useUnreadMessages } from '../../hooks/useUnreadMessages';
+import { StyleSheet, View, Text } from 'react-native';
 
 export default function TabLayout() {
   const { isAuthenticated, isLoading } = useAuth();
+  const { unreadCount } = useUnreadMessages();
 
   // Проверяем, авторизован ли пользователь
   useEffect(() => {
@@ -19,6 +22,22 @@ export default function TabLayout() {
   if (isLoading) {
     return null;
   }
+
+  // Custom badge component to use instead of the default tabBarBadge
+  const ChatTabIcon = ({ color, size, focused }) => (
+    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
+      <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} color={color} size={size} />
+      {unreadCount > 0 && (
+        <View style={styles.badgeContainer}>
+          {unreadCount > 99 ? (
+            <Text style={styles.badgeText}>99+</Text>
+          ) : (
+            <Text style={styles.badgeText}>{unreadCount}</Text>
+          )}
+        </View>
+      )}
+    </View>
+  );
 
   return (
     <Tabs
@@ -59,9 +78,7 @@ export default function TabLayout() {
         name="chats"
         options={{
           title: 'Чаты',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubbles-outline" color={color} size={size} />
-          ),
+          tabBarIcon: (props) => <ChatTabIcon {...props} />,
         }}
       />
 
@@ -77,3 +94,25 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  badgeContainer: {
+    position: 'absolute',
+    top: -2,
+    right: -6,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  },
+  badgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+});

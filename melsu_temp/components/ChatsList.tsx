@@ -1,4 +1,4 @@
-// File: melsu_temp/components/ChatsList.tsx
+// File: components/ChatsList.tsx
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import {
   View,
@@ -11,8 +11,9 @@ import {
   ScrollView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useAuth } from '../hooks/useAuth';
+import { useUnreadMessages } from '../hooks/useUnreadMessages';
 import chatService from '../src/services/chatService';
 
 // ChatsList as a forwardRef component
@@ -21,6 +22,8 @@ const ChatsList = forwardRef((props, ref) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { user } = useAuth();
+  const { refreshUnreadCount } = useUnreadMessages();
+  const [unreadStates, setUnreadStates] = useState({});
 
   // Expose handleRefresh to parent component
   useImperativeHandle(ref, () => ({
@@ -30,6 +33,33 @@ const ChatsList = forwardRef((props, ref) => {
       }
     }
   }));
+
+  // Refresh unread count when the screen gains focus
+  useFocusEffect(
+    React.useCallback(() => {
+      refreshUnreadCount();
+      updateUnreadStates();
+    }, [])
+  );
+
+  // Update unread states for all chats
+  const updateUnreadStates = async () => {
+    if (!chats || chats.length === 0) return;
+
+    const newUnreadStates = {};
+
+    for (const chat of chats) {
+      try {
+        const count = await chatService.getUnreadMessageCount(chat.id);
+        newUnreadStates[chat.id] = count > 0;
+      } catch (error) {
+        console.error(`Error checking unread status for chat ${chat.id}:`, error);
+        newUnreadStates[chat.id] = false;
+      }
+    }
+
+    setUnreadStates(newUnreadStates);
+  };
 
   // Load chat list with forced initialization
   const loadChats = async (withRefreshing = false) => {
@@ -58,6 +88,14 @@ const ChatsList = forwardRef((props, ref) => {
       setChats(userChats);
 
       console.log(`Loaded ${userChats.length} chats`);
+
+      // Refresh unread count after loading chats
+      refreshUnreadCount();
+
+      // Update unread states for each chat
+      if (userChats.length > 0) {
+        await updateUnreadStates();
+      }
     } catch (error) {
       console.error('Error loading chats:', error);
 
@@ -135,7 +173,7 @@ const ChatsList = forwardRef((props, ref) => {
     return name.substring(0, 2).toUpperCase();
   };
 
-  // Render chat item
+  // Render chat item - NO HOOKS INSIDE THIS FUNCTION
   const renderChatItem = ({ item }) => {
     // Determine display chat name
     let chatName = 'Чат';
@@ -150,6 +188,9 @@ const ChatsList = forwardRef((props, ref) => {
 
     // Get initials for avatar
     const initials = getInitials(chatName);
+
+    // Check for unread indicator from the unreadStates object
+    const hasUnread = unreadStates[item.id] || false;
 
     return (
       <TouchableOpacity
@@ -172,23 +213,61 @@ const ChatsList = forwardRef((props, ref) => {
           <Text style={styles.chatName} numberOfLines={1}>{chatName}</Text>
 
           {item.lastMessage && (
-            <Text style={styles.lastMessage} numberOfLines={1}>
+            <Text style={[
+              styles.lastMessage,
+              hasUnread ? styles.unreadMessage : {}
+            ]} numberOfLines={1}>
               {String(item.lastMessage.senderId) === String(user?.id) ? 'Вы: ' : ''}
               {item.lastMessage.text}
             </Text>
           )}
         </View>
 
-        {item.lastMessage && (
-          <View style={styles.metaInfo}>
-            <Text style={styles.timeText}>
+        <View style={styles.metaInfo}>
+          {hasUnread && (
+            <View style={styles.unreadIndicator} />
+          )}
+          {item.lastMessage && (
+            <Text style={[
+              styles.timeText,
+              hasUnread ? styles.unreadTimeText : {}
+            ]}>
               {formatTime(item.lastMessage.timestamp)}
             </Text>
-          </View>
-        )}
+          )}
+        </View>
       </TouchableOpacity>
     );
   };
+
+  // Setup chat messages listener to update unread states
+  useEffect(() => {
+    if (!chats || chats.length === 0) return;
+
+    // This sets up a listener that updates unread states whenever messages change
+    const setupMessageListeners = async () => {
+      for (const chat of chats) {
+        chatService.setupChatMessageListener(chat.id, () => {
+          // Just update this specific chat's unread state
+          chatService.getUnreadMessageCount(chat.id).then(count => {
+            setUnreadStates(prev => ({
+              ...prev,
+              [chat.id]: count > 0
+            }));
+          });
+        });
+      }
+    };
+
+    setupMessageListeners();
+
+    return () => {
+      // Clean up listeners when component unmounts
+      for (const chat of chats) {
+        chatService.removeChatMessageListener(chat.id);
+      }
+    };
+  }, [chats]);
 
   if (loading) {
     return (
@@ -305,12 +384,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
+  unreadMessage: {
+    fontWeight: '700',
+    color: '#333',
+  },
   metaInfo: {
     alignItems: 'flex-end',
   },
   timeText: {
     fontSize: 12,
     color: '#999',
+  },
+  unreadTimeText: {
+    color: '#770002',
+    fontWeight: 'bold',
+  },
+  unreadIndicator: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#770002',
+    marginBottom: 6,
   },
   emptyContainer: {
     flexGrow: 1, // Use flexGrow instead of flex

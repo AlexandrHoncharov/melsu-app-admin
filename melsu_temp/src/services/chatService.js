@@ -1,4 +1,4 @@
-// Полная версия chatService.js с поддержкой групповых чатов и улучшенными push-уведомлениями
+// File: src/services/chatService.js
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {auth, database} from '../config/firebase';
 import {
@@ -17,6 +17,7 @@ import {
 import {signInAnonymously, signInWithCustomToken} from 'firebase/auth';
 import apiClient from '../api/apiClient';
 import * as Device from 'expo-device';
+import { Platform } from 'react-native';
 
 class ChatService {
     constructor() {
@@ -26,6 +27,7 @@ class ChatService {
         this.forcedUserId = null; // Для принудительного задания ID пользователя
         this.initializationInProgress = false; // Флаг для предотвращения рекурсии
         this.deviceToken = null; // Токен устройства для push-уведомлений
+        this.unreadCountCallback = null; // Callback для обновления счетчика непрочитанных сообщений
     }
 
     // Принудительно установить ID текущего пользователя (для исправления ошибок идентификации)
@@ -216,118 +218,108 @@ class ChatService {
     }
 
     // Улучшенная версия метода registerDeviceToken в chatService.js
-// Добавляет проверку на существующие токены перед регистрацией
+    // Добавляет проверку на существующие токены перед регистрацией
 
-async registerDeviceToken(token) {
-    if (!token || !this.initialized || !this.currentUser) {
-        return false;
-    }
+    async registerDeviceToken(token) {
+        if (!token || !this.initialized || !this.currentUser) {
+            return false;
+        }
 
-    // Проверяем, не такой ли же токен у нас уже сохранен
-    if (this.deviceToken === token) {
-        console.log('Token already registered in memory, skipping registration');
+        // Проверяем, не такой ли же токен у нас уже сохранен
+        if (this.deviceToken === token) {
+            console.log('Token already registered in memory, skipping registration');
 
-        // Проверяем токен в AsyncStorage
-        try {
-            const storedToken = await AsyncStorage.getItem('devicePushToken');
-            if (storedToken === token) {
-                console.log('Token already stored in AsyncStorage');
-                return true; // Токен уже зарегистрирован
+            // Проверяем токен в AsyncStorage
+            try {
+                const storedToken = await AsyncStorage.getItem('devicePushToken');
+                if (storedToken === token) {
+                    console.log('Token already stored in AsyncStorage');
+                    return true; // Токен уже зарегистрирован
+                }
+            } catch (error) {
+                console.warn('Error checking stored token:', error);
             }
-        } catch (error) {
-            console.warn('Error checking stored token:', error);
         }
-    }
 
-    try {
-        console.log(`Registering device token: ${token.substring(0, 10)}...`);
-
-        // Добавляем флаг для сервера, чтобы он заменил существующие токены
-        const response = await apiClient.post('/device/register', {
-            token: token,
-            platform: Platform.OS,
-            device_name: Device.modelName || 'Unknown device',
-            replace_existing: true // Этот флаг будет использован на сервере
-        });
-
-        // Запоминаем успешный токен в памяти
-        this.deviceToken = token;
-
-        // Сохраняем в AsyncStorage
         try {
-            await AsyncStorage.setItem('devicePushToken', token);
-            console.log('Device token saved to AsyncStorage');
-        } catch (storageError) {
-            console.warn('Error saving token to AsyncStorage:', storageError);
-        }
+            console.log(`Registering device token: ${token.substring(0, 10)}...`);
 
-        console.log('Device token registered successfully:', response.data);
-        return true;
-    } catch (error) {
-        console.warn('Error registering device token on server:', error);
-        return false;
+            // Добавляем флаг для сервера, чтобы он заменил существующие токены
+            const response = await apiClient.post('/device/register', {
+                token: token,
+                platform: Platform.OS,
+                device_name: Device.modelName || 'Unknown device',
+                replace_existing: true // Этот флаг будет использован на сервере
+            });
+
+            // Запоминаем успешный токен в памяти
+            this.deviceToken = token;
+
+            // Сохраняем в AsyncStorage
+            try {
+                await AsyncStorage.setItem('devicePushToken', token);
+                console.log('Device token saved to AsyncStorage');
+            } catch (storageError) {
+                console.warn('Error saving token to AsyncStorage:', storageError);
+            }
+
+            console.log('Device token registered successfully:', response.data);
+            return true;
+        } catch (error) {
+            console.warn('Error registering device token on server:', error);
+            return false;
+        }
     }
-}
 
     // Удаляет токен устройства с сервера
-    // Исправленный метод unregisterDeviceToken с расширенным логированием
-// Замените этот метод в chatService.js
-
-// Удаляет токен устройства с сервера
-// Исправленный метод unregisterDeviceToken для chatService.js
-// Замените существующий метод на этот:
-
-// Improved unregisterDeviceToken method in chatService.js
-// Replace the existing method with this one
-
-// Udated method for unregistering device tokens
-async unregisterDeviceToken() {
-    try {
-        console.log('Attempting to unregister ALL device tokens for the current user...');
-
-        // Even if we don't have a device token in memory, we should still
-        // attempt to clear tokens from the server to be safe
-        if (!this.deviceToken) {
-            console.log('No device token in memory, but still clearing server tokens');
-        } else {
-            console.log(`Local device token to unregister: ${this.deviceToken.substring(0, 10)}...`);
-        }
-
-        // Always make the API call to unregister tokens
-        // Send the current token if we have it, but the server will remove ALL tokens for this user
-        const response = await apiClient.post('/device/unregister', {
-            token: this.deviceToken || 'force_all_tokens_removal'
-        });
-
-        console.log('Device token unregistration response:', response.data);
-
-        // Clear tokens from local storage regardless of API response
+    // Improved unregisterDeviceToken method
+    async unregisterDeviceToken() {
         try {
-            await AsyncStorage.removeItem('devicePushToken');
-            console.log('Device token removed from AsyncStorage');
-        } catch (storageError) {
-            console.warn('Error removing device token from AsyncStorage:', storageError);
-        }
+            console.log('Attempting to unregister ALL device tokens for the current user...');
 
-        // Reset our local reference
-        this.deviceToken = null;
+            // Even if we don't have a device token in memory, we should still
+            // attempt to clear tokens from the server to be safe
+            if (!this.deviceToken) {
+                console.log('No device token in memory, but still clearing server tokens');
+            } else {
+                console.log(`Local device token to unregister: ${this.deviceToken.substring(0, 10)}...`);
+            }
 
-        return true;
-    } catch (error) {
-        console.warn('Error unregistering device token from server:', error);
+            // Always make the API call to unregister tokens
+            // Send the current token if we have it, but the server will remove ALL tokens for this user
+            const response = await apiClient.post('/device/unregister', {
+                token: this.deviceToken || 'force_all_tokens_removal'
+            });
 
-        // Even on error, clear local data
-        try {
-            await AsyncStorage.removeItem('devicePushToken');
+            console.log('Device token unregistration response:', response.data);
+
+            // Clear tokens from local storage regardless of API response
+            try {
+                await AsyncStorage.removeItem('devicePushToken');
+                console.log('Device token removed from AsyncStorage');
+            } catch (storageError) {
+                console.warn('Error removing device token from AsyncStorage:', storageError);
+            }
+
+            // Reset our local reference
             this.deviceToken = null;
-            console.log('Local device token cleared despite server error');
-        } catch (storageError) {
-            console.warn('Error removing device token from AsyncStorage:', storageError);
-        }
 
-        return false;
+            return true;
+        } catch (error) {
+            console.warn('Error unregistering device token from server:', error);
+
+            // Even on error, clear local data
+            try {
+                await AsyncStorage.removeItem('devicePushToken');
+                this.deviceToken = null;
+                console.log('Local device token cleared despite server error');
+            } catch (storageError) {
+                console.warn('Error removing device token from AsyncStorage:', storageError);
+            }
+
+            return false;
+        }
     }
-}
 
     // Полный сброс состояния сервиса (вызывается при выходе из аккаунта)
     async reset() {
@@ -351,6 +343,7 @@ async unregisterDeviceToken() {
         this.forcedUserId = null;
         this.initializationInProgress = false;
         this.deviceToken = null;
+        this.unreadCountCallback = null;
 
         // Выход из Firebase Auth
         try {
@@ -791,15 +784,6 @@ async unregisterDeviceToken() {
                 return {success: false, skipped: true, reason: 'self_notification'};
             }
 
-            // Предотвращаем отправку уведомлений в эмуляторах/симуляторах в режиме разработки
-            // Это можно сделать, если есть способ определить режим разработки
-            /*
-            if (__DEV__ && simulatorRegex.test(Device.modelName)) {
-                console.log(`Skipping notification in dev/simulator for user ${recipientId}`);
-                return {success: false, skipped: true, reason: 'dev_simulator'};
-            }
-            */
-
             // Отправляем запрос на сервер
             const response = await apiClient.post('/chat/send-notification', {
                 recipient_id: recipientId,
@@ -833,94 +817,93 @@ async unregisterDeviceToken() {
     }
 
     // Получение списка чатов пользователя
-    // Исправленный метод getUserChats в chatService.js
-async getUserChats() {
-    try {
-        // Проверяем необходимость инициализации
-        if (!this.initialized || !this.currentUser) {
-            try {
-                const initResult = await this.initialize();
-                if (!initResult) {
-                    // Даже если инициализация не удалась, проверяем, есть ли у нас данные пользователя
+    async getUserChats() {
+        try {
+            // Проверяем необходимость инициализации
+            if (!this.initialized || !this.currentUser) {
+                try {
+                    const initResult = await this.initialize();
+                    if (!initResult) {
+                        // Даже если инициализация не удалась, проверяем, есть ли у нас данные пользователя
+                        if (!this.currentUser || !this.currentUser.id) {
+                            console.error('No current user available after initialization attempt');
+                            return [];
+                        }
+                        // Продолжаем работу, если у нас есть ID пользователя, даже если Firebase аутентификация не удалась
+                        console.log('Continuing with user chats despite initialization issues');
+                    }
+                } catch (initError) {
+                    console.error('Error during initialization:', initError);
+                    // Проверяем, есть ли у нас данные пользователя несмотря на ошибку
                     if (!this.currentUser || !this.currentUser.id) {
-                        console.error('No current user available after initialization attempt');
                         return [];
                     }
-                    // Продолжаем работу, если у нас есть ID пользователя, даже если Firebase аутентификация не удалась
-                    console.log('Continuing with user chats despite initialization issues');
+                    console.log('Continuing with user chats despite initialization error');
                 }
-            } catch (initError) {
-                console.error('Error during initialization:', initError);
-                // Проверяем, есть ли у нас данные пользователя несмотря на ошибку
-                if (!this.currentUser || !this.currentUser.id) {
-                    return [];
-                }
-                console.log('Continuing with user chats despite initialization error');
-            }
-        }
-
-        if (!this.currentUser || !this.currentUser.id) {
-            console.error('No current user available');
-            return [];
-        }
-
-        // ВСЕГДА используем строковый ID
-        const myUserId = this.getCurrentUserId();
-
-        try {
-            // Отписываемся от предыдущего слушателя, если он был
-            if (this.listeners.userChats) {
-                off(ref(database, this.listeners.userChats.path), this.listeners.userChats.event);
-                delete this.listeners.userChats;
             }
 
-            const path = `userChats/${myUserId}`;
-            console.log(`Getting chats for user ${myUserId}`);
+            if (!this.currentUser || !this.currentUser.id) {
+                console.error('No current user available');
+                return [];
+            }
 
-            return new Promise((resolve) => {
-                const userChatsRef = ref(database, path);
+            // ВСЕГДА используем строковый ID
+            const myUserId = this.getCurrentUserId();
 
-                const handler = onValue(userChatsRef, (snapshot) => {
-                    const chatsData = snapshot.val() || {};
+            try {
+                // Отписываемся от предыдущего слушателя, если он был
+                if (this.listeners.userChats) {
+                    off(ref(database, this.listeners.userChats.path), this.listeners.userChats.event);
+                    delete this.listeners.userChats;
+                }
 
-                    // Преобразуем в массив
-                    const chats = Object.entries(chatsData).map(([id, data]) => {
-                        // Гарантируем, что withUser всегда строка
-                        if (data.withUser) {
-                            data.withUser = String(data.withUser);
-                        }
+                const path = `userChats/${myUserId}`;
+                console.log(`Getting chats for user ${myUserId}`);
 
-                        return {
-                            id, ...data
-                        };
+                return new Promise((resolve) => {
+                    const userChatsRef = ref(database, path);
+
+                    const handler = onValue(userChatsRef, (snapshot) => {
+                        const chatsData = snapshot.val() || {};
+
+                        // Преобразуем в массив
+                        const chats = Object.entries(chatsData).map(([id, data]) => {
+                            // Гарантируем, что withUser всегда строка
+                            if (data.withUser) {
+                                data.withUser = String(data.withUser);
+                            }
+
+                            return {
+                                id, ...data
+                            };
+                        });
+
+                        // Сортируем по времени (сначала новые)
+                        chats.sort((a, b) => {
+                            const timeA = a.updatedAt || 0;
+                            const timeB = b.updatedAt || 0;
+                            return timeB - timeA;
+                        });
+
+                        console.log(`Loaded ${chats.length} chats for user ${myUserId}`);
+                        resolve(chats);
+                    }, (error) => {
+                        console.error('Error getting user chats:', error);
+                        resolve([]);
                     });
 
-                    // Сортируем по времени (сначала новые)
-                    chats.sort((a, b) => {
-                        const timeA = a.updatedAt || 0;
-                        const timeB = b.updatedAt || 0;
-                        return timeB - timeA;
-                    });
-
-                    console.log(`Loaded ${chats.length} chats for user ${myUserId}`);
-                    resolve(chats);
-                }, (error) => {
-                    console.error('Error getting user chats:', error);
-                    resolve([]);
+                    // Сохраняем слушателя для последующей отписки
+                    this.listeners.userChats = {path, event: 'value', handler};
                 });
-
-                // Сохраняем слушателя для последующей отписки
-                this.listeners.userChats = {path, event: 'value', handler};
-            });
-        } catch (error) {
-            console.error('Error in getUserChats:', error);
+            } catch (error) {
+                console.error('Error in getUserChats:', error);
+                return [];
+            }
+        } catch (outerError) {
+            console.error('Unexpected error in getUserChats:', outerError);
             return [];
         }
-    } catch (outerError) {
-        console.error('Unexpected error in getUserChats:', outerError);
-        return [];
     }
-}
 
     // Получение сообщений чата
     async getChatMessages(chatId, limit = 50) {
@@ -1084,9 +1067,237 @@ async getUserChats() {
             if (updateCount > 0) {
                 await update(ref(database), updates);
                 console.log(`Marked ${updateCount} messages as read in chat ${chatId}`);
+
+                // Notify about unread count change if callback exists
+                if (this.unreadCountCallback) {
+                    this.getUnreadMessageCount(chatId).then(count => {
+                        this.refreshUnreadMessagesCount();
+                    });
+                }
             }
         } catch (error) {
             console.warn('Error marking messages as read:', error);
+        }
+    }
+
+    /**
+     * Get unread message count for a specific chat
+     * @param {string} chatId - The chat ID
+     * @returns {Promise<number>} - Number of unread messages
+     */
+    async getUnreadMessageCount(chatId) {
+        if (!this.initialized || !this.currentUser) {
+            await this.initialize();
+        }
+
+        if (!chatId || !this.currentUser || !this.currentUser.id) {
+            return 0;
+        }
+
+        const myUserId = this.getCurrentUserId();
+
+        try {
+            const messagesRef = ref(database, `messages/${chatId}`);
+            const snapshot = await get(messagesRef);
+
+            if (!snapshot.exists()) return 0;
+
+            let unreadCount = 0;
+
+            // Count messages that are not from current user and not marked as read
+            snapshot.forEach((childSnapshot) => {
+                const message = childSnapshot.val() || {};
+
+                // Convert sender ID to string for comparison
+                const messageSenderId = String(message.senderId || '');
+
+                // Only count if: not from current user AND not read by current user
+                if (messageSenderId !== myUserId && (!message.read || !message.read[myUserId])) {
+                    unreadCount++;
+                }
+            });
+
+            return unreadCount;
+        } catch (error) {
+            console.error(`Error getting unread count for chat ${chatId}:`, error);
+            return 0;
+        }
+    }
+
+    /**
+     * Get total unread count across all chats
+     * @returns {Promise<number>} - Total unread count
+     */
+    async getTotalUnreadCount() {
+        if (!this.initialized || !this.currentUser) {
+            await this.initialize();
+        }
+
+        if (!this.currentUser || !this.currentUser.id) {
+            return 0;
+        }
+
+        try {
+            // Get all user chats
+            const chats = await this.getUserChats();
+
+            // Calculate total unread messages
+            let totalUnread = 0;
+
+            // Process each chat
+            for (const chat of chats) {
+                try {
+                    const unreadForChat = await this.getUnreadMessageCount(chat.id);
+                    totalUnread += unreadForChat;
+                } catch (error) {
+                    console.error(`Error getting unread count for chat ${chat.id}:`, error);
+                }
+            }
+
+            return totalUnread;
+        } catch (error) {
+            console.error('Error getting total unread count:', error);
+            return 0;
+        }
+    }
+
+    /**
+     * Setup listener for unread messages across all chats
+     * @param {Function} callback - Function to call with updated unread count
+     */
+    async setupUnreadMessagesListener(callback) {
+        if (!callback) return;
+
+        // Save callback for future use
+        this.unreadCountCallback = callback;
+
+        if (!this.initialized || !this.currentUser) {
+            await this.initialize();
+        }
+
+        if (!this.currentUser || !this.currentUser.id) return;
+
+        const myUserId = this.getCurrentUserId();
+
+        // Remove any existing listener
+        this.removeUnreadMessagesListener();
+
+        try {
+            // Listen for changes to user's chats
+            const userChatsRef = ref(database, `userChats/${myUserId}`);
+
+            const handler = onValue(userChatsRef, async (snapshot) => {
+                if (!snapshot.exists()) {
+                    callback(0);
+                    return;
+                }
+
+                // Call the refresh function to calculate and update count
+                this.refreshUnreadMessagesCount();
+            });
+
+            // Save listener for later cleanup
+            this.listeners.unreadMessages = {
+                path: `userChats/${myUserId}`,
+                event: 'value',
+                handler
+            };
+
+            console.log('Setup unread messages listener');
+
+            // Initial count update
+            this.refreshUnreadMessagesCount();
+        } catch (error) {
+            console.error('Error setting up unread messages listener:', error);
+        }
+    }
+
+    /**
+     * Refresh unread messages count and call callback
+     */
+    async refreshUnreadMessagesCount() {
+        if (!this.unreadCountCallback || !this.currentUser) return;
+
+        try {
+            const totalUnread = await this.getTotalUnreadCount();
+            this.unreadCountCallback(totalUnread);
+        } catch (error) {
+            console.error('Error refreshing unread count:', error);
+        }
+    }
+
+    /**
+     * Remove listener for unread messages
+     */
+    removeUnreadMessagesListener() {
+        if (this.listeners.unreadMessages) {
+            try {
+                // Get reference to the listener's path
+                const listenerRef = ref(database, this.listeners.unreadMessages.path);
+
+                // Unsubscribe from the event
+                off(listenerRef, this.listeners.unreadMessages.event, this.listeners.unreadMessages.handler);
+
+                // Remove the listener from our list
+                delete this.listeners.unreadMessages;
+
+                // Clear callback
+                this.unreadCountCallback = null;
+
+                console.log('Removed unread messages listener');
+            } catch (error) {
+                console.error('Error removing unread messages listener:', error);
+            }
+        }
+    }
+
+    /**
+     * Set up a listener for a specific chat's messages
+     * @param {string} chatId - The chat ID to listen for
+     * @param {Function} callback - Callback function to execute when messages change
+     */
+    async setupChatMessageListener(chatId, callback) {
+        if (!chatId || !callback) return;
+
+        // Remove any existing listener first
+        this.removeChatMessageListener(chatId);
+
+        try {
+            const messagesRef = ref(database, `messages/${chatId}`);
+            const handler = onValue(messagesRef, (snapshot) => {
+                // Just trigger the callback - the component will handle fetching the count
+                callback();
+            });
+
+            // Save the listener for cleanup
+            this.listeners[`chat_messages_${chatId}`] = {
+                path: `messages/${chatId}`,
+                event: 'value',
+                handler
+            };
+
+            console.log(`Set up message listener for chat ${chatId}`);
+        } catch (error) {
+            console.error(`Error setting up message listener for chat ${chatId}:`, error);
+        }
+    }
+
+    /**
+     * Remove message listener for a specific chat
+     * @param {string} chatId - The chat ID
+     */
+    removeChatMessageListener(chatId) {
+        const listenerKey = `chat_messages_${chatId}`;
+
+        if (this.listeners[listenerKey]) {
+            try {
+                const listenerRef = ref(database, this.listeners[listenerKey].path);
+                off(listenerRef, this.listeners[listenerKey].event, this.listeners[listenerKey].handler);
+                delete this.listeners[listenerKey];
+                console.log(`Removed message listener for chat ${chatId}`);
+            } catch (error) {
+                console.error(`Error removing message listener for chat ${chatId}:`, error);
+            }
         }
     }
 }

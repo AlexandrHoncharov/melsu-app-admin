@@ -16,13 +16,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 import { format, startOfWeek, endOfWeek, isToday, isSameDay, addDays } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { router, useFocusEffect } from 'expo-router';
 import LessonDetailsModal from '../../components/LessonDetailsModal';
-import apiClient from '../../src/api/apiClient';
+import scheduleService, { ScheduleItem } from '../../src/services/scheduleService';
+import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
 
 // Get screen dimensions
 const { width } = Dimensions.get('window');
@@ -52,21 +51,19 @@ const COLORS = {
   examColor: '#FF3B30'       // Exam/Test
 };
 
-// Cache storage keys
-const STORAGE_KEYS = {
-  SCHEDULE_DATA: 'schedule_data',
-  SCHEDULE_LAST_UPDATE: 'schedule_last_update',
-  WEEK_SCHEDULE: 'week_schedule',
-};
+// Interface for processed schedule data
+interface TimeSlot {
+  id: string;
+  timeStart: string;
+  timeEnd: string;
+  lessons: ScheduleItem[];
+}
 
-// Max cache time in minutes
-const CACHE_EXPIRATION_TIME = 60; // 1 hour
-
-// Function to check if a class is active right now (moved outside component)
-const isLessonActive = (timeStart, timeEnd, lessonDate) => {
+// Function to check if a class is active right now
+const isLessonActive = (timeStart: string, timeEnd: string, lessonDate: string): boolean => {
   const now = new Date();
 
-  // If class date is not today, it can't be active
+  // If lesson date is not today, it can't be active
   if (!isSameDay(new Date(lessonDate), now)) {
     return false;
   }
@@ -81,12 +78,12 @@ export default function ScheduleScreen() {
   // Component state
   const { user, isAuthenticated, checkVerificationStatus } = useAuth();
   const [currentDate, setCurrentDate] = useState(new Date());
-  const [schedule, setSchedule] = useState([]);
-  const [weekSchedule, setWeekSchedule] = useState({});
+  const [schedule, setSchedule] = useState<TimeSlot[]>([]);
+  const [weekSchedule, setWeekSchedule] = useState<Record<string, ScheduleItem[]>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isOffline, setIsOffline] = useState(false);
-  const [selectedLesson, setSelectedLesson] = useState(null);
+  const [selectedLesson, setSelectedLesson] = useState<ScheduleItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
 
   // Animated values for swipes and transitions
@@ -97,10 +94,10 @@ export default function ScheduleScreen() {
   const [isSwipingAllowed, setIsSwipingAllowed] = useState(true);
 
   // Reference for days navigation panel
-  const daysScrollRef = useRef(null);
+  const daysScrollRef = useRef<ScrollView | null>(null);
 
   // State for storing week days
-  const [weekDays, setWeekDays] = useState([]);
+  const [weekDays, setWeekDays] = useState<Array<{ date: Date; isToday: boolean; isSelected: boolean }>>([]);
 
   // Refresh verification status on focus
   useFocusEffect(
@@ -136,7 +133,7 @@ export default function ScheduleScreen() {
     if (Platform.OS === 'android') {
       StatusBar.setBackgroundColor('#FFFFFF');
     }
-    checkNetworkAndLoadData();
+    loadScheduleData();
   }, []);
 
   // Load data when date changes
@@ -164,10 +161,12 @@ export default function ScheduleScreen() {
 
         // Use setTimeout to ensure scroll happens after rendering
         setTimeout(() => {
-          daysScrollRef.current.scrollTo({
-            x: Math.max(0, scrollPosition),
-            animated: true
-          });
+          if (daysScrollRef.current) {
+            daysScrollRef.current.scrollTo({
+              x: Math.max(0, scrollPosition),
+              animated: true
+            });
+          }
         }, 100);
       } catch (error) {
         console.debug('Error scrolling to weekday:', error);
@@ -176,7 +175,7 @@ export default function ScheduleScreen() {
   }, [currentDate]);
 
   // Animation when changing day
-  const animateViewChange = (direction) => {
+  const animateViewChange = (direction: 'next' | 'prev') => {
     // Reset animation values before starting
     slideAnim.setValue(direction === 'next' ? 50 : -50);
     fadeAnim.setValue(0.3);
@@ -196,32 +195,32 @@ export default function ScheduleScreen() {
     ]).start();
   };
 
-  // Check network and load data
-  const checkNetworkAndLoadData = async () => {
+  // Load schedule data - main loading function
+  const loadScheduleData = async () => {
+    setIsLoading(true);
     try {
-      const networkAvailable = await isNetworkAvailable();
-      console.debug('Network available:', networkAvailable);
-      setIsOffline(!networkAvailable);
+      // Check network status
+      const isNetworkAvailable = await scheduleService.isNetworkAvailable();
+      setIsOffline(!isNetworkAvailable);
 
-      if (networkAvailable) {
-        // If network is available, load fresh data
+      if (isNetworkAvailable) {
+        // If network available, load fresh data
         await loadWeekSchedule();
       } else {
-        // If no network, try to load from local storage
+        // If offline, try to load from cache
         try {
-          const cachedWeekSchedule = await getWeekScheduleFromStorage();
+          const cachedWeekSchedule = await scheduleService.getWeekSchedule(currentDate, false);
           if (cachedWeekSchedule) {
             setWeekSchedule(cachedWeekSchedule);
             const currentFormattedDate = format(currentDate, 'yyyy-MM-dd');
             processSchedule(cachedWeekSchedule[currentFormattedDate] || []);
-            setIsLoading(false);
+
             Alert.alert(
               'Offline Mode',
               'You are working with saved data. Connect to the internet for the most up-to-date schedule.',
               [{ text: 'OK' }]
             );
           } else {
-            setIsLoading(false);
             Alert.alert(
               'No Data',
               'Failed to load schedule. Please connect to the internet.',
@@ -230,148 +229,60 @@ export default function ScheduleScreen() {
           }
         } catch (error) {
           console.error('Error loading data from cache:', error);
-          setIsLoading(false);
         }
       }
     } catch (error) {
-      console.error('Error checking network:', error);
+      console.error('Error loading schedule data:', error);
+    } finally {
       setIsLoading(false);
-    }
-  };
-
-  // Check network availability
-  const isNetworkAvailable = async () => {
-    try {
-      const token = await AsyncStorage.getItem('userToken');
-      if (!token) return false;
-
-      // Use timeout for faster check
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      try {
-        // Use GET instead of HEAD as HEAD may not be supported
-        const response = await fetch(`${apiClient.defaults.baseURL}/api/groups/`, {
-          method: 'GET',
-          headers: { 'Authorization': `Bearer ${token}` },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-        return response.ok;
-      } catch (error) {
-        clearTimeout(timeoutId);
-        console.debug('Network test error:', error.message);
-        return false;
-      }
-    } catch (error) {
-      console.debug('Network check error:', error);
-      return false;
     }
   };
 
   // Load weekly schedule
   const loadWeekSchedule = async () => {
     setIsLoading(true);
-
     try {
-      // Get start and end of week
-      const startDate = format(startOfWeek(currentDate, { locale: ru }), 'yyyy-MM-dd');
-      const endDate = format(endOfWeek(currentDate, { locale: ru }), 'yyyy-MM-dd');
+      const weekScheduleData = await scheduleService.getWeekSchedule(currentDate, true);
+      setWeekSchedule(weekScheduleData);
 
-      // Check cache validity
-      try {
-        const lastUpdateJson = await AsyncStorage.getItem(STORAGE_KEYS.SCHEDULE_LAST_UPDATE);
-        if (lastUpdateJson) {
-          const lastUpdate = new Date(lastUpdateJson);
-          const now = new Date();
-          const minutesDiff = (now - lastUpdate) / (1000 * 60);
-          const isCacheValid = minutesDiff < CACHE_EXPIRATION_TIME;
+      // Load today's schedule
+      const formattedDate = format(currentDate, 'yyyy-MM-dd');
+      processSchedule(weekScheduleData[formattedDate] || []);
 
-          if (isCacheValid) {
-            // If cache is valid, use it
-            const cachedWeekSchedule = await getWeekScheduleFromStorage();
-            if (cachedWeekSchedule) {
-              console.debug('Using cached week schedule');
-              setWeekSchedule(cachedWeekSchedule);
-              const formattedDate = format(currentDate, 'yyyy-MM-dd');
-              processSchedule(cachedWeekSchedule[formattedDate] || []);
-              setIsLoading(false);
-              setRefreshing(false);
-              return;
-            }
-          }
-        }
-      } catch (cacheError) {
-        console.error('Error checking cache:', cacheError);
+      // Update offline status
+      setIsOffline(false);
+    } catch (error: any) {
+      console.error('Error loading week schedule:', error);
+
+      // Handle authentication errors
+      if (error.message && (
+        error.message.includes('Authentication required') ||
+        error.message.includes('session has expired')
+      )) {
+        Alert.alert(
+          'Authentication Error',
+          'Your session has expired. Please log in again.',
+          [{
+            text: 'OK',
+            onPress: () => router.replace('/login')
+          }]
+        );
+        return;
       }
 
-      // If cache is not valid or doesn't exist, load data from server
-      // First try to use the weekly schedule API
-      const token = await AsyncStorage.getItem('userToken');
-      if (!token) {
-        throw new Error('No authorization token');
-      }
-
+      // Try to load from cache in case of other errors
       try {
-        console.debug('Loading schedule from API for week:', startDate, 'to', endDate);
-
-        // Create array of dates to load
-        const dates = [];
-        let day = new Date(startOfWeek(currentDate, { locale: ru }));
-        const weekEndDay = new Date(endOfWeek(currentDate, { locale: ru }));
-
-        while (day <= weekEndDay) {
-          dates.push(format(day, 'yyyy-MM-dd'));
-          day = addDays(day, 1);
-        }
-
-        // Try to load schedule by days
-        const newWeekSchedule = {};
-        let hasData = false;
-
-        for (const date of dates) {
-          try {
-            const response = await apiClient.get('/api/schedule', {
-              params: { date },
-              headers: { 'Authorization': `Bearer ${token}` }
-            });
-
-            newWeekSchedule[date] = response.data;
-            hasData = true;
-            console.debug(`Loaded schedule for ${date}, items:`, response.data.length);
-          } catch (err) {
-            console.debug(`Failed to load schedule for ${date}:`, err.message);
-            newWeekSchedule[date] = [];
-          }
-        }
-
-        if (!hasData) {
-          console.debug('No data loaded for the week');
-          throw new Error('No data for the selected period');
-        }
-
-        // Save data to local storage
-        await saveWeekScheduleToStorage(newWeekSchedule);
-
-        // Set data in state
-        setWeekSchedule(newWeekSchedule);
-        const formattedDate = format(currentDate, 'yyyy-MM-dd');
-        processSchedule(newWeekSchedule[formattedDate] || []);
-      } catch (error) {
-        console.error('Failed to load week schedule:', error);
-
-        // In case of error, check cache again
-        const cachedWeekSchedule = await getWeekScheduleFromStorage();
+        const cachedWeekSchedule = await scheduleService.getWeekSchedule(currentDate, false);
         if (cachedWeekSchedule) {
           setWeekSchedule(cachedWeekSchedule);
           const formattedDate = format(currentDate, 'yyyy-MM-dd');
           processSchedule(cachedWeekSchedule[formattedDate] || []);
           setIsOffline(true);
         }
+      } catch (cacheError) {
+        console.error('Error loading from cache:', cacheError);
+        setSchedule([]);
       }
-    } catch (error) {
-      console.error('Error in loadWeekSchedule:', error);
-      setSchedule([]);
     } finally {
       setIsLoading(false);
       setRefreshing(false);
@@ -379,22 +290,15 @@ export default function ScheduleScreen() {
   };
 
   // Load schedule for specific date
-  const loadScheduleForDate = async (date) => {
+  const loadScheduleForDate = async (date: string) => {
     try {
       console.debug('Loading schedule for date:', date);
 
-      // Load from server without connection check
+      // Attempt to load schedule for this date
       try {
-        const response = await apiClient.get('/api/schedule', {
-          params: { date }
-        });
+        const scheduleData = await scheduleService.getScheduleForDate(date);
 
-        const scheduleData = response.data;
-
-        // Save to cache
-        await saveScheduleDataToStorage(date, scheduleData);
-
-        // Update weekly schedule
+        // Update weekly schedule state with this date's data
         setWeekSchedule(prev => ({
           ...prev,
           [date]: scheduleData
@@ -402,13 +306,28 @@ export default function ScheduleScreen() {
 
         processSchedule(scheduleData);
         setIsOffline(false);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error loading schedule from API:', error);
 
-        // Try to load from cache in case of error
-        try {
-          const cachedData = await getScheduleForDateFromStorage(date);
+        // Handle authentication errors
+        if (error.message && (
+          error.message.includes('Authentication required') ||
+          error.message.includes('session has expired')
+        )) {
+          Alert.alert(
+            'Authentication Error',
+            'Your session has expired. Please log in again.',
+            [{
+              text: 'OK',
+              onPress: () => router.replace('/login')
+            }]
+          );
+          return;
+        }
 
+        // Try to load from cache for other errors
+        try {
+          const cachedData = await scheduleService.getScheduleForDate(date, false);
           if (cachedData) {
             processSchedule(cachedData);
             setIsOffline(true);
@@ -429,7 +348,7 @@ export default function ScheduleScreen() {
   };
 
   // Process schedule data with user filtering
-  const processSchedule = (data) => {
+  const processSchedule = (data: ScheduleItem[]) => {
     if (!data || !Array.isArray(data) || data.length === 0) {
       setSchedule([]);
       return;
@@ -439,80 +358,127 @@ export default function ScheduleScreen() {
       // Log original number of classes before filtering
       console.debug(`Total classes before filtering: ${data.length}`);
 
+      // Log a sample item to debug property names
+      if (data.length > 0) {
+        console.debug('Sample schedule item properties:', Object.keys(data[0]));
+        console.debug('First item:', JSON.stringify(data[0]));
+      }
+
       // Filter schedule based on user role
       let filteredData = [...data];
 
       if (user) {
         if (user.role === 'student' && user.group) {
-          // For students - only their group's classes
-          filteredData = filteredData.filter(item =>
-            item.group_name === user.group
-          );
+          // For students - filter by their group
+          // Try multiple potential property names for group
+          const userGroup = user.group.trim();
+
+          filteredData = filteredData.filter(item => {
+            // Check different possible property names for group
+            const itemGroup =
+              item.groupName ||
+              item.group_name ||
+              item.group ||
+              '';
+
+            // Do a case-insensitive comparison
+            return itemGroup.toLowerCase() === userGroup.toLowerCase();
+          });
+
           console.debug(`Filtered for student group ${user.group}: ${filteredData.length} classes`);
+
+          // If no matches found, log more details
+          if (filteredData.length === 0 && data.length > 0) {
+            console.debug('No matches found. Available groups in schedule:');
+            const uniqueGroups = [...new Set(data.map(item =>
+              item.groupName || item.group_name || item.group || 'unknown'
+            ))];
+            console.debug(uniqueGroups);
+          }
         } else if (user.role === 'teacher') {
           // For teachers - find matching by name
           const teacherFullName = user.fullName;
 
-          // Split teacher name into parts for more flexible search
-          const teacherParts = teacherFullName.toLowerCase().split(' ');
-          const lastName = teacherParts[0];
+          // Skip if no teacher name
+          if (!teacherFullName) {
+            console.debug('No teacher name available, showing all classes');
+            filteredData = data;
+          } else {
+            // Split teacher name into parts for more flexible search
+            const teacherParts = teacherFullName.toLowerCase().split(' ');
+            const lastName = teacherParts[0];
 
-          console.debug(`Searching for teacher: "${teacherFullName}", last name: "${lastName}"`);
+            console.debug(`Searching for teacher: "${teacherFullName}", last name: "${lastName}"`);
 
-          // More flexible filtering by teacher name
-          filteredData = filteredData.filter(item => {
-            // Check exact match
-            if (item.teacher_name === teacherFullName) {
-              return true;
+            // More flexible filtering by teacher name
+            filteredData = filteredData.filter(item => {
+              // Get teacher name from different possible properties
+              const itemTeacher =
+                item.teacherName ||
+                item.teacher_name ||
+                item.teacher ||
+                '';
+
+              if (!itemTeacher) return false;
+
+              // Check exact match
+              if (itemTeacher.toLowerCase() === teacherFullName.toLowerCase()) {
+                return true;
+              }
+
+              // Check partial match - if teacher name contains the last name
+              return itemTeacher.toLowerCase().includes(lastName);
+            });
+
+            console.debug(`Filtered for teacher ${teacherFullName}: ${filteredData.length} classes`);
+
+            // If no classes after filtering, log all teacher names for debugging
+            if (filteredData.length === 0) {
+              const uniqueTeachers = [...new Set(data.map(item =>
+                item.teacherName || item.teacher_name || item.teacher || 'unknown'
+              ))];
+              console.debug('Available teachers in schedule:', uniqueTeachers);
             }
 
-            // Check partial match - if teacher name contains the last name
-            const lowerTeacherName = item.teacher_name.toLowerCase();
-            return lowerTeacherName.includes(lastName);
-          });
+            // Combine classes for same subject at same time for teachers
+            const combinedLessons: ScheduleItem[] = [];
+            const lessonKeys = new Map<string, ScheduleItem>();
 
-          console.debug(`Filtered for teacher ${teacherFullName}: ${filteredData.length} classes`);
+            filteredData.forEach(lesson => {
+              // Key for combining: subject + lesson type + time + classroom
+              const key = `${lesson.subject}|${lesson.lessonType || lesson.lesson_type}|${lesson.timeStart || lesson.time_start}|${lesson.timeEnd || lesson.time_end}|${lesson.auditory}`;
 
-          // If no classes after filtering, log all teacher names for debugging
-          if (filteredData.length === 0) {
-            const uniqueTeachers = [...new Set(data.map(item => item.teacher_name))];
-            console.debug('Available teachers in schedule:', uniqueTeachers);
+              if (lessonKeys.has(key)) {
+                // Add group to existing lesson
+                const existingLesson = lessonKeys.get(key)!;
+                if (!existingLesson.groups) {
+                  existingLesson.groups = [existingLesson.groupName || existingLesson.group_name || existingLesson.group || ''];
+                }
+
+                // Get group name from different possible properties
+                const groupName = lesson.groupName || lesson.group_name || lesson.group || '';
+
+                // Check that this group is not already added (avoid duplicates)
+                if (groupName && existingLesson.groups && !existingLesson.groups.includes(groupName)) {
+                  existingLesson.groups.push(groupName);
+                  // Update group_name for display
+                  existingLesson.groupName = existingLesson.groups.join(', ');
+                }
+              } else {
+                // Create new entry with deep copy
+                const newLesson = { ...lesson };
+                // Initialize groups array for all lessons
+                const groupName = newLesson.groupName || newLesson.group_name || newLesson.group || '';
+                newLesson.groups = [groupName];
+                lessonKeys.set(key, newLesson);
+                combinedLessons.push(newLesson);
+              }
+            });
+
+            // Replace filtered data with combined
+            filteredData = combinedLessons;
+            console.debug(`After combining classes: ${filteredData.length} unique classes`);
           }
-
-          // Combine classes for same subject at same time for teachers
-          const combinedLessons = [];
-          const lessonKeys = new Map();
-
-          filteredData.forEach(lesson => {
-            // Key for combining: subject + lesson type + time + classroom
-            const key = `${lesson.subject}|${lesson.lesson_type}|${lesson.time_start}|${lesson.time_end}|${lesson.auditory}`;
-
-            if (lessonKeys.has(key)) {
-              // Add group to existing lesson
-              const existingLesson = lessonKeys.get(key);
-              if (!existingLesson.groups) {
-                existingLesson.groups = [existingLesson.group_name];
-              }
-
-              // Check that this group is not already added (avoid duplicates)
-              if (!existingLesson.groups.includes(lesson.group_name)) {
-                existingLesson.groups.push(lesson.group_name);
-                // Update group_name for display
-                existingLesson.group_name = existingLesson.groups.join(', ');
-              }
-            } else {
-              // Create new entry with deep copy
-              const newLesson = { ...lesson };
-              // Initialize groups array for all lessons
-              newLesson.groups = [newLesson.group_name];
-              lessonKeys.set(key, newLesson);
-              combinedLessons.push(newLesson);
-            }
-          });
-
-          // Replace filtered data with combined
-          filteredData = combinedLessons;
-          console.debug(`After combining classes: ${filteredData.length} unique classes`);
         }
       }
 
@@ -521,29 +487,43 @@ export default function ScheduleScreen() {
       const today = format(now, 'yyyy-MM-dd');
 
       filteredData = filteredData.map(lesson => {
+        // Use multiple potential property names for time
+        const timeStart = lesson.timeStart || lesson.time_start || '';
+        const timeEnd = lesson.timeEnd || lesson.time_end || '';
+
         const isCurrentLesson = isLessonActive(
-          lesson.time_start,
-          lesson.time_end,
+          timeStart,
+          timeEnd,
           today
         );
 
         return {
           ...lesson,
+          // Normalize property names to ensure consistent use later
+          timeStart: timeStart,
+          timeEnd: timeEnd,
+          lessonType: lesson.lessonType || lesson.lesson_type || '',
+          teacherName: lesson.teacherName || lesson.teacher_name || lesson.teacher || '',
+          groupName: lesson.groupName || lesson.group_name || lesson.group || '',
+          subject: lesson.subject || '',
+          auditory: lesson.auditory || '',
           isCurrentLesson
         };
       });
 
       // Group classes by time
-      const timeSlots = {};
+      const timeSlots: Record<string, TimeSlot> = {};
 
       filteredData.forEach((lesson) => {
-        const timeKey = `${lesson.time_start}-${lesson.time_end}`;
+        const timeStart = lesson.timeStart || lesson.time_start || '';
+        const timeEnd = lesson.timeEnd || lesson.time_end || '';
+        const timeKey = `${timeStart}-${timeEnd}`;
 
         if (!timeSlots[timeKey]) {
           timeSlots[timeKey] = {
             id: timeKey,
-            timeStart: lesson.time_start,
-            timeEnd: lesson.time_end,
+            timeStart,
+            timeEnd,
             lessons: []
           };
         }
@@ -567,88 +547,17 @@ export default function ScheduleScreen() {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      // Load fresh data without connection check
+      // Load fresh data
       await loadWeekSchedule();
     } catch (error) {
       console.error('Error during refresh:', error);
+    } finally {
       setRefreshing(false);
     }
   };
 
-  // ======== Cache functions ========
-
-  // Save schedule for specified date
-  const saveScheduleDataToStorage = async (date, scheduleData) => {
-    try {
-      // Get existing data or initialize new object
-      const existingDataJson = await AsyncStorage.getItem(STORAGE_KEYS.SCHEDULE_DATA);
-      const scheduleStorage = existingDataJson ? JSON.parse(existingDataJson) : {};
-
-      // Update data for specified date
-      scheduleStorage[date] = scheduleData;
-
-      // Save updated data
-      await AsyncStorage.setItem(STORAGE_KEYS.SCHEDULE_DATA, JSON.stringify(scheduleStorage));
-
-      // Update last update time
-      await AsyncStorage.setItem(STORAGE_KEYS.SCHEDULE_LAST_UPDATE, new Date().toISOString());
-    } catch (error) {
-      console.error('Error saving schedule data:', error);
-      throw error;
-    }
-  };
-
-  // Save weekly schedule
-  const saveWeekScheduleToStorage = async (weekData) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEYS.WEEK_SCHEDULE, JSON.stringify(weekData));
-      await AsyncStorage.setItem(STORAGE_KEYS.SCHEDULE_LAST_UPDATE, new Date().toISOString());
-    } catch (error) {
-      console.error('Error saving week schedule:', error);
-      throw error;
-    }
-  };
-
-  // Get schedule for specified date
-  const getScheduleForDateFromStorage = async (date) => {
-    try {
-      const scheduleDataJson = await AsyncStorage.getItem(STORAGE_KEYS.SCHEDULE_DATA);
-      if (!scheduleDataJson) return null;
-
-      const scheduleData = JSON.parse(scheduleDataJson);
-      return scheduleData[date] || null;
-    } catch (error) {
-      console.error('Error getting schedule for date:', error);
-      return null;
-    }
-  };
-
-  // Get weekly schedule
-  const getWeekScheduleFromStorage = async () => {
-    try {
-      const weekScheduleJson = await AsyncStorage.getItem(STORAGE_KEYS.WEEK_SCHEDULE);
-      return weekScheduleJson ? JSON.parse(weekScheduleJson) : null;
-    } catch (error) {
-      console.error('Error getting week schedule:', error);
-      return null;
-    }
-  };
-
-  // Clear schedule cache
-  const clearCache = async () => {
-    try {
-      await AsyncStorage.removeItem(STORAGE_KEYS.SCHEDULE_DATA);
-      await AsyncStorage.removeItem(STORAGE_KEYS.WEEK_SCHEDULE);
-      await AsyncStorage.removeItem(STORAGE_KEYS.SCHEDULE_LAST_UPDATE);
-      console.debug('Cache cleared');
-    } catch (error) {
-      console.error('Error clearing cache:', error);
-      throw error;
-    }
-  };
-
   // Handle class selection for viewing details
-  const handleLessonSelect = (lesson) => {
+  const handleLessonSelect = (lesson: ScheduleItem) => {
     setSelectedLesson(lesson);
     setModalVisible(true);
   };
@@ -662,7 +571,7 @@ export default function ScheduleScreen() {
   };
 
   // Weekday selection handler
-  const handleDaySelect = useCallback((selectedDay) => {
+  const handleDaySelect = useCallback((selectedDay: { date: Date; isToday: boolean; isSelected: boolean }) => {
     if (!isSameDay(selectedDay.date, currentDate)) {
       const direction = selectedDay.date > currentDate ? 'next' : 'prev';
       animateViewChange(direction);
@@ -716,7 +625,7 @@ export default function ScheduleScreen() {
   };
 
   // Horizontal swipe handler
-  const onSwipeHandler = ({ nativeEvent }) => {
+  const onSwipeHandler = ({ nativeEvent }: any) => {
     // Check that swipe is long enough (more than 50px)
     if (Math.abs(nativeEvent.translationX) > 50 && isSwipingAllowed) {
       if (nativeEvent.translationX > 0) {
@@ -730,7 +639,7 @@ export default function ScheduleScreen() {
   };
 
   // Get color for class type
-  const getLessonTypeColor = (type) => {
+  const getLessonTypeColor = (type: string) => {
     if (!type) return COLORS.accent;
 
     const lowerType = type.toLowerCase();
@@ -751,7 +660,7 @@ export default function ScheduleScreen() {
   };
 
   // Format time (add 0 before single digits)
-  const formatTime = (time) => {
+  const formatTime = (time: string) => {
     if (!time) return '';
 
     // Check that time is in HH:MM format
@@ -765,7 +674,7 @@ export default function ScheduleScreen() {
   const renderLoading = () => (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size="large" color={COLORS.primary} />
-      <Text style={styles.loadingText}>Loading schedule...</Text>
+      <Text style={styles.loadingText}>Загрузка расписания...</Text>
     </View>
   );
 
@@ -779,15 +688,15 @@ export default function ScheduleScreen() {
       />
       <Text style={styles.emptyText}>
         {isOffline && (!weekSchedule || !weekSchedule[format(currentDate, 'yyyy-MM-dd')])
-          ? "No saved data for this date"
+          ? "Нет сохраненных данных для этой даты"
           : user?.role === 'student'
-            ? "No classes for this day"
-            : "You have no classes for this day"}
+            ? "Нет занятий на этот день"
+            : "У вас нет занятий на этот день"}
       </Text>
       <Text style={styles.emptySubText}>
         {isOffline
-          ? "Connect to the internet to load schedule"
-          : "Enjoy your free time!"}
+          ? "Подключитесь к интернету для загрузки расписания"
+          : "Хорошего дня!"}
       </Text>
 
       {!isOffline && (
@@ -796,7 +705,7 @@ export default function ScheduleScreen() {
           onPress={onRefresh}
         >
           <Ionicons name="refresh-outline" size={16} color="#fff" style={styles.refreshIcon} />
-          <Text style={styles.refreshText}>Refresh</Text>
+          <Text style={styles.refreshText}>Обновить</Text>
         </TouchableOpacity>
       )}
     </Animated.View>
@@ -807,13 +716,13 @@ export default function ScheduleScreen() {
     return (
       <View style={[styles.container, styles.centered]}>
         <Text style={styles.noAuthText}>
-          You need to log in to view your schedule
+          Необходимо войти в систему для просмотра расписания
         </Text>
         <TouchableOpacity
           style={styles.loginButton}
           onPress={() => router.replace('/login')}
         >
-          <Text style={styles.loginButtonText}>Log In</Text>
+          <Text style={styles.loginButtonText}>Войти</Text>
         </TouchableOpacity>
       </View>
     );
@@ -827,16 +736,16 @@ export default function ScheduleScreen() {
 
         {/* Screen title and offline indicator */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Schedule</Text>
+          <Text style={styles.headerTitle}>Расписание</Text>
           {isOffline && (
             <View style={styles.offlineIndicator}>
               <Ionicons name="wifi-outline" size={12} color="#FFFFFF" />
-              <Text style={styles.offlineText}>Offline</Text>
+              <Text style={styles.offlineText}>Офлайн</Text>
             </View>
           )}
         </View>
 
-        {/* Week days navigation - replace FlatList with ScrollView */}
+        {/* Week days navigation - ScrollView for days */}
         <View style={styles.weekDaysContainer}>
           <ScrollView
             ref={daysScrollRef}
@@ -891,7 +800,7 @@ export default function ScheduleScreen() {
               {format(currentDate, 'd MMMM', { locale: ru })}
             </Text>
             {!isToday(currentDate) && (
-              <Text style={styles.todayButtonText}>today</Text>
+              <Text style={styles.todayButtonText}>сегодня</Text>
             )}
           </TouchableOpacity>
 
@@ -904,7 +813,7 @@ export default function ScheduleScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Schedule content with swipe support - replace FlatList with ScrollView */}
+        {/* Schedule content with swipe support */}
         <PanGestureHandler
           onEnded={onSwipeHandler}
           enabled={isSwipingAllowed && !isLoading && !refreshing}
@@ -922,8 +831,8 @@ export default function ScheduleScreen() {
                   <RefreshControl
                     refreshing={refreshing}
                     onRefresh={onRefresh}
-                    tintColor={COLORS.primary}
                     colors={[COLORS.primary]}
+                    tintColor={COLORS.primary}
                   />
                 }
               >
@@ -980,19 +889,19 @@ export default function ScheduleScreen() {
                                 <View
                                   style={[
                                     styles.lessonTypeBadge,
-                                    { backgroundColor: getLessonTypeColor(lesson.lesson_type) }
+                                    { backgroundColor: getLessonTypeColor(lesson.lessonType) }
                                   ]}
                                 >
-                                  <Text style={styles.lessonTypeText}>{lesson.lesson_type}</Text>
+                                  <Text style={styles.lessonTypeText}>{lesson.lessonType}</Text>
                                 </View>
                               </View>
                               <Text style={styles.detailsText}>
                                 {lesson.auditory}
-                                {lesson.subgroup > 0 && ` • Subgroup ${lesson.subgroup}`}
+                                {lesson.subgroup > 0 && ` • Подгруппа ${lesson.subgroup}`}
                               </Text>
                               {user?.role === 'student' ? (
                                 <Text style={styles.teacherText}>
-                                  {lesson.teacher_name}
+                                  {lesson.teacherName}
                                 </Text>
                               ) : (
                                 <Text
@@ -1001,8 +910,8 @@ export default function ScheduleScreen() {
                                   ellipsizeMode="tail"
                                 >
                                   {lesson.groups && lesson.groups.length > 1
-                                    ? `Groups: ${lesson.group_name}`
-                                    : `Group: ${lesson.group_name}`}
+                                    ? `Groups: ${lesson.groupName}`
+                                    : `Group: ${lesson.groupName}`}
                                 </Text>
                               )}
                             </TouchableOpacity>
@@ -1109,12 +1018,11 @@ const styles = StyleSheet.create({
   },
   selectedDayItem: {
     backgroundColor: COLORS.primary,
-    // Removed border for selected day to avoid double highlighting
   },
   todayDayItem: {
     borderWidth: 1,
     borderColor: COLORS.primary,
-    backgroundColor: '#f0f0f0', // Explicitly set standard background
+    backgroundColor: '#f0f0f0',
   },
   dayName: {
     fontSize: 12,
@@ -1128,10 +1036,10 @@ const styles = StyleSheet.create({
     color: COLORS.text,
   },
   selectedDayText: {
-    color: '#FFFFFF', // White text on selected day (red background)
+    color: '#FFFFFF',
   },
   todayDayText: {
-    color: COLORS.primary, // Red text for current day (if not selected)
+    color: COLORS.primary,
   },
   todayIndicator: {
     position: 'absolute',
@@ -1140,9 +1048,6 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: COLORS.primary,
-  },
-  selectedTodayIndicator: {
-    backgroundColor: '#FFFFFF', // White indicator on red background
   },
   dateNavigation: {
     flexDirection: 'row',

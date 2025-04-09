@@ -833,13 +833,29 @@ async unregisterDeviceToken() {
     }
 
     // Получение списка чатов пользователя
-    async getUserChats() {
-        // Инициализируем, если не инициализированы
+    // Исправленный метод getUserChats в chatService.js
+async getUserChats() {
+    try {
+        // Проверяем необходимость инициализации
         if (!this.initialized || !this.currentUser) {
-            const initResult = await this.initialize();
-            if (!initResult) {
-                console.error('Failed to initialize when getting user chats');
-                return [];
+            try {
+                const initResult = await this.initialize();
+                if (!initResult) {
+                    // Даже если инициализация не удалась, проверяем, есть ли у нас данные пользователя
+                    if (!this.currentUser || !this.currentUser.id) {
+                        console.error('No current user available after initialization attempt');
+                        return [];
+                    }
+                    // Продолжаем работу, если у нас есть ID пользователя, даже если Firebase аутентификация не удалась
+                    console.log('Continuing with user chats despite initialization issues');
+                }
+            } catch (initError) {
+                console.error('Error during initialization:', initError);
+                // Проверяем, есть ли у нас данные пользователя несмотря на ошибку
+                if (!this.currentUser || !this.currentUser.id) {
+                    return [];
+                }
+                console.log('Continuing with user chats despite initialization error');
             }
         }
 
@@ -900,7 +916,11 @@ async unregisterDeviceToken() {
             console.error('Error in getUserChats:', error);
             return [];
         }
+    } catch (outerError) {
+        console.error('Unexpected error in getUserChats:', outerError);
+        return [];
     }
+}
 
     // Получение сообщений чата
     async getChatMessages(chatId, limit = 50) {

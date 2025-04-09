@@ -736,7 +736,7 @@ export default function ScheduleScreen() {
 
         {/* Screen title and offline indicator */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Расписание</Text>
+
           {isOffline && (
             <View style={styles.offlineIndicator}>
               <Ionicons name="wifi-outline" size={12} color="#FFFFFF" />

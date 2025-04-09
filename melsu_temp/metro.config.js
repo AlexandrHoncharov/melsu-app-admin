@@ -13,7 +13,9 @@ config.resolver.extraNodeModules = {
   // Предоставляем пустую реализацию idb
   'idb': path.resolve(__dirname, 'empty-modules/idb.js')
 };
-
+config.resolver.blockList = [
+  /node_modules\/.*\/node_modules\/react-native\/.*/,
+];
 // Создаем директорию для пустых модулей, если её нет
 const emptyModulesDir = path.join(__dirname, 'empty-modules');
 const fs = require('fs');

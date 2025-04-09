@@ -19,7 +19,7 @@
         "gradleCommand": ":app:assembleRelease"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://82.202.130.12:5001//api"
+        "EXPO_PUBLIC_API_URL": "https://univappschedule.ru/api"
       }
     },
     "production": {
@@ -27,7 +27,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://82.202.130.12:5001//api"
+        "EXPO_PUBLIC_API_URL": "https://univappschedule.ru/api"
       }
     }
   }

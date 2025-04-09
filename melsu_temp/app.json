@@ -8,6 +8,14 @@
     "scheme": "melsu",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "resolutions": {
+      "metro": "0.76.0",
+      "metro-resolver": "0.76.0"
+    },
+    "overrides": {
+      "metro": "0.76.0",
+      "metro-resolver": "0.76.0"
+    },
     "splash": {
       "image": "./assets/images/splash.png",
       "resizeMode": "contain",

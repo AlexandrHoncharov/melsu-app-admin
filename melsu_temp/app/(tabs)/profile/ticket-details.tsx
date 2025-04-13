@@ -6,16 +6,16 @@ import {
   TouchableOpacity,
   TextInput,
   FlatList,
+  KeyboardAvoidingView,
+  Platform,
   ActivityIndicator,
   Alert,
   SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
   Image,
   RefreshControl,
   Dimensions,
   Modal,
-  Linking
+  ScrollView
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -27,11 +27,10 @@ import * as MediaLibrary from 'expo-media-library';
 import * as IntentLauncher from 'expo-intent-launcher';
 import * as Sharing from 'expo-sharing';
 import * as SecureStore from 'expo-secure-store';
-import * as WebBrowser from 'expo-web-browser'; // Добавляем импорт WebBrowser
 import { API_URL } from '../../../src/api/apiClient';
 
 // Получаем ширину экрана для адаптивной верстки
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 // Хелпер для отображения времени
 const formatDate = (dateString: string): string => {
@@ -77,78 +76,89 @@ const getStatusInfo = (status: string): { name: string; color: string; bgColor: 
   }
 };
 
-// Helper to determine file type and extension
-const getFileInfo = (filename: string) => {
-  // Extract extension
-  const extension = filename.split('.').pop()?.toLowerCase() || '';
+// Компонент предпросмотра изображений - встроенный просмотрщик
+const ImagePreview = ({ visible, imageUri, onClose, onSave }) => {
+  if (!visible || !imageUri) return null;
 
-  // Determine mime type based on extension
-  let mimeType = 'application/octet-stream';
-  if (extension) {
-    switch (extension) {
-      case 'jpg':
-      case 'jpeg':
-        mimeType = 'image/jpeg';
-        break;
-      case 'png':
-        mimeType = 'image/png';
-        break;
-      case 'gif':
-        mimeType = 'image/gif';
-        break;
-      case 'pdf':
-        mimeType = 'application/pdf';
-        break;
-      case 'doc':
-        mimeType = 'application/msword';
-        break;
-      case 'docx':
-        mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        break;
-      case 'xls':
-        mimeType = 'application/vnd.ms-excel';
-        break;
-      case 'xlsx':
-        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-        break;
-      case 'txt':
-        mimeType = 'text/plain';
-        break;
-      case 'mp3':
-        mimeType = 'audio/mpeg';
-        break;
-      case 'mp4':
-        mimeType = 'video/mp4';
-        break;
-      case 'zip':
-        mimeType = 'application/zip';
-        break;
-    }
-  }
+  const [scale, setScale] = useState(1);
 
-  // Determine file category
-  let fileType = 'document';
-  let icon = 'document-outline';
+  return (
+    <Modal
+      transparent={false}
+      visible={visible}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <SafeAreaView style={imagePreviewStyles.container}>
+        <View style={imagePreviewStyles.header}>
+          <TouchableOpacity onPress={onClose} style={imagePreviewStyles.closeButton}>
+            <Ionicons name="close" size={24} color="#000" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onSave} style={imagePreviewStyles.saveButton}>
+            <Ionicons name="download-outline" size={22} color="#fff" />
+            <Text style={imagePreviewStyles.saveButtonText}>Сохранить</Text>
+          </TouchableOpacity>
+        </View>
 
-  if (mimeType.startsWith('image/')) {
-    fileType = 'image';
-    icon = 'image-outline';
-  } else if (mimeType.startsWith('video/')) {
-    fileType = 'video';
-    icon = 'videocam-outline';
-  } else if (mimeType.startsWith('audio/')) {
-    fileType = 'audio';
-    icon = 'musical-note-outline';
-  } else if (mimeType === 'application/pdf') {
-    fileType = 'pdf';
-    icon = 'document-text-outline';
-  } else if (mimeType.includes('spreadsheet') || extension === 'xls' || extension === 'xlsx') {
-    fileType = 'spreadsheet';
-    icon = 'grid-outline';
-  }
-
-  return { extension, mimeType, fileType, icon };
+        <ScrollView
+          contentContainerStyle={imagePreviewStyles.imageContainer}
+          maximumZoomScale={3}
+          minimumZoomScale={1}
+          bouncesZoom={true}
+        >
+          <Image
+            source={{ uri: imageUri }}
+            style={imagePreviewStyles.image}
+            resizeMode="contain"
+          />
+        </ScrollView>
+      </SafeAreaView>
+    </Modal>
+  );
 };
+
+// Стили для компонента предпросмотра изображений
+const imagePreviewStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  closeButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#bb0000',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    marginLeft: 6,
+  },
+  imageContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  image: {
+    width: width,
+    height: height * 0.8,
+  }
+});
 
 export default function TicketDetailsScreen() {
   const { user } = useAuth();
@@ -162,7 +172,12 @@ export default function TicketDetailsScreen() {
   const [isSending, setIsSending] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showActionMenu, setShowActionMenu] = useState(false);
-  const [openingFile, setOpeningFile] = useState<string | null>(null); // Изменено с downloadingFile на openingFile
+  const [openingFile, setOpeningFile] = useState<string | null>(null);
+
+  // Состояния для предпросмотра файлов
+  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+  const [showImagePreview, setShowImagePreview] = useState(false);
+  const [tempFilePath, setTempFilePath] = useState<string | null>(null);
 
   // Ref для автоматической прокрутки к последнему сообщению
   const flatListRef = useRef<FlatList>(null);
@@ -337,143 +352,272 @@ export default function TicketDetailsScreen() {
     return fullUrl;
   };
 
-// Исправленная функция для прямого открытия файла в нативных приложениях
-const handleFileOpen = async (filename: string) => {
-  try {
-    setOpeningFile(filename);
+  // Сохранение изображения в галерею (для iOS и Android)
+  const saveImageToGallery = async (uri: string) => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
 
-    // Получаем токен авторизации - исправление формата токена
-    const token = await SecureStore.getItemAsync('userToken');
-    if (!token) {
-      Alert.alert('Ошибка', 'Авторизация не найдена. Пожалуйста, войдите в систему заново.');
-      setOpeningFile(null);
-      return;
-    }
-
-    // Запрашиваем разрешения для медиатеки
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Ошибка', 'Необходимо разрешение на доступ к медиатеке');
-      setOpeningFile(null);
-      return;
-    }
-
-    const fileInfo = getFileInfo(filename);
-    const fileUrl = getAttachmentUrl(filename);
-
-    // ВАЖНО: Всегда скачиваем во временный файл для открытия в нативном приложении
-    // Создаем временную директорию
-    const tempDir = `${FileSystem.cacheDirectory}ticket-files/`;
-    const dirInfo = await FileSystem.getInfoAsync(tempDir);
-    if (!dirInfo.exists) {
-      await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true });
-    }
-
-    // Генерируем локальное имя файла с правильным расширением
-    const localFilename = `file-${Date.now()}.${fileInfo.extension || 'bin'}`;
-    const localFile = `${tempDir}${localFilename}`;
-
-    console.log(`Скачивание файла из ${fileUrl} в ${localFile}`);
-    console.log(`Используемый токен авторизации: Bearer ${token.substring(0, 10)}...`);
-
-    // Скачиваем файл с правильным форматом авторизации
-    const downloadResult = await FileSystem.downloadAsync(
-      fileUrl,
-      localFile,
-      {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+      if (status !== 'granted') {
+        Alert.alert("Нет разрешения", "Не удалось получить разрешение на сохранение в галерею");
+        return;
       }
-    );
 
-    if (downloadResult.status !== 200) {
-      throw new Error(`Ошибка загрузки файла: код ${downloadResult.status}`);
+      const asset = await MediaLibrary.createAssetAsync(uri);
+      await MediaLibrary.createAlbumAsync("MelSU", asset, false);
+
+      Alert.alert("Успех", "Изображение сохранено в галерею");
+    } catch (error) {
+      console.error("Ошибка при сохранении изображения:", error);
+      Alert.alert("Ошибка", "Не удалось сохранить изображение");
+    }
+  };
+
+  // Helper to determine file type and extension
+  const getFileInfo = (filename: string) => {
+    // Extract extension
+    const extension = filename.split('.').pop()?.toLowerCase() || '';
+
+    // Determine mime type based on extension
+    let mimeType = 'application/octet-stream';
+    if (extension) {
+      switch (extension) {
+        case 'jpg':
+        case 'jpeg':
+          mimeType = 'image/jpeg';
+          break;
+        case 'png':
+          mimeType = 'image/png';
+          break;
+        case 'gif':
+          mimeType = 'image/gif';
+          break;
+        case 'pdf':
+          mimeType = 'application/pdf';
+          break;
+        case 'doc':
+          mimeType = 'application/msword';
+          break;
+        case 'docx':
+          mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          break;
+        case 'xls':
+          mimeType = 'application/vnd.ms-excel';
+          break;
+        case 'xlsx':
+          mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          break;
+        case 'txt':
+          mimeType = 'text/plain';
+          break;
+        case 'mp3':
+          mimeType = 'audio/mpeg';
+          break;
+        case 'mp4':
+          mimeType = 'video/mp4';
+          break;
+        case 'zip':
+          mimeType = 'application/zip';
+          break;
+      }
     }
 
-    console.log('Файл успешно скачан. Размер:', await FileSystem.getInfoAsync(localFile).then(info => info.size));
+    // Determine file category
+    let fileType = 'document';
+    let icon = 'document-outline';
 
-    // Открываем файл в соответствующем приложении
-    // На iOS используем Sharing, на Android комбинацию MediaLibrary и IntentLauncher
-    if (fileInfo.fileType === 'image') {
-      // Для изображений используем специфичный для платформы подход
-      if (Platform.OS === 'android') {
+    if (mimeType.startsWith('image/')) {
+      fileType = 'image';
+      icon = 'image-outline';
+    } else if (mimeType.startsWith('video/')) {
+      fileType = 'video';
+      icon = 'videocam-outline';
+    } else if (mimeType.startsWith('audio/')) {
+      fileType = 'audio';
+      icon = 'musical-note-outline';
+    } else if (mimeType === 'application/pdf') {
+      fileType = 'pdf';
+      icon = 'document-text-outline';
+    } else if (mimeType.includes('spreadsheet') || extension === 'xls' || extension === 'xlsx') {
+      fileType = 'spreadsheet';
+      icon = 'grid-outline';
+    }
+
+    return { extension, mimeType, fileType, icon };
+  };
+
+  // Обновленная функция открытия файла (без Quick Look)
+  const handleFileOpen = async (filename: string) => {
+    try {
+      setOpeningFile(filename);
+
+      // Получаем токен авторизации
+      const token = await SecureStore.getItemAsync('userToken');
+      if (!token) {
+        Alert.alert('Ошибка', 'Авторизация не найдена. Пожалуйста, войдите в систему заново.');
+        setOpeningFile(null);
+        return;
+      }
+
+      const fileInfo = getFileInfo(filename);
+      const fileUrl = getAttachmentUrl(filename);
+
+      // Создаем временную директорию
+      const tempDir = `${FileSystem.cacheDirectory}ticket-files/`;
+      const dirInfo = await FileSystem.getInfoAsync(tempDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true });
+      }
+
+      // Генерируем локальное имя файла с правильным расширением
+      const localFilename = `file-${Date.now()}.${fileInfo.extension || 'bin'}`;
+      const localFile = `${tempDir}${localFilename}`;
+
+      console.log(`Скачивание файла из ${fileUrl} в ${localFile}`);
+
+      // Скачиваем файл с правильным форматом авторизации
+      const downloadResult = await FileSystem.downloadAsync(
+        fileUrl,
+        localFile,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (downloadResult.status !== 200) {
+        throw new Error(`Ошибка загрузки файла: код ${downloadResult.status}`);
+      }
+
+      console.log('Файл успешно скачан. Размер:', await FileSystem.getInfoAsync(localFile).then(info => info.size));
+
+      // Сохраняем путь к временному файлу для возможного сохранения позже
+      setTempFilePath(localFile);
+
+      // Логика прямого просмотра в зависимости от типа файла
+      if (fileInfo.fileType === 'image') {
+        // Для изображений - открываем в встроенном просмотрщике
+        setPreviewImageUri(localFile);
+        setShowImagePreview(true);
+      } else if (Platform.OS === 'android') {
+        // Для Android - используем IntentLauncher для прямого открытия
         try {
-          // На Android сохраняем сначала в галерею
-          const asset = await MediaLibrary.createAssetAsync(localFile);
-          console.log('Создан медиа-ассет:', asset.uri);
+          // Получаем URI контента для Android
+          const contentUri = await FileSystem.getContentUriAsync(localFile);
 
-          // И открываем с правильным MIME-типом
+          // Открываем файл с помощью интента
           await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-            data: asset.uri,
-            flags: 1,
+            data: contentUri,
+            flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
             type: fileInfo.mimeType
           });
         } catch (intentError) {
           console.error('Ошибка при открытии через Intent:', intentError);
-          // Запасной вариант через Share
-          await Sharing.shareAsync(localFile, {
-            mimeType: fileInfo.mimeType,
-            dialogTitle: `Открыть изображение`
-          });
+
+          // Если не удалось открыть напрямую, предлагаем пользователю выбрать приложение
+          Alert.alert(
+            'Выберите действие',
+            'Не удалось открыть файл напрямую. Что вы хотите сделать?',
+            [
+              {
+                text: 'Открыть с помощью...',
+                onPress: async () => {
+                  await Sharing.shareAsync(localFile, {
+                    mimeType: fileInfo.mimeType,
+                    dialogTitle: 'Открыть с помощью'
+                  });
+                }
+              },
+              {
+                text: 'Сохранить',
+                onPress: async () => {
+                  try {
+                    const asset = await MediaLibrary.createAssetAsync(localFile);
+                    Alert.alert('Успех', 'Файл сохранен в медиатеку');
+                  } catch (saveError) {
+                    console.error('Ошибка сохранения:', saveError);
+                    Alert.alert('Ошибка', 'Не удалось сохранить файл');
+                  }
+                }
+              },
+              { text: 'Отмена', style: 'cancel' }
+            ]
+          );
         }
       } else {
-        // На iOS просто используем Sharing
-        await Sharing.shareAsync(localFile, {
-          mimeType: fileInfo.mimeType,
-          UTI: fileInfo.mimeType
-        });
+        // Для iOS - используем улучшенный ShareSheet с подсказками
+        Alert.alert(
+          'Открыть файл',
+          'Для просмотра файла выберите приложение в появившемся меню.',
+          [
+            {
+              text: 'Открыть',
+              onPress: async () => {
+                await Sharing.shareAsync(localFile, {
+                  UTI: Platform.OS === 'ios'
+                    ? (fileInfo.fileType === 'pdf' ? 'com.adobe.pdf' : 'public.data')
+                    : undefined,
+                  mimeType: fileInfo.mimeType,
+                  dialogTitle: 'Открыть с помощью'
+                });
+              }
+            },
+            {
+              text: 'Отмена',
+              style: 'cancel'
+            }
+          ]
+        );
       }
-    } else if (fileInfo.fileType === 'pdf') {
-      // PDF файлы обычно хорошо открываются через Share
-      await Sharing.shareAsync(localFile, {
-        mimeType: 'application/pdf',
-        UTI: 'com.adobe.pdf',
-        dialogTitle: 'Открыть PDF'
-      });
-    } else {
-      // Для остальных типов файлов используем общий подход
-      await Sharing.shareAsync(localFile, {
-        mimeType: fileInfo.mimeType,
-        dialogTitle: `Открыть ${fileInfo.extension ? fileInfo.extension.toUpperCase() : 'файл'}`
-      });
+    } catch (error) {
+      console.error('Ошибка при открытии файла:', error);
+      Alert.alert(
+        'Ошибка',
+        `Не удалось открыть файл: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`
+      );
+    } finally {
+      setOpeningFile(null);
     }
-  } catch (error) {
-    console.error('Ошибка при открытии файла:', error);
-    Alert.alert(
-      'Ошибка',
-      `Не удалось открыть файл: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`
+  };
+
+  // Обновленная функция рендеринга вложения
+  const renderAttachment = (attachment: string) => {
+    const fileInfo = getFileInfo(attachment);
+    const isOpening = openingFile === attachment;
+
+    // Определяем, является ли файл изображением для показа превью
+    const isImage = fileInfo.fileType === 'image';
+
+    return (
+      <TouchableOpacity
+        style={styles.attachmentContainer}
+        onPress={() => handleFileOpen(attachment)}
+        disabled={isOpening}
+      >
+        {isOpening ? (
+          <ActivityIndicator size="small" color="#1976D2" />
+        ) : (
+          <Ionicons name={fileInfo.icon} size={20} color="#1976D2" />
+        )}
+        <Text style={styles.attachmentText}>
+          {isOpening
+            ? 'Открытие файла...'
+            : (isImage
+                ? `Изображение${fileInfo.extension ? ' .' + fileInfo.extension.toUpperCase() : ''}`
+                : `Файл${fileInfo.extension ? ' .' + fileInfo.extension.toUpperCase() : ''}`)
+          }
+        </Text>
+        {!isOpening && (
+          <Ionicons
+            name={isImage ? "eye-outline" : "open-outline"}
+            size={16}
+            color="#1976D2"
+            style={styles.attachmentIcon}
+          />
+        )}
+      </TouchableOpacity>
     );
-  } finally {
-    setOpeningFile(null);
-  }
-};
-
-// Обновленная функция рендеринга вложения с другой иконкой
-const renderAttachment = (attachment: string) => {
-  const fileInfo = getFileInfo(attachment);
-  const isOpening = openingFile === attachment;
-
-  return (
-    <TouchableOpacity
-      style={styles.attachmentContainer}
-      onPress={() => handleFileOpen(attachment)}
-      disabled={isOpening}
-    >
-      {isOpening ? (
-        <ActivityIndicator size="small" color="#1976D2" />
-      ) : (
-        <Ionicons name={fileInfo.icon} size={20} color="#1976D2" />
-      )}
-      <Text style={styles.attachmentText}>
-        {isOpening ? 'Открытие файла...' : `Файл${fileInfo.extension ? ' .' + fileInfo.extension.toUpperCase() : ''}`}
-      </Text>
-      {!isOpening && (
-        <Ionicons name="document-text-outline" size={16} color="#1976D2" style={styles.attachmentIcon} />
-      )}
-    </TouchableOpacity>
-  );
-};
+  };
 
   // Рендеринг сообщения
   const renderMessage = ({ item }: { item: TicketMessage }) => {
@@ -576,6 +720,21 @@ const renderAttachment = (attachment: string) => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
+        {/* Компонент предпросмотра изображений */}
+        <ImagePreview
+          visible={showImagePreview}
+          imageUri={previewImageUri}
+          onClose={() => {
+            setShowImagePreview(false);
+            setPreviewImageUri(null);
+          }}
+          onSave={() => {
+            if (previewImageUri) {
+              saveImageToGallery(previewImageUri);
+            }
+          }}
+        />
+
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}

@@ -186,6 +186,21 @@ def get_users(current_user):
             if user.role == 'student':
                 user_data['group'] = user.group
                 user_data['faculty'] = user.faculty
+                # Добавляем информацию о специальности
+                user_data['speciality'] = {
+                    'id': user.speciality_id,
+                    'code': user.speciality_code,
+                    'name': user.speciality_name,
+                    'form': user.study_form,
+                    'formName': user.study_form_name
+                }
+                # Получаем курс из расписания
+                try:
+                    schedule_item = Schedule.query.filter_by(group_name=user.group).first()
+                    if schedule_item:
+                        user_data['course'] = schedule_item.course
+                except Exception as e:
+                    print(f"Error getting course from schedule: {str(e)}")
             elif user.role == 'teacher':
                 teacher = Teacher.query.filter_by(user_id=user.id).first()
                 if teacher:
@@ -195,6 +210,7 @@ def get_users(current_user):
             result.append(user_data)
 
     return jsonify(result)
+
 
 
 # Update the unregister_device function in api.py
@@ -270,7 +286,15 @@ def get_user(current_user, user_id):
         'name': user.full_name,
         'role': user.role,
         'group': user.group,
-        'faculty': user.faculty
+        'faculty': user.faculty,
+        # Добавляем информацию о специальности
+        'speciality': {
+            'id': user.speciality_id,
+            'code': user.speciality_code,
+            'name': user.speciality_name,
+            'form': user.study_form,
+            'formName': user.study_form_name
+        }
     }
 
     # Для преподавателей добавляем информацию о кафедре
@@ -279,6 +303,15 @@ def get_user(current_user, user_id):
         if teacher:
             user_data['department'] = teacher.department
             user_data['position'] = teacher.position
+
+    # Добавляем информацию о курсе для студентов
+    if user.role == 'student' and user.group:
+        try:
+            schedule_item = Schedule.query.filter_by(group_name=user.group).first()
+            if schedule_item:
+                user_data['course'] = schedule_item.course
+        except Exception as e:
+            print(f"Error getting course from schedule: {str(e)}")
 
     return jsonify(user_data)
 
@@ -599,6 +632,56 @@ def get_profile(current_user):
     # Определяем роль
     role = current_user.role or ('admin' if current_user.is_admin else 'unknown')
 
+    # Напрямую запрашиваем данные из базы данных, минуя ORM
+    try:
+        query = """
+        SELECT 
+            id, 
+            username, 
+            full_name, 
+            role, 
+            `group`, 
+            faculty, 
+            verification_status, 
+            student_card_image,
+            speciality_id,
+            speciality_code,
+            speciality_name,
+            study_form,
+            study_form_name
+        FROM user 
+        WHERE id = %s
+        """
+
+        with db.engine.connect() as connection:
+            result = connection.execute(db.text(query), [current_user.id])
+            user_data = result.fetchone()
+
+            if not user_data:
+                return jsonify({'message': 'Пользователь не найден'}), 404
+
+            # Преобразуем строку из запроса в словарь
+            user_dict = dict(zip(result.keys(), user_data))
+            print(f"DEBUG: DB query result: {user_dict}")
+    except Exception as e:
+        print(f"ERROR: Direct DB query failed: {str(e)}")
+        # В случае ошибки используем данные из ORM
+        user_dict = {
+            'id': current_user.id,
+            'username': current_user.username,
+            'full_name': current_user.full_name,
+            'role': current_user.role,
+            'group': current_user.group,
+            'faculty': current_user.faculty,
+            'verification_status': current_user.verification_status,
+            'student_card_image': current_user.student_card_image,
+            'speciality_id': current_user.speciality_id,
+            'speciality_code': current_user.speciality_code,
+            'speciality_name': current_user.speciality_name,
+            'study_form': current_user.study_form,
+            'study_form_name': current_user.study_form_name,
+        }
+
     # Для преподавателей получаем дополнительную информацию
     teacher_info = None
     if role == 'teacher':
@@ -612,27 +695,72 @@ def get_profile(current_user):
 
     # Формируем данные профиля
     profile_data = {
-        'id': current_user.id,
-        'username': current_user.username,
-        'fullName': current_user.full_name or (teacher_info['name'] if teacher_info else ''),
-        'role': role,
-        'group': current_user.group,
-        'faculty': current_user.faculty,
+        'id': user_dict['id'],
+        'username': user_dict['username'],
+        'fullName': user_dict['full_name'] or (teacher_info['name'] if teacher_info else ''),
+        'role': user_dict['role'],
+        'group': user_dict['group'],
+        'faculty': user_dict['faculty'],
         'department': teacher_info['department'] if teacher_info else None,
         'position': teacher_info['position'] if teacher_info else None,
-        'verificationStatus': current_user.verification_status or 'verified',
-        'studentCardImage': current_user.student_card_image,
-        # Add speciality information
+        'verificationStatus': user_dict['verification_status'] or 'verified',
+        'studentCardImage': user_dict['student_card_image'],
+        # Всегда добавляем информацию о специальности из прямого запроса
         'speciality': {
-            'id': current_user.speciality_id,
-            'code': current_user.speciality_code,
-            'name': current_user.speciality_name,
-            'form': current_user.study_form,
-            'formName': current_user.study_form_name
-        } if current_user.speciality_id else None
+            'id': user_dict['speciality_id'],
+            'code': user_dict['speciality_code'],
+            'name': user_dict['speciality_name'],
+            'form': user_dict['study_form'],
+            'formName': user_dict['study_form_name']
+        }
     }
 
+    # Для студентов получаем курс из расписания
+    if role == 'student' and user_dict['group']:
+        try:
+            schedule_query = "SELECT course FROM schedule WHERE group_name = %s LIMIT 1"
+            with db.engine.connect() as connection:
+                schedule_result = connection.execute(db.text(schedule_query), [user_dict['group']])
+                schedule_data = schedule_result.fetchone()
+
+                if schedule_data:
+                    profile_data['course'] = schedule_data[0]
+                    print(f"DEBUG: Found course in schedule: {schedule_data[0]}")
+        except Exception as e:
+            print(f"DEBUG: Error fetching course from schedule: {str(e)}")
+
+    # Отладочный вывод - финальные данные
+    print(f"DEBUG: Final profile data: {profile_data}")
+
     return jsonify(profile_data), 200
+
+
+@app.route('/api/schedule/course', methods=['GET'])
+@token_required
+def get_course_from_schedule(current_user):
+    """Get course information from schedule based on group"""
+    group = request.args.get('group') or (current_user.group if current_user.role == 'student' else None)
+
+    if not group:
+        return jsonify({'message': 'Не указана группа', 'success': False}), 400
+
+    try:
+        schedule_item = Schedule.query.filter_by(group_name=group).first()
+
+        if not schedule_item:
+            return jsonify({'message': 'Расписание для группы не найдено', 'success': False}), 404
+
+        return jsonify({
+            'course': schedule_item.course,
+            'group': group,
+            'success': True
+        }), 200
+    except Exception as e:
+        print(f"Error fetching course info: {str(e)}")
+        return jsonify({
+            'message': f'Ошибка при получении информации о курсе: {str(e)}',
+            'success': False
+        }), 500
 
 
 # Маршрут для загрузки фото студенческого билета

@@ -32,14 +32,50 @@ interface MenuItem {
 }
 
 export default function ProfileScreen() {
-  const { user, isLoading, logout, refreshUserProfile } = useAuth();
+  const { user: originalUser, isLoading, logout, refreshUserProfile } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const [courseFromApi, setCourseFromApi] = useState(null);
+
+  // Проверка и нормализация данных пользователя
+  const checkUserData = (user) => {
+    if (!user) return null;
+
+    // Создаем копию объекта пользователя
+    const normalizedUser = {...user};
+
+    // Проверяем, существует ли объект speciality
+    if (!normalizedUser.speciality) {
+      // Если объект speciality отсутствует, но есть необходимые поля в корне объекта,
+      // создаем объект speciality на основе этих полей
+      const hasSpecialityData = user.speciality_code || user.speciality_name ||
+                               user.speciality_id || user.study_form || user.study_form_name;
+
+      if (hasSpecialityData) {
+        normalizedUser.speciality = {
+          id: user.speciality_id,
+          code: user.speciality_code,
+          name: user.speciality_name,
+          form: user.study_form,
+          formName: user.study_form_name
+        };
+
+        console.log("Created speciality object from user data:", normalizedUser.speciality);
+      }
+    }
+
+    return normalizedUser;
+  };
+
+  // Нормализуем данные пользователя
+  const user = checkUserData(originalUser);
 
   // Profile refresh handler
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       await refreshUserProfile();
+      // Повторно запрашиваем полный профиль после обновления
+      // Если есть отдельная функция для повторного запроса профиля, можно вызвать её здесь
     } catch (error) {
       console.error('Error refreshing profile:', error);
     } finally {
@@ -133,19 +169,27 @@ export default function ProfileScreen() {
     return '';
   };
 
-  // Extract year of study from group (if possible)
-  const getYearOfStudy = (groupName) => {
-    if (!groupName) return null;
-
-    // Try to extract year from format xxxx-xxxx.x
-    // First digit of second part often indicates year of study
-    const match = groupName.match(/\d{4}-(\d)(\d{3}\.\d)/);
-    if (match && match[1]) {
-      const yearDigit = parseInt(match[1]);
-      if (yearDigit >= 1 && yearDigit <= 6) {
-        return `${yearDigit}-й курс`;
+  // Здесь должен быть API запрос для получения курса из расписания
+  // Это нужно реализовать на бэкенде
+  const getCourseFromSchedule = async (group) => {
+    // Эту функцию нужно будет реализовать через API
+    // Примерная логика: запрос к API на получение первой записи расписания для группы
+    // и извлечение из неё поля course
+    /*
+    try {
+      const response = await fetch(`/api/schedule/course?group=${group}`);
+      const data = await response.json();
+      if (data.course) {
+        return `${data.course}-й курс`;
       }
+      return null;
+    } catch (error) {
+      console.error('Error fetching course from schedule:', error);
+      return null;
     }
+    */
+
+    // Временное решение для демонстрации
     return null;
   };
 
@@ -242,8 +286,21 @@ export default function ProfileScreen() {
   // Get verification info
   const verificationInfo = getVerificationInfo(user.verificationStatus);
 
-  // Get year of study for students
-  const yearOfStudy = user.role === 'student' ? getYearOfStudy(user.group) : null;
+  const [course, setCourse] = useState(null);
+
+  // Отладочная информация для проверки данных пользователя
+  useEffect(() => {
+    if (originalUser) {
+      console.log("Original user data:", originalUser);
+      console.log("Normalized user data:", user);
+      console.log("Speciality data:", user?.speciality);
+      console.log("Course data:", course);
+      console.log("Course from API:", courseFromApi);
+    }
+  }, [originalUser, user, course, courseFromApi]);
+
+  // Временная заглушка для демонстрации
+  const tempCourse = user?.role === 'student' ? '3-й курс' : null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -270,7 +327,7 @@ export default function ProfileScreen() {
           </View>
 
           <View style={styles.nameSection}>
-            <Text style={styles.nameText}>{user.fullName || user.username}</Text>
+            <Text style={styles.nameText} numberOfLines={2} ellipsizeMode="tail">{user.fullName || user.username}</Text>
             <View style={styles.roleBadge}>
               <Ionicons
                 name={user.role === 'student' ? 'school-outline' : 'briefcase-outline'}
@@ -298,9 +355,10 @@ export default function ProfileScreen() {
                   </View>
                   <View style={styles.infoValueContainer}>
                     <Text style={styles.infoValue}>{user.group}</Text>
-                    {yearOfStudy && (
+                    {course && (
                       <View style={styles.yearBadge}>
-                        <Text style={styles.yearText}>{yearOfStudy}</Text>
+                        <Ionicons name="calendar-outline" size={12} color="#1976D2" style={{marginRight: 4}} />
+                        <Text style={styles.yearText}>{course}</Text>
                       </View>
                     )}
                   </View>
@@ -314,20 +372,13 @@ export default function ProfileScreen() {
                     <Ionicons name="business-outline" size={18} color="#555" />
                     <Text style={styles.infoLabel}>Факультет</Text>
                   </View>
-                  <Text style={styles.infoValue}>{user.faculty}</Text>
+                  <View style={styles.infoValueWrap}>
+                    <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.faculty}</Text>
+                  </View>
                 </View>
               )}
 
-              {/* Speciality code */}
-              {user.speciality && user.speciality.code && (
-                <View style={styles.infoRow}>
-                  <View style={styles.infoLabelContainer}>
-                    <Ionicons name="code-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Код</Text>
-                  </View>
-                  <Text style={styles.infoValue}>{user.speciality.code}</Text>
-                </View>
-              )}
+              {/* Removed Speciality code as it's now shown in the speciality section */}
 
               {/* Study form */}
               {getFormName(user) && (
@@ -340,16 +391,33 @@ export default function ProfileScreen() {
                 </View>
               )}
 
-              {/* Speciality name */}
-              {user.speciality && user.speciality.name && (
-                <View style={styles.specialityRow}>
-                  <View style={styles.infoLabelContainer}>
-                    <Ionicons name="school-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Направление</Text>
-                  </View>
-                  <Text style={styles.specialityValue}>{user.speciality.name}</Text>
+              {/* Speciality name - проверка на наличие данных специальности */}
+              <View style={styles.specialitySection}>
+                <View style={styles.specialityHeader}>
+                  <Ionicons name="school-outline" size={18} color="#555" />
+                  <Text style={styles.specialityLabel}>Направление подготовки</Text>
                 </View>
-              )}
+
+                {user && user.speciality && (user.speciality.name || user.speciality.code) ? (
+                  <View style={styles.specialityContent}>
+                    {user.speciality.code && (
+                      <View style={styles.codeContainer}>
+                        <Text style={styles.codeLabel}>Код:</Text>
+                        <Text style={styles.codeValue}>{user.speciality.code}</Text>
+                      </View>
+                    )}
+                    {user.speciality.name && (
+                      <Text style={styles.specialityValue}>{user.speciality.name}</Text>
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.specialityContent}>
+                    <Text style={styles.emptySpeciality}>
+                      Информация о направлении подготовки отсутствует
+                    </Text>
+                  </View>
+                )}
+              </View>
 
               {/* Verification status */}
               <TouchableOpacity
@@ -377,18 +445,22 @@ export default function ProfileScreen() {
                     <Ionicons name="briefcase-outline" size={18} color="#555" />
                     <Text style={styles.infoLabel}>Должность</Text>
                   </View>
-                  <Text style={styles.infoValue}>{user.position}</Text>
+                  <View style={styles.infoValueWrap}>
+                    <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.position}</Text>
+                  </View>
                 </View>
               )}
 
               {/* Department */}
               {user.department && (
-                <View style={styles.departmentRow}>
-                  <View style={styles.infoLabelContainer}>
+                <View style={styles.departmentSection}>
+                  <View style={styles.departmentHeader}>
                     <Ionicons name="business-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Кафедра</Text>
+                    <Text style={styles.departmentLabel}>Кафедра</Text>
                   </View>
-                  <Text style={styles.departmentValue}>{user.department}</Text>
+                  <View style={styles.departmentContent}>
+                    <Text style={styles.departmentValue}>{user.department}</Text>
+                  </View>
                 </View>
               )}
 
@@ -399,7 +471,9 @@ export default function ProfileScreen() {
                     <Ionicons name="school-outline" size={18} color="#555" />
                     <Text style={styles.infoLabel}>Факультет</Text>
                   </View>
-                  <Text style={styles.infoValue}>{user.faculty}</Text>
+                  <View style={styles.infoValueWrap}>
+                    <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.faculty}</Text>
+                  </View>
                 </View>
               )}
             </View>
@@ -503,6 +577,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 8,
+    flexWrap: 'wrap',
   },
   roleBadge: {
     flexDirection: 'row',
@@ -556,6 +631,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     width: 130,
+    minWidth: 130,
+    flexShrink: 0,
   },
   infoLabel: {
     fontSize: 14,
@@ -568,6 +645,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     alignItems: 'center',
   },
+  infoValueWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+  },
   infoValue: {
     fontSize: 14,
     color: '#333',
@@ -578,38 +661,103 @@ const styles = StyleSheet.create({
     backgroundColor: '#E3F2FD',
     borderRadius: 10,
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     marginLeft: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   yearText: {
     fontSize: 12,
     color: '#1976D2',
-    fontWeight: '500',
+    fontWeight: '600',
   },
-  specialityRow: {
+
+  // Redesigned speciality section
+  specialitySection: {
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  specialityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  specialityLabel: {
+    fontSize: 14,
+    color: '#555',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  specialityContent: {
+    backgroundColor: '#F9F9F9',
+    borderRadius: 8,
+    padding: 10,
+    marginLeft: 26,
   },
   specialityValue: {
     fontSize: 14,
     color: '#333',
     fontWeight: '500',
-    marginTop: 4,
     lineHeight: 20,
+    marginTop: 4,
   },
-  departmentRow: {
+  codeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eaeaea',
+  },
+  codeLabel: {
+    fontSize: 13,
+    color: '#666',
+    fontWeight: '500',
+    marginRight: 8,
+  },
+  codeValue: {
+    fontSize: 15,
+    color: '#1976D2',
+    fontWeight: 'bold',
+  },
+  emptySpeciality: {
+    fontSize: 13,
+    color: '#888',
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+
+  // Redesigned department section for teachers
+  departmentSection: {
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  departmentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  departmentLabel: {
+    fontSize: 14,
+    color: '#555',
+    marginLeft: 8,
+    fontWeight: '500',
+  },
+  departmentContent: {
+    backgroundColor: '#F9F9F9',
+    borderRadius: 8,
+    padding: 10,
+    marginLeft: 26,
   },
   departmentValue: {
     fontSize: 14,
     color: '#333',
     fontWeight: '500',
-    marginTop: 4,
     lineHeight: 20,
   },
+
   verificationRow: {
     flexDirection: 'row',
     alignItems: 'center',

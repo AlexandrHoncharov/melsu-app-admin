@@ -5,6 +5,8 @@ import pymysql
 from functools import wraps
 from db import db
 from datetime import datetime, timedelta
+from werkzeug.utils import secure_filename
+import uuid
 from sqlalchemy import text
 import re
 
@@ -430,8 +432,9 @@ def reply_to_ticket(ticket_id):
     text = request.form.get('text', '').strip()
     new_status = request.form.get('status', ticket.status)
 
-    # Проверяем, что сообщение не пустое
-    if not text:
+    # Проверяем, что сообщение не пустое или есть прикрепленный файл
+    has_attachment = 'attachment' in request.files and request.files['attachment'].filename
+    if not text and not has_attachment:
         flash('Текст сообщения не может быть пустым', 'error')
         return redirect(url_for('view_ticket', ticket_id=ticket_id))
 
@@ -445,7 +448,49 @@ def reply_to_ticket(ticket_id):
             is_read=False
         )
 
-        db.session.add(message)
+        # Обрабатываем прикрепленный файл, если он есть
+        if has_attachment:
+            file = request.files['attachment']
+
+            # Генерируем уникальное имя файла
+            original_filename = secure_filename(file.filename)
+            file_ext = os.path.splitext(original_filename)[1]
+            filename = f"{uuid.uuid4()}{file_ext}"
+            file_path = os.path.join(TICKET_ATTACHMENTS_FOLDER, filename)
+
+            # Убедитесь, что директория существует
+            os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
+
+            # Сохраняем файл
+            file.save(file_path)
+            file_size = os.path.getsize(file_path)
+
+            # Определяем тип файла
+            if file_ext.lower() in ['.jpg', '.jpeg', '.png', '.gif']:
+                file_type = 'image'
+            else:
+                file_type = 'document'
+
+            # Добавляем информацию о вложении в сообщение
+            message.attachment = filename
+
+            # Создаем запись о вложении
+            attachment = TicketAttachment(
+                message_id=0,  # Временное значение, обновим после flush
+                filename=filename,
+                original_filename=original_filename,
+                file_type=file_type,
+                file_size=file_size
+            )
+
+            db.session.add(message)
+            db.session.flush()  # Получаем ID сообщения
+
+            # Обновляем ID сообщения в записи о вложении
+            attachment.message_id = message.id
+            db.session.add(attachment)
+        else:
+            db.session.add(message)
 
         # Обновляем статус тикета, если он изменился
         if new_status != ticket.status:
@@ -475,8 +520,8 @@ def reply_to_ticket(ticket_id):
                         notification_body,
                         {
                             'type': 'ticket_message',
-    'ticket_id': int(ticket.id) if ticket.id is not None else None,  # Явное преобразование в int
-    'timestamp': datetime.utcnow().isoformat()
+                            'ticket_id': int(ticket.id) if ticket.id is not None else None,
+                            'timestamp': datetime.utcnow().isoformat()
                         }
                     )
         except Exception as notify_error:
@@ -486,6 +531,7 @@ def reply_to_ticket(ticket_id):
         flash('Ответ успешно отправлен', 'success')
     except Exception as e:
         db.session.rollback()
+        print(f"Error in reply_to_ticket: {str(e)}")
         flash(f'Ошибка при отправке ответа: {str(e)}', 'error')
 
     return redirect(url_for('view_ticket', ticket_id=ticket_id))

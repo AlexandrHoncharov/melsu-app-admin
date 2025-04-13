@@ -9,7 +9,7 @@ def create_database():
     connection = pymysql.connect(
         host='localhost',
         user='root',
-        password='your_new_password',
+        password='',
         charset='utf8mb4'
     )
 

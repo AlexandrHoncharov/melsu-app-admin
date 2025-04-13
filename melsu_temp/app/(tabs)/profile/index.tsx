@@ -1,4 +1,3 @@
-// File: melsu_temp/app/(tabs)/profile/index.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -13,6 +12,7 @@ import {
   Platform,
   StatusBar,
   Dimensions,
+  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../hooks/useAuth';
@@ -30,6 +30,7 @@ interface MenuItem {
   iconBgColor: string;
   iconColor: string;
   route: string;
+  badge?: number;
 }
 
 export default function ProfileScreen() {
@@ -38,6 +39,10 @@ export default function ProfileScreen() {
   // Состояние для хранения информации о курсе
   const [course, setCourse] = useState<number | null>(null);
   const [isLoadingCourse, setIsLoadingCourse] = useState(false);
+  // Состояние для хранения количества непрочитанных тикетов
+  const [unreadTickets, setUnreadTickets] = useState<number>(0);
+  // Состояние для отслеживания, загружены ли непрочитанные тикеты
+  const [ticketsLoaded, setTicketsLoaded] = useState<boolean>(false);
 
   // Функция для загрузки информации о курсе
   const loadCourseInfo = async (groupName: string, forceRefresh: boolean = false) => {
@@ -60,6 +65,22 @@ export default function ProfileScreen() {
       setCourse(null);
     } finally {
       setIsLoadingCourse(false);
+    }
+  };
+
+  // Функция для загрузки количества непрочитанных тикетов
+  const loadUnreadTickets = async () => {
+    try {
+      // Импортируем API для тикетов только при необходимости (ленивый импорт)
+      const ticketsApi = (await import('../../../src/api/ticketsApi')).default;
+
+      const result = await ticketsApi.getUnreadCount();
+      setUnreadTickets(result.unread_tickets);
+      setTicketsLoaded(true);
+    } catch (error) {
+      console.error('Error loading unread tickets count:', error);
+      setUnreadTickets(0);
+      setTicketsLoaded(true);
     }
   };
 
@@ -106,6 +127,13 @@ export default function ProfileScreen() {
     }
   }, [user?.group]);
 
+  // Загружаем количество непрочитанных тикетов при инициализации
+  useEffect(() => {
+    if (user) {
+      loadUnreadTickets();
+    }
+  }, [user]);
+
   // Profile refresh handler
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -120,6 +148,9 @@ export default function ProfileScreen() {
       if (user?.role === 'student' && user?.group) {
         await loadCourseInfo(user.group, true); // Форсируем обновление курса
       }
+
+      // Обновляем количество непрочитанных тикетов
+      await loadUnreadTickets();
     } catch (error) {
       console.error('Error refreshing profile:', error);
       Alert.alert(
@@ -217,7 +248,7 @@ export default function ProfileScreen() {
     return '';
   };
 
-  // Prepare menu items
+  // Подготовка меню
   const getMenuItems = (): MenuItem[] => {
     // Common items for all users
     const commonItems: MenuItem[] = [
@@ -249,8 +280,18 @@ export default function ProfileScreen() {
         route: '/notification-settings'
       },
       {
+        id: 'tickets',
+        title: 'Техническая поддержка',
+        subtitle: 'Обращения в службу поддержки',
+        icon: 'ticket-outline',
+        iconBgColor: '#EDE7F6',
+        iconColor: '#673AB7',
+        route: '/profile/tickets',
+        badge: ticketsLoaded ? unreadTickets : undefined
+      },
+      {
         id: 'support',
-        title: 'Поддержка',
+        title: 'Справка',
         subtitle: 'Получите помощь по использованию',
         icon: 'help-buoy-outline',
         iconBgColor: '#FFF3E0',
@@ -317,8 +358,9 @@ export default function ProfileScreen() {
       console.log("Normalized user data:", user);
       console.log("Speciality data:", user?.speciality);
       console.log("Course data:", course);
+      console.log("Unread tickets:", unreadTickets);
     }
-  }, [originalUser, user, course]);
+  }, [originalUser, user, course, unreadTickets]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -510,6 +552,11 @@ export default function ProfileScreen() {
             >
               <View style={[styles.menuIconContainer, { backgroundColor: item.iconBgColor }]}>
                 <Ionicons name={item.icon} size={24} color={item.iconColor} />
+                {typeof item.badge === 'number' && item.badge > 0 && (
+                  <View style={styles.badgeContainer}>
+                    <Text style={styles.badgeText}>{item.badge > 99 ? '99+' : item.badge}</Text>
+                  </View>
+                )}
               </View>
               <Text style={styles.menuTitle}>{item.title}</Text>
               <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
@@ -822,6 +869,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
+    position: 'relative',
+  },
+  badgeContainer: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    backgroundColor: '#bb0000',
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  badgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
   menuTitle: {
     fontSize: 14,

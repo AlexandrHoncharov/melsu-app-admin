@@ -247,6 +247,13 @@ export function usePushNotifications() {
       } else if (data?.type === 'verification') {
         router.push('/verification');
       }
+      else if (data?.type === 'ticket_message' && data?.ticket_id) {
+        // Переход на страницу тикета при нажатии на уведомление о новом сообщении в тикете
+        router.push({
+          pathname: '/profile/ticket-details',
+          params: { ticketId: data.ticket_id }
+        });
+      }
     });
 
     return () => {

@@ -1,20 +1,14 @@
-// File: components/InAppNotification.tsx
-import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Animated, StyleSheet, Dimensions } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-
-const { width } = Dimensions.get('window');
 
 interface InAppNotificationProps {
   title: string;
   message: string;
-  type: 'chat_message' | 'verification' | 'test';
-  data?: any;
+  type: string;
+  data: any;
   onDismiss: () => void;
-  autoDismiss?: boolean;
-  duration?: number;
 }
 
 const InAppNotification: React.FC<InAppNotificationProps> = ({
@@ -22,95 +16,85 @@ const InAppNotification: React.FC<InAppNotificationProps> = ({
   message,
   type,
   data,
-  onDismiss,
-  autoDismiss = true,
-  duration = 5000,
+  onDismiss
 }) => {
-  const translateY = useRef(new Animated.Value(-100)).current;
-  const [isVisible, setIsVisible] = useState(true);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const translateY = new Animated.Value(-100);
 
   useEffect(() => {
-    // Vibrate when notification appears
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-    // Animate in
-    Animated.spring(translateY, {
+    // Анимация появления
+    Animated.timing(translateY, {
       toValue: 0,
-      useNativeDriver: true,
-      tension: 80,
-      friction: 10,
+      duration: 300,
+      useNativeDriver: true
     }).start();
 
-    // Auto dismiss if enabled
-    if (autoDismiss) {
-      timeoutRef.current = setTimeout(() => {
-        dismissNotification();
-      }, duration);
-    }
+    // Автоматическое скрытие через 5 секунд
+    const timer = setTimeout(() => {
+      handleDismiss();
+    }, 5000);
 
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
+    return () => clearTimeout(timer);
   }, []);
 
-  const dismissNotification = () => {
-    if (!isVisible) return;
-
-    setIsVisible(false);
+  const handleDismiss = () => {
+    // Анимация исчезновения
     Animated.timing(translateY, {
       toValue: -100,
       duration: 300,
-      useNativeDriver: true,
+      useNativeDriver: true
     }).start(() => {
       onDismiss();
     });
   };
 
+  // Обработка нажатия на уведомление
   const handlePress = () => {
-    dismissNotification();
+    handleDismiss();
 
+    // Навигация в зависимости от типа уведомления
     if (type === 'chat_message' && data?.chat_id) {
       router.push(`/chat/${data.chat_id}`);
-    } else if (type === 'verification') {
-      router.push('/verification');
+    } else if (type === 'ticket_message' && data?.ticket_id) {
+      router.push({
+        pathname: '/profile/ticket-details',
+        params: { ticketId: data.ticket_id }
+      });
     }
   };
 
-  // Choose icon based on notification type
-  let iconName = 'notifications-outline';
-  if (type === 'chat_message') iconName = 'chatbubble-outline';
-  else if (type === 'verification') iconName = 'shield-checkmark-outline';
+  // Определяем иконку в зависимости от типа уведомления
+  let icon = 'notifications-outline';
+  if (type === 'chat_message') {
+    icon = 'chatbubble-outline';
+  } else if (type === 'ticket_message') {
+    icon = 'ticket-outline';
+  }
 
   return (
     <Animated.View
       style={[
         styles.container,
-        { transform: [{ translateY }] }
+        { transform: [{ translateY }] },
+        Platform.OS === 'ios' && styles.iosContainer
       ]}
     >
       <TouchableOpacity
-        style={styles.contentContainer}
-        activeOpacity={0.8}
+        style={styles.content}
+        activeOpacity={0.9}
         onPress={handlePress}
       >
         <View style={styles.iconContainer}>
-          <Ionicons name={iconName as any} size={24} color="#fff" />
+          <Ionicons name={icon} size={24} color="#FFFFFF" />
         </View>
-
         <View style={styles.textContainer}>
           <Text style={styles.title} numberOfLines={1}>{title}</Text>
           <Text style={styles.message} numberOfLines={2}>{message}</Text>
         </View>
-
         <TouchableOpacity
           style={styles.closeButton}
-          onPress={dismissNotification}
-          hitSlop={{ top: 15, right: 15, bottom: 15, left: 15 }}
+          onPress={handleDismiss}
         >
-          <Ionicons name="close-outline" size={20} color="#999" />
+          <Ionicons name="close" size={24} color="#999" />
         </TouchableOpacity>
       </TouchableOpacity>
     </Animated.View>
@@ -123,49 +107,50 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 9999,
-    paddingTop: 40, // Safe area
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    backgroundColor: 'transparent',
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 5,
+    zIndex: 999,
   },
-  contentContainer: {
+  iosContainer: {
+    paddingTop: 44, // Safe area for iOS notch
+  },
+  content: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
     padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.22,
-    shadowRadius: 2.22,
-    elevation: 3,
   },
   iconContainer: {
-    height: 40,
     width: 40,
+    height: 40,
     borderRadius: 20,
-    backgroundColor: '#770002',
+    backgroundColor: '#bb0000',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   textContainer: {
     flex: 1,
-    marginRight: 8,
+    marginRight: 10,
   },
   title: {
-    fontWeight: 'bold',
     fontSize: 14,
+    fontWeight: 'bold',
     color: '#333',
     marginBottom: 2,
   },
   message: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#666',
   },
   closeButton: {
-    padding: 4,
+    width: 30,
+    height: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
 

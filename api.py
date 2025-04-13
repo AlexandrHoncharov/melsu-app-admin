@@ -13,6 +13,16 @@ from models import User, Teacher, Schedule, VerificationLog, DeviceToken, Schedu
 import firebase_admin
 from firebase_admin import credentials, auth
 
+
+import os
+import uuid
+from flask import request, jsonify, send_from_directory
+from werkzeug.utils import secure_filename
+from models import Ticket, TicketMessage, TicketAttachment
+
+# Папка для хранения прикрепленных файлов
+
+
 app = Flask(__name__)
 CORS(app)
 
@@ -29,6 +39,8 @@ STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
 # Создаем папки, если их нет
 os.makedirs(STUDENT_CARDS_FOLDER, exist_ok=True)
 
+TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
+os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 
 if not firebase_admin._apps:
     cred = credentials.Certificate('firebase.json')
@@ -762,6 +774,419 @@ def get_course_from_schedule(current_user):
             'success': False
         }), 500
 
+
+@app.route('/api/tickets', methods=['GET'])
+@token_required
+def get_user_tickets(current_user):
+    try:
+        # Получаем параметры фильтрации
+        status = request.args.get('status', None)
+        category = request.args.get('category', None)
+
+        # Базовый запрос
+        query = Ticket.query.filter_by(user_id=current_user.id)
+
+        # Применяем фильтры, если они указаны
+        if status:
+            query = query.filter_by(status=status)
+        if category:
+            query = query.filter_by(category=category)
+
+        # Сортируем по дате обновления (сначала новые)
+        tickets = query.order_by(Ticket.updated_at.desc()).all()
+
+        # Преобразуем в формат JSON
+        return jsonify([ticket.to_dict() for ticket in tickets]), 200
+
+    except Exception as e:
+        print(f"Error getting tickets: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+# Создание нового тикета
+@app.route('/api/tickets', methods=['POST'])
+@token_required
+def create_ticket(current_user):
+    try:
+        data = request.json
+
+        # Проверяем обязательные поля
+        required_fields = ['title', 'category', 'message']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"message": f"Field {field} is required"}), 400
+
+        # Создаем новый тикет
+        new_ticket = Ticket(
+            user_id=current_user.id,
+            title=data['title'],
+            category=data['category'],
+            priority=data.get('priority', 'medium'),
+            status='new',
+            has_admin_unread=True,
+            has_user_unread=False
+        )
+
+        # Если указаны связанные данные
+        if 'related_type' in data and 'related_id' in data:
+            new_ticket.related_type = data['related_type']
+            new_ticket.related_id = data['related_id']
+
+        db.session.add(new_ticket)
+        db.session.flush()  # Чтобы получить ID тикета
+
+        # Создаем первое сообщение
+        message = TicketMessage(
+            ticket_id=new_ticket.id,
+            user_id=current_user.id,
+            is_from_admin=False,
+            text=data['message'],
+            is_read=True  # Сообщение от пользователя считается прочитанным пользователем
+        )
+
+        db.session.add(message)
+        db.session.commit()
+
+        # Отправляем уведомление администраторам (можно реализовать позже)
+
+        return jsonify({
+            "message": "Ticket created successfully",
+            "ticket": new_ticket.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error creating ticket: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+# Получение деталей тикета
+@app.route('/api/tickets/<int:ticket_id>', methods=['GET'])
+@token_required
+def get_ticket_details(current_user, ticket_id):
+    try:
+        # Находим тикет и проверяем, принадлежит ли он текущему пользователю
+        ticket = Ticket.query.get_or_404(ticket_id)
+
+        if ticket.user_id != current_user.id and not current_user.is_admin:
+            return jsonify({"message": "Access denied"}), 403
+
+        # Получаем все сообщения тикета
+        messages = [message.to_dict() for message in ticket.messages]
+
+        # Если текущий пользователь не админ, отмечаем сообщения как прочитанные
+        if not current_user.is_admin and ticket.has_user_unread:
+            # Находим все непрочитанные сообщения от администратора
+            unread_messages = TicketMessage.query.filter_by(
+                ticket_id=ticket.id,
+                is_from_admin=True,
+                is_read=False
+            ).all()
+
+            # Отмечаем их как прочитанные
+            for message in unread_messages:
+                message.is_read = True
+
+            # Обновляем флаг непрочитанных сообщений
+            ticket.has_user_unread = False
+            db.session.commit()
+
+        # Возвращаем данные тикета и сообщения
+        return jsonify({
+            "ticket": ticket.to_dict(),
+            "messages": messages
+        }), 200
+
+    except Exception as e:
+        print(f"Error getting ticket details: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+# Добавление сообщения к тикету
+@app.route('/api/tickets/<int:ticket_id>/messages', methods=['POST'])
+@token_required
+def add_ticket_message(current_user, ticket_id):
+    try:
+        # Находим тикет
+        ticket = Ticket.query.get_or_404(ticket_id)
+
+        # Проверяем права доступа
+        if ticket.user_id != current_user.id and not current_user.is_admin:
+            return jsonify({"message": "Access denied"}), 403
+
+        # Получаем данные сообщения
+        data = request.json
+        if 'text' not in data or not data['text'].strip():
+            return jsonify({"message": "Message text is required"}), 400
+
+        # Определяем, от кого сообщение
+        is_from_admin = current_user.is_admin
+
+        # Создаем новое сообщение
+        new_message = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=current_user.id,
+            is_from_admin=is_from_admin,
+            text=data['text'],
+            is_read=False
+        )
+
+        db.session.add(new_message)
+
+        # Обновляем статус тикета, если указан
+        if 'status' in data and data['status'] and current_user.is_admin:
+            ticket.status = data['status']
+
+        # Если был закрыт, но пользователь отвечает, переводим в статус ожидания
+        if ticket.status == 'closed' and not is_from_admin:
+            ticket.status = 'waiting'
+
+        # Обновляем флаги непрочитанных сообщений
+        if is_from_admin:
+            ticket.has_user_unread = True
+        else:
+            ticket.has_admin_unread = True
+
+        # Обновляем время последнего обновления
+        ticket.updated_at = datetime.datetime.utcnow()
+
+        db.session.commit()
+
+        # Отправляем уведомление (если сообщение от админа - пользователю, иначе - админам)
+        try:
+            recipient_id = ticket.user_id if is_from_admin else None  # Для админов нужна другая логика
+
+            if recipient_id:
+                # Получаем получателя
+                recipient = User.query.get(recipient_id)
+                if recipient:
+                    # Получаем токены устройств
+                    device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
+
+                    if device_tokens:
+                        # Формируем данные уведомления
+                        notification_title = "Новый ответ в обращении"
+                        notification_body = f"Получен ответ на ваше обращение: {ticket.title}"
+
+                        # Отправляем уведомление на каждое устройство
+                        for token_obj in device_tokens:
+                            send_push_message(
+                                token_obj.token,
+                                notification_title,
+                                notification_body,
+                                {
+                                    'type': 'ticket_message',
+                                    'ticket_id': ticket.id,
+                                    'timestamp': datetime.datetime.utcnow().isoformat()
+                                }
+                            )
+        except Exception as notify_error:
+            # Логируем ошибку, но не прерываем основной процесс
+            print(f"Error sending notification: {str(notify_error)}")
+
+        return jsonify({
+            "message": "Message added successfully",
+            "ticket_message": new_message.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error adding message: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+# Загрузка прикрепленного файла
+@app.route('/api/tickets/<int:ticket_id>/attachment', methods=['POST'])
+@token_required
+def upload_ticket_attachment(current_user, ticket_id):
+    try:
+        # Находим тикет
+        ticket = Ticket.query.get_or_404(ticket_id)
+
+        # Проверяем права доступа
+        if ticket.user_id != current_user.id and not current_user.is_admin:
+            return jsonify({"message": "Access denied"}), 403
+
+        # Проверяем, что файл отправлен
+        if 'file' not in request.files:
+            return jsonify({"message": "No file part"}), 400
+
+        file = request.files['file']
+
+        # Проверяем, что имя файла не пустое
+        if file.filename == '':
+            return jsonify({"message": "No selected file"}), 400
+
+        # Текст сообщения (опционально)
+        message_text = request.form.get('text', '')
+
+        # Безопасное имя файла
+        original_filename = secure_filename(file.filename)
+
+        # Генерируем уникальное имя файла
+        filename = f"{uuid.uuid4()}{os.path.splitext(original_filename)[1]}"
+        file_path = os.path.join(TICKET_ATTACHMENTS_FOLDER, filename)
+
+        # Сохраняем файл
+        file.save(file_path)
+
+        # Определяем тип файла
+        file_ext = os.path.splitext(original_filename)[1].lower()
+        if file_ext in ['.jpg', '.jpeg', '.png', '.gif']:
+            file_type = 'image'
+        else:
+            file_type = 'document'
+
+        # Создаем сообщение
+        is_from_admin = current_user.is_admin
+        new_message = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=current_user.id,
+            is_from_admin=is_from_admin,
+            text=message_text,
+            attachment=filename,
+            is_read=False
+        )
+
+        db.session.add(new_message)
+
+        # Создаем запись о прикрепленном файле
+        attachment = TicketAttachment(
+            message_id=new_message.id,
+            filename=filename,
+            original_filename=original_filename,
+            file_type=file_type,
+            file_size=os.path.getsize(file_path)
+        )
+
+        db.session.add(attachment)
+
+        # Обновляем флаги непрочитанных сообщений и время обновления тикета
+        if is_from_admin:
+            ticket.has_user_unread = True
+        else:
+            ticket.has_admin_unread = True
+
+        ticket.updated_at = datetime.datetime.utcnow()
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "File uploaded successfully",
+            "ticket_message": new_message.to_dict()
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error uploading file: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+# Получение прикрепленного файла
+@app.route('/api/uploads/ticket_attachments/<filename>', methods=['GET'])
+@token_required
+def get_ticket_attachment(current_user, filename):
+    try:
+        # Находим запись о прикрепленном файле
+        attachment = TicketAttachment.query.filter_by(filename=filename).first_or_404()
+
+        # Находим сообщение и тикет
+        message = TicketMessage.query.get_or_404(attachment.message_id)
+        ticket = Ticket.query.get_or_404(message.ticket_id)
+
+        # Проверяем права доступа (только пользователь-владелец тикета или админ)
+        if ticket.user_id != current_user.id and not current_user.is_admin:
+            return jsonify({"message": "Access denied"}), 403
+
+        return send_from_directory(TICKET_ATTACHMENTS_FOLDER, filename)
+
+    except Exception as e:
+        print(f"Error getting attachment: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+# Изменение статуса тикета
+@app.route('/api/tickets/<int:ticket_id>/status', methods=['PUT'])
+@token_required
+def update_ticket_status(current_user, ticket_id):
+    try:
+        # Находим тикет
+        ticket = Ticket.query.get_or_404(ticket_id)
+
+        # Проверяем права доступа
+        is_owner = ticket.user_id == current_user.id
+        if not is_owner and not current_user.is_admin:
+            return jsonify({"message": "Access denied"}), 403
+
+        data = request.json
+        if 'status' not in data:
+            return jsonify({"message": "Status is required"}), 400
+
+        new_status = data['status']
+        comment = data.get('comment', '')
+
+        # Проверка допустимости статуса и прав на его изменение
+        valid_statuses = ['new', 'in_progress', 'waiting', 'resolved', 'closed']
+        if new_status not in valid_statuses:
+            return jsonify({"message": "Invalid status"}), 400
+
+        # Пользователь может только закрыть тикет или повторно открыть
+        if is_owner and not current_user.is_admin:
+            if new_status not in ['closed', 'waiting']:
+                return jsonify({"message": "You can only close the ticket or reopen it"}), 403
+
+        # Обновляем статус
+        ticket.status = new_status
+        ticket.updated_at = datetime.datetime.utcnow()
+
+        # Добавляем комментарий к изменению статуса, если он предоставлен
+        if comment:
+            status_message = TicketMessage(
+                ticket_id=ticket.id,
+                user_id=current_user.id,
+                is_from_admin=current_user.is_admin,
+                text=comment,
+                is_read=False
+            )
+            db.session.add(status_message)
+
+            # Обновляем флаги непрочитанных сообщений
+            if current_user.is_admin:
+                ticket.has_user_unread = True
+            else:
+                ticket.has_admin_unread = True
+
+        db.session.commit()
+
+        return jsonify({
+            "message": "Ticket status updated successfully",
+            "ticket": ticket.to_dict()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating ticket status: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+# Получение количества непрочитанных тикетов/сообщений
+@app.route('/api/tickets/unread-count', methods=['GET'])
+@token_required
+def get_unread_tickets_count(current_user):
+    try:
+        # Находим тикеты с непрочитанными сообщениями для текущего пользователя
+        unread_tickets = Ticket.query.filter_by(
+            user_id=current_user.id,
+            has_user_unread=True
+        ).count()
+
+        return jsonify({
+            "unread_tickets": unread_tickets
+        }), 200
+
+    except Exception as e:
+        print(f"Error getting unread tickets count: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
 
 # Маршрут для загрузки фото студенческого билета
 @app.route('/api/student/verify', methods=['POST'])

@@ -1,0 +1,240 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Обращение #{{ ticket.id }}</h1>
+        <a href="{{ url_for('tickets_list') }}" class="text-gray-600 hover:text-gray-800">
+            Вернуться к списку
+        </a>
+    </div>
+
+    <!-- Информация о тикете -->
+    <div class="bg-gray-50 p-6 rounded-lg mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+                <h2 class="text-xl font-bold text-gray-700 mb-4">{{ ticket.title }}</h2>
+
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Категория:</div>
+                    <div class="col-span-2">
+                        {% if ticket.category == 'technical' %}
+                            <span class="bg-purple-100 text-purple-800 py-1 px-3 rounded-full text-xs">Техническая проблема</span>
+                        {% elif ticket.category == 'schedule' %}
+                            <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Проблема с расписанием</span>
+                        {% elif ticket.category == 'verification' %}
+                            <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs">Вопрос по верификации</span>
+                        {% else %}
+                            <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Другое</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Статус:</div>
+                    <div class="col-span-2">
+                        <span class="bg-{{ statuses[ticket.status].color }}-100 text-{{ statuses[ticket.status].color }}-800 py-1 px-3 rounded-full text-xs">
+                            {{ statuses[ticket.status].label }}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Приоритет:</div>
+                    <div class="col-span-2">
+                        {% if ticket.priority == 'low' %}
+                            <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Низкий</span>
+                        {% elif ticket.priority == 'medium' %}
+                            <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">Средний</span>
+                        {% elif ticket.priority == 'high' %}
+                            <span class="bg-red-100 text-red-800 py-1 px-3 rounded-full text-xs">Высокий</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Пользователь:</div>
+                    <div class="col-span-2">
+                        <a href="{{ url_for('view_student_details', student_id=user.id) if user.role == 'student' else '#' }}" class="text-blue-600 hover:text-blue-800">
+                            {{ user.full_name or user.username }}
+                        </a>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Роль:</div>
+                    <div class="col-span-2">
+                        {% if user.role == 'student' %}
+                            <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs">Студент</span>
+                        {% elif user.role == 'teacher' %}
+                            <span class="bg-purple-100 text-purple-800 py-1 px-3 rounded-full text-xs">Преподаватель</span>
+                        {% else %}
+                            <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">{{ user.role or 'Пользователь' }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if user.role == 'student' and user.group %}
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Группа:</div>
+                    <div class="col-span-2">{{ user.group }}</div>
+                </div>
+                {% endif %}
+
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Создан:</div>
+                    <div class="col-span-2">{{ ticket.created_at.strftime('%d.%m.%Y %H:%M') }}</div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4 mb-3">
+                    <div class="font-medium text-gray-600">Обновлен:</div>
+                    <div class="col-span-2">{{ ticket.updated_at.strftime('%d.%m.%Y %H:%M') }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- История сообщений -->
+    <div class="mb-6">
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">История сообщений</h2>
+
+        <div class="space-y-4">
+            {% for message in messages %}
+                <div class="p-4 rounded-lg {{ 'bg-blue-50 ml-8' if message.is_from_admin else 'bg-gray-50 mr-8' }}">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="font-medium {{ 'text-blue-600' if message.is_from_admin else 'text-gray-700' }}">
+                            {{ message.user.full_name or message.user.username }}
+                            {% if message.is_from_admin %}
+                                <span class="bg-blue-100 text-blue-800 py-0.5 px-2 rounded text-xs ml-2">Администратор</span>
+                            {% endif %}
+                        </div>
+                        <div class="text-sm text-gray-500">
+                            {{ message.created_at.strftime('%d.%m.%Y %H:%M') }}
+                        </div>
+                    </div>
+
+                    <div class="text-gray-700 whitespace-pre-wrap">{{ message.text }}</div>
+
+                    {% if message.attachment %}
+                        <div class="mt-3 p-2 bg-white rounded border border-gray-200">
+                            <div class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                </svg>
+                                <span class="ml-2 text-sm text-gray-700">
+                                    {% if hasattr(message, 'attachment_info') %}
+                                        {{ message.attachment_info.original_filename }}
+                                    {% else %}
+                                        Прикрепленный файл
+                                    {% endif %}
+                                </span>
+                                <a href="{{ url_for('get_ticket_attachment_admin', filename=message.attachment) }}"
+                                   class="ml-auto bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-1 px-2 rounded"
+                                   target="_blank">
+                                    Просмотреть
+                                </a>
+                                <a href="{{ url_for('get_ticket_attachment_admin', filename=message.attachment, download=1) }}"
+                                   class="ml-2 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded">
+                                    Скачать
+                                </a>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Форма ответа -->
+    <div>
+        <h2 class="text-lg font-semibold text-gray-800 mb-4">Ответить</h2>
+
+        <form action="{{ url_for('reply_to_ticket', ticket_id=ticket.id) }}" method="POST" class="space-y-4">
+            <div>
+                <label for="text" class="block text-sm font-medium text-gray-700 mb-2">Сообщение</label>
+                <textarea id="text" name="text" rows="4"
+                          class="shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border-gray-300 rounded-md p-2"
+                          required></textarea>
+            </div>
+
+            <div>
+                <label for="status" class="block text-sm font-medium text-gray-700 mb-2">Изменить статус</label>
+                <select id="status" name="status"
+                        class="shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border-gray-300 rounded-md p-2">
+                    <option value="{{ ticket.status }}">Оставить текущий ({{ statuses[ticket.status].label }})</option>
+                    <option value="in_progress">В обработке</option>
+                    <option value="waiting">Требует уточнения</option>
+                    <option value="resolved">Решен</option>
+                    <option value="closed">Закрыт</option>
+                </select>
+            </div>
+
+            <div class="flex justify-end space-x-3 mt-4">
+                <!-- Быстрые ответы - шаблоны -->
+                <div class="relative inline-block text-left">
+                    <div>
+                        <button type="button" id="quickRepliesButton"
+                                class="inline-flex justify-center w-full rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none"
+                                onclick="toggleQuickReplies()">
+                            Шаблоны ответов
+                            <svg id="dropdownIcon" class="-mr-1 ml-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="quickRepliesMenu" class="hidden origin-top-right absolute right-0 mt-2 w-72 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
+                        <div class="py-1">
+                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                    onclick="insertQuickReply('Здравствуйте! Благодарим за обращение. Ваш запрос принят в работу, мы рассмотрим его и свяжемся с вами в ближайшее время.')">
+                                Подтверждение получения запроса
+                            </button>
+                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                    onclick="insertQuickReply('Пожалуйста, предоставьте дополнительную информацию для более точного решения вашей проблемы: [какая информация нужна]')">
+                                Запрос дополнительной информации
+                            </button>
+                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                    onclick="insertQuickReply('Мы решили вашу проблему. Пожалуйста, проверьте и сообщите, если у вас остались вопросы.')">
+                                Уведомление о решении
+                            </button>
+                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                    onclick="insertQuickReply('Благодарим за ваше терпение. К сожалению, решение вашей проблемы требует дополнительного времени. Мы сообщим вам о результатах как можно скорее.')">
+                                Уведомление о задержке
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="bg-primary hover:bg-red-900 text-white py-2 px-4 rounded-md">
+                    Отправить ответ
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function toggleQuickReplies() {
+    const menu = document.getElementById('quickRepliesMenu');
+    menu.classList.toggle('hidden');
+}
+
+function insertQuickReply(text) {
+    const textarea = document.getElementById('text');
+    textarea.value = text;
+    document.getElementById('quickRepliesMenu').classList.add('hidden');
+    textarea.focus();
+}
+
+// Закрытие меню при клике вне его
+document.addEventListener('click', function(event) {
+    const menu = document.getElementById('quickRepliesMenu');
+    const button = document.getElementById('quickRepliesButton');
+
+    if (!menu.contains(event.target) && !button.contains(event.target) && !menu.classList.contains('hidden')) {
+        menu.classList.add('hidden');
+    }
+});
+</script>
+{% endblock %}

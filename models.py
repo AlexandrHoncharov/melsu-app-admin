@@ -164,3 +164,115 @@ class DeviceToken(db.Model):
 
     def __repr__(self):
         return f'<DeviceToken {self.token[:10]}... ({self.platform})>'
+
+
+class Ticket(db.Model):
+    """Модель для тикетов технической поддержки"""
+    __tablename__ = 'ticket'
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user = db.relationship('User', backref=db.backref('tickets', lazy=True))
+
+    # Метаданные тикета
+    title = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
+    category = db.Column(db.String(50, collation='utf8mb4_unicode_ci'),
+                         nullable=False)  # 'technical', 'schedule', 'verification', 'other'
+    priority = db.Column(db.String(20, collation='utf8mb4_unicode_ci'), default='medium')  # 'low', 'medium', 'high'
+    status = db.Column(db.String(20, collation='utf8mb4_unicode_ci'),
+                       default='new')  # 'new', 'in_progress', 'waiting', 'resolved', 'closed'
+
+    # Контент и временные метки
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Для связывания с другими сущностями
+    related_type = db.Column(db.String(50, collation='utf8mb4_unicode_ci'),
+                             nullable=True)  # 'schedule', 'verification', etc.
+    related_id = db.Column(db.Integer, nullable=True)  # ID связанной записи
+
+    # Для отслеживания непрочитанных ответов
+    has_user_unread = db.Column(db.Boolean, default=False)  # Есть ли непрочитанные сообщения для пользователя
+    has_admin_unread = db.Column(db.Boolean, default=True)  # Есть ли непрочитанные сообщения для администратора
+
+    def __repr__(self):
+        return f'<Ticket {self.id} {self.title}>'
+
+    def to_dict(self):
+        """Преобразует тикет в словарь для API"""
+        return {
+            'id': self.id,
+            'title': self.title,
+            'category': self.category,
+            'priority': self.priority,
+            'status': self.status,
+            'created_at': self.created_at.isoformat(),
+            'updated_at': self.updated_at.isoformat(),
+            'has_unread': self.has_user_unread,
+            'messages_count': len(self.messages),
+            'last_message': self.messages[-1].to_dict() if self.messages else None
+        }
+
+
+class TicketMessage(db.Model):
+    """Модель для сообщений в тикете"""
+    __tablename__ = 'ticket_message'
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = db.Column(db.Integer, primary_key=True)
+    ticket_id = db.Column(db.Integer, db.ForeignKey('ticket.id'), nullable=False)
+    ticket = db.relationship('Ticket', backref=db.backref('messages', lazy=True, order_by='TicketMessage.created_at'))
+
+    # Отправитель (пользователь или администратор)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    user = db.relationship('User')
+    is_from_admin = db.Column(db.Boolean, default=False)
+
+    # Контент сообщения
+    text = db.Column(db.Text(collation='utf8mb4_unicode_ci'), nullable=False)
+    attachment = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=True)  # Путь к прикрепленному файлу
+
+    # Временные метки
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Статус прочтения
+    is_read = db.Column(db.Boolean, default=False)
+
+    def __repr__(self):
+        return f'<TicketMessage {self.id} ticket:{self.ticket_id}>'
+
+    def to_dict(self):
+        """Преобразует сообщение в словарь для API"""
+        return {
+            'id': self.id,
+            'text': self.text,
+            'is_from_admin': self.is_from_admin,
+            'created_at': self.created_at.isoformat(),
+            'is_read': self.is_read,
+            'attachment': self.attachment,
+            'user': {
+                'id': self.user.id,
+                'name': self.user.full_name or self.user.username
+            }
+        }
+
+
+class TicketAttachment(db.Model):
+    """Модель для хранения информации о прикрепленных файлах к тикетам"""
+    __tablename__ = 'ticket_attachment'
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('ticket_message.id'), nullable=False)
+    message = db.relationship('TicketMessage', backref=db.backref('attachments', lazy=True))
+
+    filename = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
+    original_filename = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
+    file_type = db.Column(db.String(50, collation='utf8mb4_unicode_ci'), nullable=False)  # 'image', 'document', etc.
+    file_size = db.Column(db.Integer, nullable=False)  # Size in bytes
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<TicketAttachment {self.id} {self.filename}>'

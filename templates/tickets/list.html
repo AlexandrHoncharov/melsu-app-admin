@@ -1,0 +1,158 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-gray-800">Обращения пользователей</h1>
+        <div class="flex space-x-2">
+            <a href="{{ url_for('tickets_dashboard') }}" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded">
+                Статистика
+            </a>
+        </div>
+    </div>
+
+    <!-- Фильтры и поиск -->
+    <div class="mb-6">
+        <form action="{{ url_for('tickets_list') }}" method="GET" class="flex flex-wrap gap-2">
+            <input type="text" name="search" value="{{ search_query|default('', true) }}"
+                   class="flex-grow px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                   placeholder="Поиск по заголовку или имени пользователя">
+
+            <select name="category" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                {% for category in categories %}
+                    <option value="{{ category.value }}" {% if category.value == current_category %}selected{% endif %}>
+                        {{ category.label }}
+                    </option>
+                {% endfor %}
+            </select>
+
+            <select name="status" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                {% for status in statuses %}
+                    <option value="{{ status.value }}" {% if status.value == current_status %}selected{% endif %}>
+                        {{ status.label }}
+                    </option>
+                {% endfor %}
+            </select>
+
+            <button type="submit" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 border rounded-md">
+                Применить
+            </button>
+
+            {% if search_query or current_status != 'all' or current_category != 'all' %}
+                <a href="{{ url_for('tickets_list') }}" class="flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm">
+                    Сбросить
+                </a>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Таблица с тикетами -->
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white">
+            <thead>
+                <tr class="bg-gray-100 text-gray-600 uppercase text-sm leading-normal">
+                    <th class="py-3 px-6 text-left">ID</th>
+                    <th class="py-3 px-6 text-left">Заголовок</th>
+                    <th class="py-3 px-6 text-left">Пользователь</th>
+                    <th class="py-3 px-6 text-center">Категория</th>
+                    <th class="py-3 px-6 text-center">Статус</th>
+                    <th class="py-3 px-6 text-center">Приоритет</th>
+                    <th class="py-3 px-6 text-center">Дата обновления</th>
+                    <th class="py-3 px-6 text-center">Действия</th>
+                </tr>
+            </thead>
+            <tbody class="text-gray-600 text-sm">
+                {% if tickets %}
+                    {% for ticket in tickets %}
+                        <tr class="border-b border-gray-200 hover:bg-gray-50
+                                  {% if ticket.has_admin_unread %}bg-yellow-50{% endif %}">
+                            <td class="py-3 px-6 text-left">{{ ticket.id }}</td>
+                            <td class="py-3 px-6 text-left">
+                                {% if ticket.has_admin_unread %}
+                                    <span class="inline-block w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+                                {% endif %}
+                                <a href="{{ url_for('view_ticket', ticket_id=ticket.id) }}" class="text-blue-600 hover:text-blue-800">
+                                    {{ ticket.title }}
+                                </a>
+                            </td>
+                            <td class="py-3 px-6 text-left">{{ ticket.user.full_name or ticket.user.username }}</td>
+                            <td class="py-3 px-6 text-center">
+                                {% if ticket.category == 'technical' %}
+                                    <span class="bg-purple-100 text-purple-800 py-1 px-3 rounded-full text-xs">Техническая</span>
+                                {% elif ticket.category == 'schedule' %}
+                                    <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Расписание</span>
+                                {% elif ticket.category == 'verification' %}
+                                    <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs">Верификация</span>
+                                {% else %}
+                                    <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Другое</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-6 text-center">
+                                {% if ticket.status == 'new' %}
+                                    <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs">Новый</span>
+                                {% elif ticket.status == 'in_progress' %}
+                                    <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">В обработке</span>
+                                {% elif ticket.status == 'waiting' %}
+                                    <span class="bg-orange-100 text-orange-800 py-1 px-3 rounded-full text-xs">Ожидает</span>
+                                {% elif ticket.status == 'resolved' %}
+                                    <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Решен</span>
+                                {% elif ticket.status == 'closed' %}
+                                    <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Закрыт</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-6 text-center">
+                                {% if ticket.priority == 'low' %}
+                                    <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Низкий</span>
+                                {% elif ticket.priority == 'medium' %}
+                                    <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">Средний</span>
+                                {% elif ticket.priority == 'high' %}
+                                    <span class="bg-red-100 text-red-800 py-1 px-3 rounded-full text-xs">Высокий</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3 px-6 text-center">
+                                {{ ticket.updated_at.strftime('%d.%m.%Y %H:%M') }}
+                            </td>
+                            <td class="py-3 px-6 text-center">
+                                <div class="flex item-center justify-center gap-2">
+                                    <a href="{{ url_for('view_ticket', ticket_id=ticket.id) }}" class="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded text-xs">
+                                        Просмотреть
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="8" class="py-8 text-center text-gray-500">
+                            Нет обращений, соответствующих заданным критериям
+                        </td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Пагинация -->
+    {% if pagination and pagination.pages > 1 %}
+    <div class="mt-6 flex justify-center">
+        <div class="flex space-x-2">
+            {% if pagination.has_prev %}
+                <a href="{{ url_for('tickets_list', page=pagination.prev_num, search=search_query, status=current_status, category=current_category) }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
+                    &laquo; Предыдущая
+                </a>
+            {% endif %}
+
+            <span class="px-4 py-2 bg-gray-100 rounded">
+                Страница {{ pagination.page }} из {{ pagination.pages }}
+            </span>
+
+            {% if pagination.has_next %}
+                <a href="{{ url_for('tickets_list', page=pagination.next_num, search=search_query, status=current_status, category=current_category) }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
+                    Следующая &raquo;
+                </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

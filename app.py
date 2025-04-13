@@ -4,7 +4,7 @@ import requests
 import pymysql
 from functools import wraps
 from db import db
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import text
 import re
 
@@ -17,11 +17,12 @@ app.config.from_object('config')
 db.init_app(app)
 
 # Импорт моделей ПОСЛЕ инициализации db
-from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog, DeviceToken
+from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog, DeviceToken, Ticket, TicketAttachment, TicketMessage
 
 # Папка для хранения загруженных изображений
 UPLOAD_FOLDER = 'uploads'
 STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
+TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
 
 # Remove this: from api import send_push_message
 
@@ -259,6 +260,339 @@ def create_teacher_account(teacher_id):
 
     return redirect(url_for('teachers_list'))
 
+
+# Добавьте следующие маршруты в файл app.py
+
+# Маршрут для страницы со списком тикетов
+@app.route('/tickets')
+@login_required
+def tickets_list():
+    """Отображение списка тикетов для администратора"""
+    # Получаем параметры фильтрации
+    status = request.args.get('status', 'all')
+    category = request.args.get('category', 'all')
+    search_query = request.args.get('search', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = 20  # Количество тикетов на странице
+
+    # Базовый запрос
+    query = Ticket.query
+
+    # Применяем фильтры
+    if status != 'all':
+        query = query.filter_by(status=status)
+
+    if category != 'all':
+        query = query.filter_by(category=category)
+
+    # Поиск по заголовку тикета или имени пользователя
+    if search_query:
+        query = query.join(User, Ticket.user_id == User.id).filter(
+            db.or_(
+                Ticket.title.ilike(f'%{search_query}%'),
+                User.full_name.ilike(f'%{search_query}%'),
+                User.username.ilike(f'%{search_query}%')
+            )
+        )
+
+    # Сортировка по дате обновления (сначала новые)
+    query = query.order_by(Ticket.updated_at.desc())
+
+    # Пагинация
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    tickets = pagination.items
+
+    # Получаем список категорий и статусов для фильтрации
+    categories = [
+        {'value': 'all', 'label': 'Все категории'},
+        {'value': 'technical', 'label': 'Техническая проблема'},
+        {'value': 'schedule', 'label': 'Проблема с расписанием'},
+        {'value': 'verification', 'label': 'Вопрос по верификации'},
+        {'value': 'other', 'label': 'Другое'}
+    ]
+
+    statuses = [
+        {'value': 'all', 'label': 'Все статусы'},
+        {'value': 'new', 'label': 'Новый'},
+        {'value': 'in_progress', 'label': 'В обработке'},
+        {'value': 'waiting', 'label': 'Требует уточнения'},
+        {'value': 'resolved', 'label': 'Решен'},
+        {'value': 'closed', 'label': 'Закрыт'}
+    ]
+
+    return render_template(
+        'tickets/list.html',
+        tickets=tickets,
+        pagination=pagination,
+        categories=categories,
+        statuses=statuses,
+        current_status=status,
+        current_category=category,
+        search_query=search_query
+    )
+
+
+@app.route('/tickets/<int:ticket_id>')
+@login_required
+def view_ticket(ticket_id):
+    """Просмотр деталей тикета и его сообщений"""
+    # Получаем тикет
+    ticket = db.session.get(Ticket, ticket_id)
+    if not ticket:
+        abort(404)
+
+    # Получаем пользователя, создавшего тикет
+    user = User.query.get(ticket.user_id)
+
+    # Получаем все сообщения тикета и сортируем их по дате
+    messages = TicketMessage.query.filter_by(ticket_id=ticket.id).order_by(TicketMessage.created_at).all()
+
+    # Отмечаем сообщения как прочитанные администратором
+    if ticket.has_admin_unread:
+        unread_messages = TicketMessage.query.filter_by(
+            ticket_id=ticket.id,
+            is_from_admin=False,
+            is_read=False
+        ).all()
+
+        for message in unread_messages:
+            message.is_read = True
+
+        ticket.has_admin_unread = False
+        db.session.commit()
+
+    # Получаем данные о прикрепленных файлах
+    for message in messages:
+        if message.attachment:
+            attachment = TicketAttachment.query.filter_by(message_id=message.id).first()
+            if attachment:
+                message.attachment_info = attachment
+
+    # Категории и статусы для отображения
+    categories = {
+        'technical': 'Техническая проблема',
+        'schedule': 'Проблема с расписанием',
+        'verification': 'Вопрос по верификации',
+        'other': 'Другое'
+    }
+
+    statuses = {
+        'new': {'label': 'Новый', 'color': 'blue'},
+        'in_progress': {'label': 'В обработке', 'color': 'yellow'},
+        'waiting': {'label': 'Требует уточнения', 'color': 'orange'},
+        'resolved': {'label': 'Решен', 'color': 'green'},
+        'closed': {'label': 'Закрыт', 'color': 'gray'}
+    }
+
+    return render_template(
+        'tickets/view.html',
+        ticket=ticket,
+        user=user,
+        messages=messages,
+        categories=categories,
+        statuses=statuses
+    )
+
+
+@app.route('/tickets/<int:ticket_id>/reply', methods=['POST'])
+@login_required
+def reply_to_ticket(ticket_id):
+    """Ответ администратора на тикет"""
+    # Получаем тикет
+    ticket = Ticket.query.get_or_404(ticket_id)
+
+    # Получаем данные из формы
+    text = request.form.get('text', '').strip()
+    new_status = request.form.get('status', ticket.status)
+
+    # Проверяем, что сообщение не пустое
+    if not text:
+        flash('Текст сообщения не может быть пустым', 'error')
+        return redirect(url_for('view_ticket', ticket_id=ticket_id))
+
+    try:
+        # Создаем новое сообщение
+        message = TicketMessage(
+            ticket_id=ticket.id,
+            user_id=session['user_id'],  # ID текущего админа
+            is_from_admin=True,
+            text=text,
+            is_read=False
+        )
+
+        db.session.add(message)
+
+        # Обновляем статус тикета, если он изменился
+        if new_status != ticket.status:
+            ticket.status = new_status
+
+        # Обновляем флаги чтения и время обновления
+        ticket.has_user_unread = True
+        ticket.updated_at = datetime.utcnow()
+
+        db.session.commit()
+
+        # Отправляем уведомление пользователю
+        try:
+            # Получаем токены устройств пользователя
+            device_tokens = DeviceToken.query.filter_by(user_id=ticket.user_id).all()
+
+            if device_tokens:
+                # Формируем данные уведомления
+                notification_title = "Новый ответ в обращении"
+                notification_body = f"Получен ответ на ваше обращение: {ticket.title}"
+
+                # Отправляем уведомление на каждое устройство
+                for token_obj in device_tokens:
+                    send_push_message(
+                        token_obj.token,
+                        notification_title,
+                        notification_body,
+                        {
+                            'type': 'verification',
+                            'status': User.verification_status,
+                            'timestamp': datetime.now().isoformat()
+                            # Correct if imported as: from datetime import datetime
+                        }
+                    )
+        except Exception as notify_error:
+            # Логируем ошибку, но не прерываем основной процесс
+            print(f"Error sending notification: {str(notify_error)}")
+
+        flash('Ответ успешно отправлен', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при отправке ответа: {str(e)}', 'error')
+
+    return redirect(url_for('view_ticket', ticket_id=ticket_id))
+
+
+@app.route('/tickets/dashboard')
+@login_required
+def tickets_dashboard():
+    """Панель статистики по тикетам"""
+    try:
+        # Общая статистика
+        total_tickets = Ticket.query.count()
+        open_tickets = Ticket.query.filter(Ticket.status.in_(['new', 'in_progress', 'waiting'])).count()
+        resolved_tickets = Ticket.query.filter_by(status='resolved').count()
+        closed_tickets = Ticket.query.filter_by(status='closed').count()
+
+        # Статистика по категориям
+        categories = {
+            'technical': 'Техническая проблема',
+            'schedule': 'Проблема с расписанием',
+            'verification': 'Вопрос по верификации',
+            'other': 'Другое'
+        }
+
+        category_stats = []
+        for category_code, category_name in categories.items():
+            count = Ticket.query.filter_by(category=category_code).count()
+            category_stats.append({
+                'code': category_code,
+                'name': category_name,
+                'count': count,
+                'percentage': round((count / total_tickets * 100) if total_tickets > 0 else 0, 1)
+            })
+
+        # Статистика по времени ответа (средняя и максимальная)
+        # Это более сложная статистика, которую можно реализовать с помощью SQL-запросов
+
+        # Список администраторов с количеством обработанных тикетов
+        admin_stats_query = db.session.query(
+            User.id, User.username, User.full_name,
+            db.func.count(db.distinct(TicketMessage.ticket_id)).label('tickets_count')
+        ).join(
+            TicketMessage, TicketMessage.user_id == User.id
+        ).filter(
+            User.is_admin == True,
+            TicketMessage.is_from_admin == True
+        ).group_by(
+            User.id
+        ).order_by(
+            db.desc('tickets_count')
+        ).all()
+
+        admin_stats = [
+            {
+                'id': admin.id,
+                'username': admin.username,
+                'full_name': admin.full_name or admin.username,
+                'tickets_count': admin.tickets_count
+            }
+            for admin in admin_stats_query
+        ]
+
+        # Получение данных для графика количества тикетов по дням
+        # Для простоты ограничимся последними 30 днями
+        today = datetime.today().date()
+        start_date = today - timedelta(days=29)
+
+        tickets_by_day_query = db.session.query(
+            db.func.date(Ticket.created_at).label('date'),
+            db.func.count(Ticket.id).label('count')
+        ).filter(
+            db.func.date(Ticket.created_at) >= start_date
+        ).group_by(
+            'date'
+        ).order_by(
+            'date'
+        ).all()
+
+        # Создаем полный словарь дат для всех 30 дней, заполняя нулями отсутствующие дни
+        tickets_by_day = {}
+        for i in range(30):
+            day = start_date + timedelta(days=i)
+            tickets_by_day[day.strftime('%Y-%m-%d')] = 0
+
+        # Заполняем реальными данными
+        for record in tickets_by_day_query:
+            date_str = record.date.strftime('%Y-%m-%d')
+            tickets_by_day[date_str] = record.count
+
+        # Преобразуем в формат для графика
+        chart_data = [
+            {
+                'date': date,
+                'count': count,
+                'date_formatted': datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m')
+            }
+            for date, count in tickets_by_day.items()
+        ]
+
+        return render_template(
+            'tickets/dashboard.html',
+            total_tickets=total_tickets,
+            open_tickets=open_tickets,
+            resolved_tickets=resolved_tickets,
+            closed_tickets=closed_tickets,
+            category_stats=category_stats,
+            admin_stats=admin_stats,
+            chart_data=chart_data
+        )
+
+    except Exception as e:
+        flash(f'Ошибка при загрузке статистики: {str(e)}', 'error')
+        return redirect(url_for('tickets_list'))
+
+
+@app.route('/uploads/ticket_attachments/<filename>')
+@login_required
+def get_ticket_attachment_admin(filename):
+    """Получение прикрепленного файла для администратора"""
+    try:
+        # Находим запись о прикрепленном файле
+        attachment = TicketAttachment.query.filter_by(filename=filename).first_or_404()
+
+        return send_from_directory(TICKET_ATTACHMENTS_FOLDER, filename,
+                                   as_attachment=request.args.get('download') == '1',
+                                   download_name=attachment.original_filename if request.args.get(
+                                       'download') == '1' else None)
+
+    except Exception as e:
+        flash(f'Ошибка при получении файла: {str(e)}', 'error')
+        return redirect(url_for('tickets_list'))
 
 @app.route('/teachers/view_credentials/<int:teacher_id>')
 @login_required

@@ -26,8 +26,10 @@ export const NotificationProvider = ({ children }: { children: ReactNode }) => {
     if (notification) {
       const { title, body, data } = notification.request.content;
 
-      // Only show in-app notification for chat messages
+      // Показываем in-app уведомление для сообщений в чате и тикетах
       if (data?.type === 'chat_message') {
+        showNotification(title, body, data.type, data);
+      } else if (data?.type === 'ticket_message') {
         showNotification(title, body, data.type, data);
       }
     }

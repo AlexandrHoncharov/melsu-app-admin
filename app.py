@@ -232,6 +232,16 @@ def create_teacher_account(teacher_id):
             password=password,
             is_admin=False
         )
+
+        # Устанавливаем роль 'teacher' и другие важные поля
+        new_user.role = 'teacher'
+        new_user.full_name = teacher.name
+        new_user.verification_status = 'verified'  # Преподаватели не требуют верификации
+
+        # Если у преподавателя есть отдел, добавляем его в department поле в метаданных
+        if teacher.department:
+            new_user.faculty = teacher.department
+
         db.session.add(new_user)
         db.session.flush()  # чтобы получить ID пользователя
 

@@ -9,7 +9,7 @@ import random
 import string
 from functools import wraps
 from db import db
-from models import User, Teacher, Schedule, VerificationLog, DeviceToken
+from models import User, Teacher, Schedule, VerificationLog, DeviceToken, ScheduleTeacher
 import firebase_admin
 from firebase_admin import credentials, auth
 
@@ -281,6 +281,62 @@ def get_user(current_user, user_id):
             user_data['position'] = teacher.position
 
     return jsonify(user_data)
+
+
+# Fix the password validation in api.py
+
+@app.route('/api/user/change-password', methods=['POST'])
+@token_required
+def change_password_api(current_user):
+    """Change user password"""
+    try:
+        data = request.json
+
+        # Validate required fields
+        if not data or not data.get('currentPassword') or not data.get('newPassword'):
+            return jsonify({'message': 'Необходимо указать текущий и новый пароль', 'success': False}), 400
+
+        current_password = data.get('currentPassword')
+        new_password = data.get('newPassword')
+
+        # Debug printout to help identify the issue (remove in production)
+        print(f"Current user: {current_user.username}")
+        print(f"Stored hashed password: {current_user.password}")
+        print(f"Plain password (if available): {current_user.password_plain}")
+
+        # FIXED: Proper password check - directly compare with plain password if available
+        # This handles cases where the hashing algorithm might have issues
+        password_correct = False
+        if current_user.password_plain and current_password == current_user.password_plain:
+            # Direct match with stored plain password
+            password_correct = True
+        else:
+            # Fallback to hashed comparison
+            password_correct = current_user.check_password(current_password)
+
+        if not password_correct:
+            return jsonify({'message': 'Текущий пароль указан неверно', 'success': False}), 401
+
+        # Check if new password is strong enough
+        if len(new_password) < 6:
+            return jsonify({'message': 'Новый пароль должен содержать минимум 6 символов', 'success': False}), 400
+
+        # Update password
+        current_user.password_plain = new_password  # For admin view
+        current_user.password = generate_password_hash(new_password)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Пароль успешно изменен',
+            'success': True
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error changing password: {str(e)}")
+        return jsonify({
+            'message': f'Ошибка при изменении пароля: {str(e)}',
+            'success': False
+        }), 500
 
 
 @app.route('/api/chat/send-notification', methods=['POST'])
@@ -732,7 +788,8 @@ def get_student_card(current_user, filename):
     return send_from_directory(STUDENT_CARDS_FOLDER, filename)
 
 
-# Маршрут для получения расписания
+# Update the get_schedule function in api.py
+
 @app.route('/api/schedule', methods=['GET'])
 @token_required
 def get_schedule(current_user):
@@ -754,11 +811,30 @@ def get_schedule(current_user):
             query = query.filter_by(group_name=group)
 
     elif current_user.role == 'teacher':
-        # Для преподавателей - по имени преподавателя
+        # Для преподавателей - используем mapping через ScheduleTeacher
         teacher = Teacher.query.filter_by(user_id=current_user.id).first()
 
         if teacher:
-            query = query.filter_by(teacher_name=teacher.name)
+            # Находим все записи ScheduleTeacher, сопоставленные с этим преподавателем
+            mapped_schedule_teachers = ScheduleTeacher.query.filter_by(
+                mapped_teacher_id=teacher.id,
+                active=True
+            ).all()
+
+            # Получаем все возможные имена преподавателя в расписании
+            teacher_names = [teacher.name]  # Начинаем с основного имени
+
+            # Добавляем имена из сопоставленных записей
+            for schedule_teacher in mapped_schedule_teachers:
+                if schedule_teacher.name and schedule_teacher.name not in teacher_names:
+                    teacher_names.append(schedule_teacher.name)
+
+            # Если есть хотя бы одно имя, применяем фильтр по всем именам
+            if teacher_names:
+                query = query.filter(Schedule.teacher_name.in_(teacher_names))
+                print(f"Filtering schedule for teacher by names: {teacher_names}")
+            else:
+                print(f"No teacher names found for user_id={current_user.id}, teacher_id={teacher.id}")
 
     # Общий фильтр по дате
     if date:

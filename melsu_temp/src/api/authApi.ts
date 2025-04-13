@@ -68,6 +68,20 @@ register: async (userData: RegisterRequest): Promise<AuthResponse> => {
   },
 
   /**
+ * Change user password
+ * @param currentPassword Current password for verification
+ * @param newPassword New password to set
+ * @returns Result of password change operation
+ */
+changePassword: async (currentPassword: string, newPassword: string) => {
+  const response = await apiClient.post('/user/change-password', {
+    currentPassword,
+    newPassword
+  });
+  return response.data;
+},
+
+  /**
  * Выход из системы
  * @returns Результат выхода
  */

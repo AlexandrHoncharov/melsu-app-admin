@@ -910,8 +910,8 @@ export default function ScheduleScreen() {
                                   ellipsizeMode="tail"
                                 >
                                   {lesson.groups && lesson.groups.length > 1
-                                    ? `Groups: ${lesson.groupName}`
-                                    : `Group: ${lesson.groupName}`}
+                                    ? `Группы: ${lesson.groupName}`
+                                    : `Группа: ${lesson.groupName}`}
                                 </Text>
                               )}
                             </TouchableOpacity>

@@ -1,216 +1,467 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="bg-white shadow rounded-lg p-6">
-    <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-gray-800">Обращение #{{ ticket.id }}</h1>
-        <a href="{{ url_for('tickets_list') }}" class="text-gray-600 hover:text-gray-800">
-            Вернуться к списку
-        </a>
-    </div>
-
-    <!-- Информация о тикете -->
-    <div class="bg-gray-50 p-6 rounded-lg mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-                <h2 class="text-xl font-bold text-gray-700 mb-4">{{ ticket.title }}</h2>
-
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Категория:</div>
-                    <div class="col-span-2">
-                        {% if ticket.category == 'technical' %}
-                            <span class="bg-purple-100 text-purple-800 py-1 px-3 rounded-full text-xs">Техническая проблема</span>
-                        {% elif ticket.category == 'schedule' %}
-                            <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Проблема с расписанием</span>
-                        {% elif ticket.category == 'verification' %}
-                            <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs">Вопрос по верификации</span>
-                        {% else %}
-                            <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Другое</span>
-                        {% endif %}
-                    </div>
+<div class="bg-white shadow-lg rounded-lg overflow-hidden">
+    <!-- Заголовок и навигация -->
+    <div class="p-6 bg-gradient-to-r from-gray-50 to-gray-100 border-b">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-primary text-white p-3 rounded-lg shadow-md">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                    </svg>
                 </div>
-
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Статус:</div>
-                    <div class="col-span-2">
-                        <span class="bg-{{ statuses[ticket.status].color }}-100 text-{{ statuses[ticket.status].color }}-800 py-1 px-3 rounded-full text-xs">
-                            {{ statuses[ticket.status].label }}
-                        </span>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Приоритет:</div>
-                    <div class="col-span-2">
-                        {% if ticket.priority == 'low' %}
-                            <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Низкий</span>
-                        {% elif ticket.priority == 'medium' %}
-                            <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">Средний</span>
-                        {% elif ticket.priority == 'high' %}
-                            <span class="bg-red-100 text-red-800 py-1 px-3 rounded-full text-xs">Высокий</span>
-                        {% endif %}
-                    </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">Обращение #{{ ticket.id }}</h1>
+                    <p class="text-sm text-gray-500">Создано {{ ticket.created_at.strftime('%d.%m.%Y в %H:%M') }}</p>
                 </div>
             </div>
-
-            <div>
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Пользователь:</div>
-                    <div class="col-span-2">
-                        <a href="{{ url_for('view_student_details', student_id=user.id) if user.role == 'student' else '#' }}" class="text-blue-600 hover:text-blue-800">
-                            {{ user.full_name or user.username }}
-                        </a>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Роль:</div>
-                    <div class="col-span-2">
-                        {% if user.role == 'student' %}
-                            <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs">Студент</span>
-                        {% elif user.role == 'teacher' %}
-                            <span class="bg-purple-100 text-purple-800 py-1 px-3 rounded-full text-xs">Преподаватель</span>
-                        {% else %}
-                            <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">{{ user.role or 'Пользователь' }}</span>
-                        {% endif %}
-                    </div>
-                </div>
-
-                {% if user.role == 'student' and user.group %}
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Группа:</div>
-                    <div class="col-span-2">{{ user.group }}</div>
-                </div>
-                {% endif %}
-
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Создан:</div>
-                    <div class="col-span-2">{{ ticket.created_at.strftime('%d.%m.%Y %H:%M') }}</div>
-                </div>
-
-                <div class="grid grid-cols-3 gap-4 mb-3">
-                    <div class="font-medium text-gray-600">Обновлен:</div>
-                    <div class="col-span-2">{{ ticket.updated_at.strftime('%d.%m.%Y %H:%M') }}</div>
-                </div>
-            </div>
+            <a href="{{ url_for('tickets_list') }}" class="flex items-center text-gray-600 hover:text-primary transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                К списку обращений
+            </a>
         </div>
     </div>
 
-    <!-- История сообщений -->
-    <div class="mb-6">
-        <h2 class="text-lg font-semibold text-gray-800 mb-4">История сообщений</h2>
+    <!-- Основной контент -->
+    <div class="p-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <!-- Левая колонка с информацией о тикете -->
+            <div class="md:col-span-2">
+                <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mb-6">
+                    <div class="border-b border-gray-200 bg-gray-50 px-5 py-3">
+                        <h2 class="text-lg font-semibold text-gray-800">{{ ticket.title }}</h2>
+                    </div>
+                    <div class="p-5">
+                        <div class="flex flex-wrap gap-2 mb-4">
+                            {% if ticket.category == 'technical' %}
+                                <span class="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    </svg>
+                                    Техническая проблема
+                                </span>
+                            {% elif ticket.category == 'schedule' %}
+                                <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    Проблема с расписанием
+                                </span>
+                            {% elif ticket.category == 'verification' %}
+                                <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                    </svg>
+                                    Вопрос по верификации
+                                </span>
+                            {% else %}
+                                <span class="bg-gray-100 text-gray-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Другое
+                                </span>
+                            {% endif %}
 
-        <div class="space-y-4">
-            {% for message in messages %}
-                <div class="p-4 rounded-lg {{ 'bg-blue-50 ml-8' if message.is_from_admin else 'bg-gray-50 mr-8' }}">
-                    <div class="flex justify-between items-start mb-2">
-                        <div class="font-medium {{ 'text-blue-600' if message.is_from_admin else 'text-gray-700' }}">
-                            {{ message.user.full_name or message.user.username }}
-                            {% if message.is_from_admin %}
-                                <span class="bg-blue-100 text-blue-800 py-0.5 px-2 rounded text-xs ml-2">Администратор</span>
+                            <span class="bg-{{ statuses[ticket.status].color }}-100 text-{{ statuses[ticket.status].color }}-800 px-3 py-1 rounded-full text-xs font-medium">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                                {{ statuses[ticket.status].label }}
+                            </span>
+
+                            {% if ticket.priority == 'low' %}
+                                <span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                    </svg>
+                                    Низкий приоритет
+                                </span>
+                            {% elif ticket.priority == 'medium' %}
+                                <span class="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4" />
+                                    </svg>
+                                    Средний приоритет
+                                </span>
+                            {% elif ticket.priority == 'high' %}
+                                <span class="bg-red-100 text-red-800 px-3 py-1 rounded-full text-xs font-medium">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                    Высокий приоритет
+                                </span>
                             {% endif %}
                         </div>
-                        <div class="text-sm text-gray-500">
-                            {{ message.created_at.strftime('%d.%m.%Y %H:%M') }}
+
+                        <!-- История сообщений -->
+                        <div class="space-y-6">
+                            {% for message in messages %}
+                                <div class="{% if message.is_from_admin %}ml-6{% else %}mr-6{% endif %}">
+                                    <div class="rounded-t-lg {% if message.is_from_admin %}bg-blue-50 rounded-l-lg rounded-br-lg{% else %}bg-gray-50 rounded-r-lg rounded-bl-lg{% endif %} p-4 shadow-sm">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <div class="flex items-center">
+                                                <div class="{% if message.is_from_admin %}bg-blue-200 text-blue-600{% else %}bg-gray-200 text-gray-600{% endif %} w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold mr-2">
+                                                    {{ message.user.name[0] if hasattr(message.user, 'name') else (message.user.full_name[0] if message.user.full_name else message.user.username[0]) | upper }}
+                                                </div>
+                                                <div>
+                                                    <div class="{% if message.is_from_admin %}text-blue-600{% else %}text-gray-700{% endif %} font-medium">
+                                                        {{ message.user.name if hasattr(message.user, 'name') else (message.user.full_name or message.user.username) }}
+                                                    </div>
+                                                    <div class="text-xs text-gray-500">
+                                                        {{ message.created_at.strftime('%d.%m.%Y %H:%M') }}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            {% if message.is_from_admin %}
+                                                <span class="bg-blue-100 text-blue-800 py-0.5 px-2 rounded text-xs">Администратор</span>
+                                            {% endif %}
+                                        </div>
+
+                                        <div class="text-gray-700 whitespace-pre-wrap">{{ message.text }}</div>
+
+                                        {% if message.attachment %}
+                                            <div class="mt-3 p-3 bg-white rounded-lg border border-gray-200 shadow-sm">
+                                                <div class="flex items-center">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                                    </svg>
+                                                    <span class="ml-2 text-sm text-gray-700 font-medium truncate max-w-xs">
+                                                        {% set attachment_info = get_attachment_info(message.id) if hasattr(message, 'id') else None %}
+                                                        {% if attachment_info and hasattr(attachment_info, 'original_filename') %}
+                                                            {{ attachment_info.original_filename }}
+                                                        {% else %}
+                                                            Прикрепленный файл
+                                                        {% endif %}
+                                                    </span>
+                                                    <div class="ml-auto flex space-x-2">
+                                                        <a href="{{ url_for('get_ticket_attachment_admin', filename=message.attachment) }}"
+                                                        class="inline-flex items-center bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-1 px-2 rounded transition-colors"
+                                                        target="_blank">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                                            </svg>
+                                                            Просмотр
+                                                        </a>
+                                                        <a href="{{ url_for('get_ticket_attachment_admin', filename=message.attachment, download=1) }}"
+                                                        class="inline-flex items-center bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded transition-colors">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                            </svg>
+                                                            Скачать
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            {% endfor %}
                         </div>
                     </div>
+                </div>
 
-                    <div class="text-gray-700 whitespace-pre-wrap">{{ message.text }}</div>
+                <!-- Форма ответа -->
+                <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+                    <div class="border-b border-gray-200 bg-gray-50 px-5 py-3">
+                        <h2 class="text-lg font-semibold text-gray-800">Ответить</h2>
+                    </div>
+                    <div class="p-5">
+                        <form action="{{ url_for('reply_to_ticket', ticket_id=ticket.id) }}" method="POST" class="space-y-4" enctype="multipart/form-data">
+                            <!-- Текст ответа -->
+                            <div>
+                                <label for="text" class="block text-sm font-medium text-gray-700 mb-1">Сообщение</label>
+                                <textarea id="text" name="text" rows="4"
+                                        class="shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border-gray-300 rounded-md p-3"
+                                        required></textarea>
+                            </div>
 
-                    {% if message.attachment %}
-                        <div class="mt-3 p-2 bg-white rounded border border-gray-200">
-                            <div class="flex items-center">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-                                </svg>
-                                <span class="ml-2 text-sm text-gray-700">
-                                    {% if hasattr(message, 'attachment_info') %}
-                                        {{ message.attachment_info.original_filename }}
-                                    {% else %}
-                                        Прикрепленный файл
-                                    {% endif %}
-                                </span>
-                                <a href="{{ url_for('get_ticket_attachment_admin', filename=message.attachment) }}"
-                                   class="ml-auto bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-1 px-2 rounded"
-                                   target="_blank">
-                                    Просмотреть
-                                </a>
-                                <a href="{{ url_for('get_ticket_attachment_admin', filename=message.attachment, download=1) }}"
-                                   class="ml-2 bg-blue-100 hover:bg-blue-200 text-blue-700 text-xs py-1 px-2 rounded">
-                                    Скачать
-                                </a>
+                            <!-- Загрузка файла -->
+                            <div>
+                                <label for="attachment" class="block text-sm font-medium text-gray-700 mb-1">Файл (опционально)</label>
+                                <div class="flex items-center">
+                                    <label class="block w-full">
+                                        <span class="sr-only">Выберите файл</span>
+                                        <input type="file" id="attachment" name="attachment"
+                                            class="block w-full text-sm text-gray-500
+                                                file:mr-4 file:py-2 file:px-4
+                                                file:rounded-full file:border-0
+                                                file:text-sm file:font-semibold
+                                                file:bg-blue-50 file:text-blue-700
+                                                hover:file:bg-blue-100
+                                                cursor-pointer
+                                            ">
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Изменение статуса -->
+                            <div>
+                                <label for="status" class="block text-sm font-medium text-gray-700 mb-1">Изменить статус</label>
+                                <select id="status" name="status"
+                                        class="shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border-gray-300 rounded-md p-2">
+                                    <option value="{{ ticket.status }}">Оставить текущий ({{ statuses[ticket.status].label }})</option>
+                                    <option value="in_progress">В обработке</option>
+                                    <option value="waiting">Требует уточнения</option>
+                                    <option value="resolved">Решен</option>
+                                    <option value="closed">Закрыт</option>
+                                </select>
+                            </div>
+
+                            <!-- Кнопки действий -->
+                            <div class="flex justify-end items-center space-x-3 pt-3">
+                                <!-- Шаблоны ответов -->
+                                <div class="relative inline-block text-left">
+                                    <div>
+                                        <button type="button" id="quickRepliesButton"
+                                                class="inline-flex items-center justify-center px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none transition-colors"
+                                                onclick="toggleQuickReplies()">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                                            </svg>
+                                            Шаблоны ответов
+                                            <svg id="dropdownIcon" class="ml-1.5 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <div id="quickRepliesMenu" class="hidden origin-top-right absolute right-0 mt-2 w-80 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
+                                        <div class="py-1">
+                                            <button type="button" class="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                                    onclick="insertQuickReply('Здравствуйте! Благодарим за обращение. Ваш запрос принят в работу, мы рассмотрим его и свяжемся с вами в ближайшее время.')">
+                                                <span class="block font-medium text-gray-900 mb-0.5">Подтверждение получения</span>
+                                                <span class="block text-xs text-gray-500 line-clamp-1">Здравствуйте! Благодарим за обращение. Ваш запрос принят в работу...</span>
+                                            </button>
+                                            <button type="button" class="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                                    onclick="insertQuickReply('Пожалуйста, предоставьте дополнительную информацию для более точного решения вашей проблемы: [какая информация нужна]')">
+                                                <span class="block font-medium text-gray-900 mb-0.5">Запрос дополнительной информации</span>
+                                                <span class="block text-xs text-gray-500 line-clamp-1">Пожалуйста, предоставьте дополнительную информацию...</span>
+                                            </button>
+                                            <button type="button" class="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                                    onclick="insertQuickReply('Мы решили вашу проблему. Пожалуйста, проверьте и сообщите, если у вас остались вопросы.')">
+                                                <span class="block font-medium text-gray-900 mb-0.5">Уведомление о решении</span>
+                                                <span class="block text-xs text-gray-500 line-clamp-1">Мы решили вашу проблему. Пожалуйста, проверьте...</span>
+                                            </button>
+                                            <button type="button" class="block w-full text-left px-4 py-3 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                                                    onclick="insertQuickReply('Благодарим за ваше терпение. К сожалению, решение вашей проблемы требует дополнительного времени. Мы сообщим вам о результатах как можно скорее.')">
+                                                <span class="block font-medium text-gray-900 mb-0.5">Уведомление о задержке</span>
+                                                <span class="block text-xs text-gray-500 line-clamp-1">Благодарим за ваше терпение. К сожалению, решение требует времени...</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-primary hover:bg-red-900 focus:outline-none transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                    </svg>
+                                    Отправить ответ
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Правая колонка с информацией о пользователе -->
+            <div>
+                <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mb-6">
+                    <div class="border-b border-gray-200 bg-gray-50 px-5 py-3">
+                        <h2 class="text-lg font-semibold text-gray-800">Информация о пользователе</h2>
+                    </div>
+                    <div class="p-5 space-y-4">
+                        <div class="flex justify-center mb-2">
+                            <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold">
+                                {{ user.full_name[0] if user.full_name else user.username[0] | upper }}
                             </div>
                         </div>
-                    {% endif %}
-                </div>
-            {% endfor %}
-        </div>
-    </div>
-
-    <!-- Форма ответа -->
-    <div>
-        <h2 class="text-lg font-semibold text-gray-800 mb-4">Ответить</h2>
-
-        <form action="{{ url_for('reply_to_ticket', ticket_id=ticket.id) }}" method="POST" class="space-y-4">
-            <div>
-                <label for="text" class="block text-sm font-medium text-gray-700 mb-2">Сообщение</label>
-                <textarea id="text" name="text" rows="4"
-                          class="shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border-gray-300 rounded-md p-2"
-                          required></textarea>
-            </div>
-
-            <div>
-                <label for="status" class="block text-sm font-medium text-gray-700 mb-2">Изменить статус</label>
-                <select id="status" name="status"
-                        class="shadow-sm block w-full focus:ring-primary focus:border-primary sm:text-sm border-gray-300 rounded-md p-2">
-                    <option value="{{ ticket.status }}">Оставить текущий ({{ statuses[ticket.status].label }})</option>
-                    <option value="in_progress">В обработке</option>
-                    <option value="waiting">Требует уточнения</option>
-                    <option value="resolved">Решен</option>
-                    <option value="closed">Закрыт</option>
-                </select>
-            </div>
-
-            <div class="flex justify-end space-x-3 mt-4">
-                <!-- Быстрые ответы - шаблоны -->
-                <div class="relative inline-block text-left">
-                    <div>
-                        <button type="button" id="quickRepliesButton"
-                                class="inline-flex justify-center w-full rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none"
-                                onclick="toggleQuickReplies()">
-                            Шаблоны ответов
-                            <svg id="dropdownIcon" class="-mr-1 ml-2 h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                            </svg>
-                        </button>
-                    </div>
-                    <div id="quickRepliesMenu" class="hidden origin-top-right absolute right-0 mt-2 w-72 rounded-md shadow-lg bg-white ring-1 ring-black ring-opacity-5 z-10">
-                        <div class="py-1">
-                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                                    onclick="insertQuickReply('Здравствуйте! Благодарим за обращение. Ваш запрос принят в работу, мы рассмотрим его и свяжемся с вами в ближайшее время.')">
-                                Подтверждение получения запроса
-                            </button>
-                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                                    onclick="insertQuickReply('Пожалуйста, предоставьте дополнительную информацию для более точного решения вашей проблемы: [какая информация нужна]')">
-                                Запрос дополнительной информации
-                            </button>
-                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                                    onclick="insertQuickReply('Мы решили вашу проблему. Пожалуйста, проверьте и сообщите, если у вас остались вопросы.')">
-                                Уведомление о решении
-                            </button>
-                            <button type="button" class="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                                    onclick="insertQuickReply('Благодарим за ваше терпение. К сожалению, решение вашей проблемы требует дополнительного времени. Мы сообщим вам о результатах как можно скорее.')">
-                                Уведомление о задержке
-                            </button>
+                        <h3 class="text-center text-gray-800 font-medium text-lg">
+                            {{ user.full_name or user.username }}
+                        </h3>
+                        <div class="flex justify-center">
+                            {% if user.role == 'student' %}
+                                <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs font-medium">Студент</span>
+                            {% elif user.role == 'teacher' %}
+                                <span class="bg-purple-100 text-purple-800 py-1 px-3 rounded-full text-xs font-medium">Преподаватель</span>
+                            {% else %}
+                                <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs font-medium">{{ user.role or 'Пользователь' }}</span>
+                            {% endif %}
                         </div>
+
+                        <div class="pt-3">
+                            <ul class="divide-y divide-gray-200">
+                                <li class="py-2 flex justify-between">
+                                    <span class="text-sm text-gray-500">ID пользователя:</span>
+                                    <span class="text-sm font-medium text-gray-900">{{ user.id }}</span>
+                                </li>
+                                {% if user.role == 'student' and user.group %}
+                                <li class="py-2 flex justify-between">
+                                    <span class="text-sm text-gray-500">Группа:</span>
+                                    <span class="text-sm font-medium text-gray-900">{{ user.group }}</span>
+                                </li>
+                                {% endif %}
+                                {% if user.role == 'teacher' and user.department %}
+                                <li class="py-2 flex justify-between">
+                                    <span class="text-sm text-gray-500">Кафедра:</span>
+                                    <span class="text-sm font-medium text-gray-900">{{ user.department }}</span>
+                                </li>
+                                {% endif %}
+                                {% if user.faculty %}
+                                <li class="py-2 flex justify-between">
+                                    <span class="text-sm text-gray-500">Факультет:</span>
+                                    <span class="text-sm font-medium text-gray-900 line-clamp-2">{{ user.faculty }}</span>
+                                </li>
+                                {% endif %}
+                                {% if user.username %}
+                                <li class="py-2 flex justify-between">
+                                    <span class="text-sm text-gray-500">Логин:</span>
+                                    <span class="text-sm font-medium text-gray-900">{{ user.username }}</span>
+                                </li>
+                                {% endif %}
+                                {% if user.verification_status %}
+                                <li class="py-2 flex justify-between items-center">
+                                    <span class="text-sm text-gray-500">Верификация:</span>
+                                    {% if user.verification_status == 'verified' %}
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                            <svg class="-ml-0.5 mr-1.5 h-3 w-3 text-green-400" fill="currentColor" viewBox="0 0 8 8">
+                                                <circle cx="4" cy="4" r="3" />
+                                            </svg>
+                                            Подтвержден
+                                        </span>
+                                    {% elif user.verification_status == 'pending' %}
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                            <svg class="-ml-0.5 mr-1.5 h-3 w-3 text-yellow-400" fill="currentColor" viewBox="0 0 8 8">
+                                                <circle cx="4" cy="4" r="3" />
+                                            </svg>
+                                            Ожидает
+                                        </span>
+                                    {% elif user.verification_status == 'rejected' %}
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                            <svg class="-ml-0.5 mr-1.5 h-3 w-3 text-red-400" fill="currentColor" viewBox="0 0 8 8">
+                                                <circle cx="4" cy="4" r="3" />
+                                            </svg>
+                                            Отклонен
+                                        </span>
+                                    {% else %}
+                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                            <svg class="-ml-0.5 mr-1.5 h-3 w-3 text-gray-400" fill="currentColor" viewBox="0 0 8 8">
+                                                <circle cx="4" cy="4" r="3" />
+                                            </svg>
+                                            Не верифицирован
+                                        </span>
+                                    {% endif %}
+                                </li>
+                                {% endif %}
+                            </ul>
+                        </div>
+
+                        {% if user.role == 'student' %}
+                        <div class="pt-2">
+                            <a href="{{ url_for('view_student_details', student_id=user.id) }}"
+                               class="inline-flex items-center justify-center w-full py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                </svg>
+                                Профиль студента
+                            </a>
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
 
-                <button type="submit" class="bg-primary hover:bg-red-900 text-white py-2 px-4 rounded-md">
-                    Отправить ответ
-                </button>
-            </div>
+                <!-- Детали тикета -->
+                <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mb-6">
+                    <div class="border-b border-gray-200 bg-gray-50 px-5 py-3">
+                        <h2 class="text-lg font-semibold text-gray-800">Детали обращения</h2>
+                    </div>
+                    <div class="p-5">
+                        <ul class="divide-y divide-gray-200">
+                            <li class="py-2 flex justify-between">
+                                <span class="text-sm text-gray-500">ID обращения:</span>
+                                <span class="text-sm font-medium text-gray-900">{{ ticket.id }}</span>
+                            </li>
+                            <li class="py-2 flex justify-between">
+                                <span class="text-sm text-gray-500">Создано:</span>
+                                <span class="text-sm font-medium text-gray-900">{{ ticket.created_at.strftime('%d.%m.%Y %H:%M') }}</span>
+                            </li>
+                            <li class="py-2 flex justify-between">
+                                <span class="text-sm text-gray-500">Обновлено:</span>
+                                <span class="text-sm font-medium text-gray-900">{{ ticket.updated_at.strftime('%d.%m.%Y %H:%M') }}</span>
+                            </li>
+                            <li class="py-2 flex justify-between">
+                                <span class="text-sm text-gray-500">Количество сообщений:</span>
+                                <span class="text-sm font-medium text-gray-900">{{ messages|length }}</span>
+                            </li>
+                            <li class="py-2 flex justify-between">
+                                <span class="text-sm text-gray-500">Время в работе:</span>
+                                {% set delta = ticket.updated_at - ticket.created_at %}
+                                {% set days = delta.days %}
+                                {% set hours = (delta.seconds // 3600) %}
+                                {% set minutes = (delta.seconds % 3600) // 60 %}
+                                <span class="text-sm font-medium text-gray-900">
+                                    {% if days > 0 %}{{ days }} д. {% endif %}
+                                    {% if hours > 0 %}{{ hours }} ч. {% endif %}
+                                    {{ minutes }} мин.
+                                </span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Быстрые действия -->
+                <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+    <div class="border-b border-gray-200 bg-gray-50 px-5 py-3">
+        <h2 class="text-lg font-semibold text-gray-800">Действия</h2>
+    </div>
+    <div class="p-5 space-y-3">
+        {% if ticket.status != 'resolved' %}
+        <form action="{{ url_for('reply_to_ticket', ticket_id=ticket.id) }}" method="POST">
+            <input type="hidden" name="text" value="Обращение отмечено как решенное.">
+            <input type="hidden" name="status" value="resolved">
+            <button type="submit" class="inline-flex items-center justify-center w-full py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                Отметить как решенный
+            </button>
         </form>
+        {% endif %}
+
+        {% if ticket.status != 'closed' %}
+        <form action="{{ url_for('reply_to_ticket', ticket_id=ticket.id) }}" method="POST">
+            <input type="hidden" name="text" value="Обращение закрыто.">
+            <input type="hidden" name="status" value="closed">
+            <button type="submit" class="inline-flex items-center justify-center w-full py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Закрыть обращение
+            </button>
+        </form>
+        {% endif %}
+
+        {% if ticket.status == 'closed' %}
+        <form action="{{ url_for('reply_to_ticket', ticket_id=ticket.id) }}" method="POST">
+            <input type="hidden" name="text" value="Обращение переоткрыто.">
+            <input type="hidden" name="status" value="in_progress">
+            <button type="submit" class="inline-flex items-center justify-center w-full py-2 px-4 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Переоткрыть обращение
+            </button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+            </div>
+        </div>
     </div>
 </div>
 

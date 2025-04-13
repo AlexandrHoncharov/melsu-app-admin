@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_from_directory
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_from_directory, abort
 import os
 import requests
 import pymysql
@@ -215,6 +215,29 @@ def sync_teachers():
 
     return render_template('teachers/sync.html')
 
+def get_attachment_info(message_id):
+    """
+    Retrieve attachment information for a ticket message
+    """
+    try:
+        # Query the TicketAttachment model
+        attachment = TicketAttachment.query.filter_by(message_id=message_id).first()
+        return attachment
+    except Exception as e:
+        print(f"Error retrieving attachment info: {str(e)}")
+        return None
+
+@app.context_processor
+def utility_processor():
+    return {
+        'get_attachment_info': get_attachment_info
+    }
+
+@app.context_processor
+def utility_processor():
+    return {
+        'hasattr': hasattr,  # Make hasattr available in templates
+    }
 
 @app.route('/teachers/create_account/<int:teacher_id>')
 @login_required

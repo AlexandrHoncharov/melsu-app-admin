@@ -135,66 +135,111 @@ const ticketsApi = {
     }
   },
 
-  /**
-   * Загрузка файла к тикету
-   * @param ticketId ID тикета
-   * @param fileUri URI файла для загрузки
-   * @param text Опциональный текст сообщения
-   * @returns Результат загрузки
-   */
-  uploadAttachment: async (
-    ticketId: number,
-    fileUri: string,
-    text: string = ''
-  ): Promise<{ ticket_message: TicketMessage, message: string }> => {
-    try {
-      // Получаем информацию о файле
-      const fileInfo = await FileSystem.getInfoAsync(fileUri);
-      if (!fileInfo.exists) {
-        throw new Error('File does not exist');
-      }
+/**
+ * Improved file upload function for tickets
+ * @param ticketId ID of the ticket
+ * @param fileUri URI of the file to upload
+ * @param text Optional message text
+ * @returns Result of the upload
+ */
+uploadAttachment: async (
+  ticketId: number,
+  fileUri: string,
+  text: string = ''
+): Promise<{ ticket_message: TicketMessage, message: string }> => {
+  try {
+    console.log(`Starting attachment upload for ticket ${ticketId}`);
+    console.log(`File URI: ${fileUri}`);
 
-      // Создаем FormData
-      const formData = new FormData();
+    // Check if fileUri is valid
+    if (!fileUri || fileUri.trim() === '') {
+      throw new Error('Invalid file URI');
+    }
 
-      // Получаем имя файла из URI
-      const fileName = fileUri.split('/').pop() || 'file';
+    // Get file info
+    const fileInfo = await FileSystem.getInfoAsync(fileUri);
+    if (!fileInfo.exists) {
+      throw new Error('File does not exist');
+    }
 
-      // Определяем тип файла
-      let fileType = 'application/octet-stream';
-      if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) {
-        fileType = 'image/jpeg';
-      } else if (fileName.endsWith('.png')) {
-        fileType = 'image/png';
-      } else if (fileName.endsWith('.pdf')) {
-        fileType = 'application/pdf';
-      }
+    console.log(`File exists, size: ${fileInfo.size} bytes`);
 
-      // Добавляем файл
-      formData.append('file', {
-        uri: fileUri,
-        name: fileName,
-        type: fileType
-      } as any);
+    // Create FormData
+    const formData = new FormData();
 
-      // Добавляем текст сообщения, если он есть
-      if (text) {
-        formData.append('text', text);
-      }
+    // Get filename from URI
+    const fileName = fileUri.split('/').pop() || 'file';
+    console.log(`Filename: ${fileName}`);
 
-      // Отправляем запрос
-      const response = await apiClient.post(`/tickets/${ticketId}/attachment`, formData, {
+    // Determine file type based on extension
+    const fileExt = fileName.split('.').pop()?.toLowerCase() || '';
+    let fileType = 'application/octet-stream';
+
+    if (fileExt === 'jpg' || fileExt === 'jpeg') {
+      fileType = 'image/jpeg';
+    } else if (fileExt === 'png') {
+      fileType = 'image/png';
+    } else if (fileExt === 'pdf') {
+      fileType = 'application/pdf';
+    } else if (fileExt === 'gif') {
+      fileType = 'image/gif';
+    }
+
+    console.log(`Determined file type: ${fileType}`);
+
+    // Append file with proper metadata
+    formData.append('file', {
+      uri: Platform.OS === 'ios' ? fileUri.replace('file://', '') : fileUri,
+      name: fileName,
+      type: fileType
+    } as any);
+
+    // Add text message if provided
+    if (text && text.trim() !== '') {
+      formData.append('text', text);
+      console.log(`Added message text: ${text.length} characters`);
+    }
+
+    console.log('FormData created, sending request...');
+
+    // Send request with increased timeout
+    const response = await apiClient.post(
+      `/tickets/${ticketId}/attachment`,
+      formData,
+      {
         headers: {
           'Content-Type': 'multipart/form-data',
+          'Accept': 'application/json'
         },
-      });
+        timeout: 30000, // 30 seconds timeout
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      }
+    );
 
-      return response.data;
-    } catch (error) {
-      console.error(`Error uploading attachment to ticket ${ticketId}:`, error);
+    console.log('File upload successful');
+    return response.data;
+  } catch (error) {
+    console.error(`Error uploading attachment to ticket ${ticketId}:`, error);
+
+    // Improve error reporting
+    if (error.code === 'ECONNABORTED') {
+      throw new Error('Превышен таймаут при загрузке файла. Попробуйте файл меньшего размера.');
+    }
+
+    if (error.response) {
+      // Server responded with a status code outside the 2xx range
+      const errorMsg = error.response.data?.message || 'Ошибка при загрузке файла';
+      throw new Error(errorMsg);
+    } else if (error.request) {
+      // The request was made but no response was received
+      throw new Error('Сервер не отвечает. Попробуйте позже');
+    } else {
+      // Something else happened while setting up the request
       throw error;
     }
-  },
+  }
+},
 
   /**
    * Получение количества непрочитанных тикетов

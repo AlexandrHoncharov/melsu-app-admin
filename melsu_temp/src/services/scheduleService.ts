@@ -11,6 +11,7 @@ const STORAGE_KEYS = {
   SCHEDULE_DATA: 'schedule_data',
   SCHEDULE_LAST_UPDATE: 'schedule_last_update',
   WEEK_SCHEDULE: 'week_schedule',
+  COURSE_INFO: 'course_info_'
 };
 
 // Cache expiration time in minutes
@@ -38,6 +39,13 @@ export interface ScheduleItem {
   subgroup?: number;
   groups?: string[]; // For combined groups in teacher view
   isCurrentLesson?: boolean;
+}
+
+// Course info interface
+export interface CourseInfo {
+  course: number;
+  group: string;
+  success: boolean;
 }
 
 // Schedule service for handling all schedule-related API calls
@@ -70,6 +78,109 @@ class ScheduleService {
     } catch (error) {
       console.error('Error checking authentication:', error);
       return false;
+    }
+  }
+
+  /**
+   * Get course information for a student's group
+   * @param group The group name to get course info for
+   * @param forceRefresh Whether to force refresh from the server
+   * @returns Course info object or null if not found
+   */
+  async getCourseInfo(group: string, forceRefresh = false): Promise<CourseInfo | null> {
+    if (!group) {
+      console.error('Group name is required to get course info');
+      return null;
+    }
+
+    try {
+      // Check cache first if not forcing refresh
+      if (!forceRefresh) {
+        const cachedInfo = await this.getCourseInfoFromCache(group);
+        if (cachedInfo) {
+          console.debug(`Using cached course info for group ${group}`);
+          return cachedInfo;
+        }
+      }
+
+      // Check network and authentication
+      const isConnected = await this.isNetworkAvailable();
+      if (!isConnected) {
+        console.warn('No network connection to fetch course info');
+        // Try cache as fallback
+        return await this.getCourseInfoFromCache(group);
+      }
+
+      const isAuth = await this.isAuthenticated();
+      if (!isAuth) {
+        console.error('Authentication required to fetch course info');
+        return null;
+      }
+
+      // Fetch from API
+      try {
+        console.debug(`Fetching course info for group ${group} from API`);
+        const response = await apiClient.get('/schedule/course', {
+          params: { group }
+        });
+
+        const courseInfo = response.data;
+
+        // Save to cache
+        await this.saveCourseInfoToCache(group, courseInfo);
+
+        return courseInfo;
+      } catch (apiError: any) {
+        console.error(`Error fetching course info for group ${group}:`, apiError);
+        return null;
+      }
+    } catch (error) {
+      console.error(`Error in getCourseInfo for group ${group}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get course info from cache
+   */
+  private async getCourseInfoFromCache(group: string): Promise<CourseInfo | null> {
+    try {
+      const cacheKey = `${STORAGE_KEYS.COURSE_INFO}${group}`;
+      const cachedInfoJson = await AsyncStorage.getItem(cacheKey);
+      if (!cachedInfoJson) {
+        return null;
+      }
+
+      // Check cache expiration
+      const lastUpdateJson = await AsyncStorage.getItem(`${cacheKey}_updated`);
+      if (lastUpdateJson) {
+        const lastUpdate = new Date(JSON.parse(lastUpdateJson));
+        const now = new Date();
+        const minutesDiff = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
+
+        if (minutesDiff > CACHE_EXPIRATION_TIME) {
+          // Cache expired
+          return null;
+        }
+      }
+
+      return JSON.parse(cachedInfoJson);
+    } catch (error) {
+      console.error('Error getting course info from cache:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Save course info to cache
+   */
+  private async saveCourseInfoToCache(group: string, info: CourseInfo): Promise<void> {
+    try {
+      const cacheKey = `${STORAGE_KEYS.COURSE_INFO}${group}`;
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(info));
+      await AsyncStorage.setItem(`${cacheKey}_updated`, JSON.stringify(new Date()));
+    } catch (error) {
+      console.error('Error saving course info to cache:', error);
     }
   }
 

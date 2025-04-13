@@ -201,6 +201,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const refreshUserProfile = async () => {
     try {
       const userData = await authApi.getCurrentUser();
+      console.log("API response for user profile:", userData);
 
       // Преобразуем данные в формат User
       const user: User = {
@@ -214,8 +215,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         studentCardImage: userData.studentCardImage,
         // Дополнительные поля для преподавателей
         department: userData.department,
-        position: userData.position
+        position: userData.position,
+        // Важно! Сохраняем данные направления подготовки
+        speciality: userData.speciality
       };
+
+      // Логирование для отладки
+      console.log("Speciality data from API:", userData.speciality);
+
+      // Если speciality не пришел как объект, но есть отдельные поля, создаем объект
+      if (!user.speciality && userData.speciality_id) {
+        user.speciality = {
+          id: userData.speciality_id,
+          code: userData.speciality_code,
+          name: userData.speciality_name,
+          form: userData.study_form,
+          formName: userData.study_form_name
+        };
+        console.log("Created speciality object from fields:", user.speciality);
+      }
 
       // Сохраняем данные
       setUser(user);

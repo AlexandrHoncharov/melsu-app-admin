@@ -17,6 +17,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../hooks/useAuth';
 import { router } from 'expo-router';
+import scheduleService from '../../../src/services/scheduleService';
 
 const { width } = Dimensions.get('window');
 
@@ -34,14 +35,43 @@ interface MenuItem {
 export default function ProfileScreen() {
   const { user: originalUser, isLoading, logout, refreshUserProfile } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const [courseFromApi, setCourseFromApi] = useState(null);
+  // Состояние для хранения информации о курсе
+  const [course, setCourse] = useState<number | null>(null);
+  const [isLoadingCourse, setIsLoadingCourse] = useState(false);
 
-  // Проверка и нормализация данных пользователя
+  // Функция для загрузки информации о курсе
+  const loadCourseInfo = async (groupName: string, forceRefresh: boolean = false) => {
+    if (!groupName) return;
+
+    setIsLoadingCourse(true);
+    try {
+      console.log(`Loading course info for group ${groupName}...`);
+      const courseInfo = await scheduleService.getCourseInfo(groupName, forceRefresh);
+
+      if (courseInfo && courseInfo.success) {
+        console.log(`Loaded course: ${courseInfo.course} for group ${groupName}`);
+        setCourse(courseInfo.course);
+      } else {
+        console.log(`No course info found for group ${groupName}`);
+        setCourse(null);
+      }
+    } catch (error) {
+      console.error('Error loading course info:', error);
+      setCourse(null);
+    } finally {
+      setIsLoadingCourse(false);
+    }
+  };
+
+  // Тщательная проверка и нормализация данных пользователя
   const checkUserData = (user) => {
     if (!user) return null;
 
-    // Создаем копию объекта пользователя
-    const normalizedUser = {...user};
+    // Создаем глубокую копию объекта пользователя
+    const normalizedUser = JSON.parse(JSON.stringify(user));
+
+    // Логирование для отладки
+    console.log("Checking user data. Original speciality:", user.speciality);
 
     // Проверяем, существует ли объект speciality
     if (!normalizedUser.speciality) {
@@ -69,15 +99,33 @@ export default function ProfileScreen() {
   // Нормализуем данные пользователя
   const user = checkUserData(originalUser);
 
+  // Загружаем информацию о курсе при инициализации компонента
+  useEffect(() => {
+    if (user?.role === 'student' && user.group) {
+      loadCourseInfo(user.group);
+    }
+  }, [user?.group]);
+
   // Profile refresh handler
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
+      console.log("Starting profile refresh...");
+
+      // Вызываем обновление профиля
       await refreshUserProfile();
-      // Повторно запрашиваем полный профиль после обновления
-      // Если есть отдельная функция для повторного запроса профиля, можно вызвать её здесь
+      console.log("Profile refreshed successfully");
+
+      // После обновления профиля, обновляем информацию о курсе
+      if (user?.role === 'student' && user?.group) {
+        await loadCourseInfo(user.group, true); // Форсируем обновление курса
+      }
     } catch (error) {
       console.error('Error refreshing profile:', error);
+      Alert.alert(
+        'Ошибка',
+        'Не удалось обновить профиль. Пожалуйста, попробуйте еще раз.'
+      );
     } finally {
       setRefreshing(false);
     }
@@ -167,30 +215,6 @@ export default function ProfileScreen() {
     }
 
     return '';
-  };
-
-  // Здесь должен быть API запрос для получения курса из расписания
-  // Это нужно реализовать на бэкенде
-  const getCourseFromSchedule = async (group) => {
-    // Эту функцию нужно будет реализовать через API
-    // Примерная логика: запрос к API на получение первой записи расписания для группы
-    // и извлечение из неё поля course
-    /*
-    try {
-      const response = await fetch(`/api/schedule/course?group=${group}`);
-      const data = await response.json();
-      if (data.course) {
-        return `${data.course}-й курс`;
-      }
-      return null;
-    } catch (error) {
-      console.error('Error fetching course from schedule:', error);
-      return null;
-    }
-    */
-
-    // Временное решение для демонстрации
-    return null;
   };
 
   // Prepare menu items
@@ -286,8 +310,6 @@ export default function ProfileScreen() {
   // Get verification info
   const verificationInfo = getVerificationInfo(user.verificationStatus);
 
-  const [course, setCourse] = useState(null);
-
   // Отладочная информация для проверки данных пользователя
   useEffect(() => {
     if (originalUser) {
@@ -295,12 +317,8 @@ export default function ProfileScreen() {
       console.log("Normalized user data:", user);
       console.log("Speciality data:", user?.speciality);
       console.log("Course data:", course);
-      console.log("Course from API:", courseFromApi);
     }
-  }, [originalUser, user, course, courseFromApi]);
-
-  // Временная заглушка для демонстрации
-  const tempCourse = user?.role === 'student' ? '3-й курс' : null;
+  }, [originalUser, user, course]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -355,11 +373,14 @@ export default function ProfileScreen() {
                   </View>
                   <View style={styles.infoValueContainer}>
                     <Text style={styles.infoValue}>{user.group}</Text>
-                    {course && (
+                    {course !== null && (
                       <View style={styles.yearBadge}>
                         <Ionicons name="calendar-outline" size={12} color="#1976D2" style={{marginRight: 4}} />
-                        <Text style={styles.yearText}>{course}</Text>
+                        <Text style={styles.yearText}>{course}-й курс</Text>
                       </View>
+                    )}
+                    {isLoadingCourse && (
+                      <ActivityIndicator size="small" color="#1976D2" style={{marginLeft: 8}} />
                     )}
                   </View>
                 </View>
@@ -378,8 +399,6 @@ export default function ProfileScreen() {
                 </View>
               )}
 
-              {/* Removed Speciality code as it's now shown in the speciality section */}
-
               {/* Study form */}
               {getFormName(user) && (
                 <View style={styles.infoRow}>
@@ -391,14 +410,14 @@ export default function ProfileScreen() {
                 </View>
               )}
 
-              {/* Speciality name - проверка на наличие данных специальности */}
+              {/* Speciality section - важная часть, которая требует исправления */}
               <View style={styles.specialitySection}>
                 <View style={styles.specialityHeader}>
                   <Ionicons name="school-outline" size={18} color="#555" />
                   <Text style={styles.specialityLabel}>Направление подготовки</Text>
                 </View>
 
-                {user && user.speciality && (user.speciality.name || user.speciality.code) ? (
+                {user.speciality && (user.speciality.name || user.speciality.code) ? (
                   <View style={styles.specialityContent}>
                     {user.speciality.code && (
                       <View style={styles.codeContainer}>

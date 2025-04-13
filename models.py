@@ -24,6 +24,12 @@ class User(db.Model):
     group = db.Column(db.String(50), default=None)
     faculty = db.Column(db.String(255), default=None)
 
+    speciality_id = db.Column(db.Integer, default=None)
+    speciality_code = db.Column(db.String(20), default=None)
+    speciality_name = db.Column(db.String(255), default=None)
+    study_form = db.Column(db.String(20), default=None)  # 'full-time', 'full-part', or 'correspondence'
+    study_form_name = db.Column(db.String(50), default=None)  # 'Очная', 'Очно-заочная', or 'Заочная'
+
     def __init__(self, username, password, is_admin=False):
         self.username = username
         self.password_plain = password  # Сохраняем пароль в открытом виде

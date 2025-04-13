@@ -435,6 +435,26 @@ def create_token(user_id):
 
 
 # Маршрут для регистрации студента
+"""
+1. Updates to models.py (User model)
+
+Add these new fields to the User model:
+"""
+
+# Add to the User class in models.py
+speciality_id = db.Column(db.Integer, default=None)
+speciality_code = db.Column(db.String(20), default=None)
+speciality_name = db.Column(db.String(255), default=None)
+study_form = db.Column(db.String(20), default=None)  # 'full-time', 'full-part', or 'correspondence'
+study_form_name = db.Column(db.String(50), default=None)  # 'Очная', 'Очно-заочная', or 'Заочная'
+
+"""
+2. Update the register endpoint in api.py
+
+Modify the /api/auth/register route to handle speciality information:
+"""
+
+
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     data = request.json
@@ -475,6 +495,19 @@ def register():
     new_user.group = data.get('group')
     new_user.faculty = data.get('faculty')
 
+    # Add speciality data if provided
+    if 'speciality' in data and data['speciality']:
+        speciality_data = data['speciality']
+        new_user.speciality_id = speciality_data.get('id')
+        new_user.speciality_code = speciality_data.get('code')
+        new_user.speciality_name = speciality_data.get('name')
+        new_user.study_form = speciality_data.get('form')
+        new_user.study_form_name = speciality_data.get('formName')
+
+        # Set faculty from speciality if not provided separately
+        if not new_user.faculty and speciality_data.get('faculty'):
+            new_user.faculty = speciality_data.get('faculty')
+
     # Для студентов устанавливаем статус верификации
     if data.get('role') == 'student':
         new_user.verification_status = 'unverified'
@@ -498,10 +531,16 @@ def register():
             'role': new_user.role,
             'group': new_user.group,
             'faculty': new_user.faculty,
-            'verificationStatus': new_user.verification_status
+            'verificationStatus': new_user.verification_status,
+            'speciality': {
+                'id': new_user.speciality_id,
+                'code': new_user.speciality_code,
+                'name': new_user.speciality_name,
+                'form': new_user.study_form,
+                'formName': new_user.study_form_name
+            } if new_user.speciality_id else None
         }
     }), 201
-
 
 # Маршрут для авторизации
 @app.route('/api/auth/login', methods=['POST'])
@@ -582,7 +621,15 @@ def get_profile(current_user):
         'department': teacher_info['department'] if teacher_info else None,
         'position': teacher_info['position'] if teacher_info else None,
         'verificationStatus': current_user.verification_status or 'verified',
-        'studentCardImage': current_user.student_card_image
+        'studentCardImage': current_user.student_card_image,
+        # Add speciality information
+        'speciality': {
+            'id': current_user.speciality_id,
+            'code': current_user.speciality_code,
+            'name': current_user.speciality_name,
+            'form': current_user.study_form,
+            'formName': current_user.study_form_name
+        } if current_user.speciality_id else None
     }
 
     return jsonify(profile_data), 200

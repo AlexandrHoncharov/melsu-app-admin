@@ -6,12 +6,22 @@ interface LoginRequest {
   password: string;
 }
 
+interface SpecialityData {
+  id: number;
+  code: string;
+  name: string;
+  faculty: string;
+  form: string;  // 'full-time', 'full-part', or 'correspondence'
+  formName: string;
+}
+
 interface RegisterRequest {
   username?: string; // Может генерироваться на сервере
   fullName: string;
   password: string;
   group: string;
   role: 'student' | 'teacher';
+  speciality?: SpecialityData;  // Add this field
 }
 
 // Типы для ответов
@@ -51,7 +61,8 @@ register: async (userData: RegisterRequest): Promise<AuthResponse> => {
     fullName: userData.fullName,
     password: userData.password,
     group: userData.group,
-    role: userData.role
+    role: userData.role,
+    speciality: userData.speciality  // Include speciality data
   };
 
   const response = await apiClient.post<AuthResponse>('/auth/register', requestData);

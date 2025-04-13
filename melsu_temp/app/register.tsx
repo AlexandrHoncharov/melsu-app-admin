@@ -17,6 +17,7 @@ import { useAuth } from '../hooks/useAuth';
 import { Stack, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import CustomDropdown from '../components/CustomDropdown';
 
 // Типы для ошибок валидации
 interface ValidationErrors {
@@ -24,6 +25,21 @@ interface ValidationErrors {
   password?: string;
   confirmPassword?: string;
   group?: string;
+  speciality?: string;
+}
+
+// Interface for speciality data
+interface Speciality {
+  id: number;
+  spec_code: string;
+  name: string;
+  faculty_name: string;
+  level: string;
+  forms: {
+    'full-time': string;
+    'full-part': string;
+    'correspondence': string;
+  };
 }
 
 export default function RegisterScreen() {
@@ -32,11 +48,19 @@ export default function RegisterScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [group, setGroup] = useState('');
+  const [specialityId, setSpecialityId] = useState<string>('');
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
+  const [specialities, setSpecialities] = useState<Record<string, Speciality>>({});
+  const [loadingSpecialities, setLoadingSpecialities] = useState(true);
 
   const { register, isLoading, isAuthenticated } = useAuth();
+
+  // Fetch specialities when component mounts
+  useEffect(() => {
+    fetchSpecialities();
+  }, []);
 
   // Проверяем, авторизован ли пользователь
   useEffect(() => {
@@ -45,74 +69,158 @@ export default function RegisterScreen() {
     }
   }, [isAuthenticated]);
 
-  // Регистрация
-  // Update the handleRegister function in register.tsx
+  // Fetch specialities from API
+  const fetchSpecialities = async () => {
+    setLoadingSpecialities(true);
+    try {
+      // Using the API endpoint you provided
+      const response = await fetch('https://melsu.ru/api/specialities/list');
+      if (!response.ok) {
+        throw new Error('Failed to fetch specialities');
+      }
 
-const handleRegister = async () => {
-  // Сбрасываем ошибки
-  setErrors({});
-  setGeneralError(null);
+      const data = await response.json();
+      setSpecialities(data);
+    } catch (error) {
+      console.error('Error fetching specialities:', error);
+      Alert.alert(
+        'Ошибка',
+        'Не удалось загрузить список направлений подготовки. Пожалуйста, проверьте подключение к интернету.'
+      );
+    } finally {
+      setLoadingSpecialities(false);
+    }
+  };
 
-  // Проверяем заполненность полей
-  const newErrors: ValidationErrors = {};
+  // Prepare dropdown items from specialities data
+  const getSpecialityDropdownItems = () => {
+    return Object.keys(specialities).map(key => ({
+      id: key,
+      label: `${specialities[key].spec_code} - ${specialities[key].name}`,
+      value: key
+    }));
+  };
 
-  if (!fullName.trim()) {
-    newErrors.fullName = 'Введите ФИО';
-  } else if (fullName.trim().split(' ').length < 2) {
-    newErrors.fullName = 'Введите фамилию и имя';
-  }
+  // Validate group format
+  const validateGroupFormat = (groupValue: string) => {
+    // Format should be xxxx-xxxx.x
+    const groupRegex = /^\d{4}-\d{4}\.\d$/;
 
-  if (!password) {
-    newErrors.password = 'Введите пароль';
-  } else if (password.length < 6) {
-    newErrors.password = 'Пароль должен содержать минимум 6 символов';
-  }
+    if (!groupRegex.test(groupValue)) {
+      return 'Формат группы должен быть xxxx-xxxx.x';
+    }
 
-  if (password !== confirmPassword) {
-    newErrors.confirmPassword = 'Пароли не совпадают';
-  }
+    // Check the 4th digit for validity
+    const fourthDigit = groupValue.charAt(3);
+    if (!['1', '2', '3'].includes(fourthDigit)) {
+      return 'Неверный формат обучения: 1 - очная, 2 - очно-заочная, 3 - заочная';
+    }
 
-  if (!group.trim()) {
-    newErrors.group = 'Введите группу';
-  }
+    return '';
+  };
 
-  // Если есть ошибки, показываем их и прерываем отправку
-  if (Object.keys(newErrors).length > 0) {
-    setErrors(newErrors);
-    return;
-  }
+  // Handle registration
+  const handleRegister = async () => {
+    // Сбрасываем ошибки
+    setErrors({});
+    setGeneralError(null);
 
-  try {
-    // Вызываем API для регистрации
-    const result = await register({
-      fullName,
-      password,
-      group,
-      role: 'student'
-    });
+    // Проверяем заполненность полей
+    const newErrors: ValidationErrors = {};
 
-    // Show success message with generated username
-    Alert.alert(
-      'Регистрация успешна',
-      `Ваш логин: ${result.user.username}\nЗапишите его для будущего входа в систему.`,
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            // Continue with normal flow - either to verification or tabs
-            if (result.user.role === 'student' && result.user.verificationStatus === 'unverified') {
-              router.replace('/verification');
-            } else {
-              router.replace('/(tabs)');
+    if (!fullName.trim()) {
+      newErrors.fullName = 'Введите ФИО';
+    } else if (fullName.trim().split(' ').length < 2) {
+      newErrors.fullName = 'Введите фамилию и имя';
+    }
+
+    if (!password) {
+      newErrors.password = 'Введите пароль';
+    } else if (password.length < 6) {
+      newErrors.password = 'Пароль должен содержать минимум 6 символов';
+    }
+
+    if (password !== confirmPassword) {
+      newErrors.confirmPassword = 'Пароли не совпадают';
+    }
+
+    if (!specialityId) {
+      newErrors.speciality = 'Выберите направление подготовки';
+    }
+
+    if (!group.trim()) {
+      newErrors.group = 'Введите группу';
+    } else {
+      const groupError = validateGroupFormat(group);
+      if (groupError) {
+        newErrors.group = groupError;
+      }
+    }
+
+    // Если есть ошибки, показываем их и прерываем отправку
+    if (Object.keys(newErrors).length > 0) {
+      setErrors(newErrors);
+      return;
+    }
+
+    // Get selected speciality data
+    const selectedSpeciality = specialities[specialityId];
+    if (!selectedSpeciality) {
+      setErrors({ speciality: 'Выбранное направление не найдено' });
+      return;
+    }
+
+    try {
+      // Determine study form based on 4th digit of group
+      const formCode = group.charAt(3);
+      let studyForm = '';
+
+      if (formCode === '1') {
+        studyForm = 'full-time';
+      } else if (formCode === '2') {
+        studyForm = 'full-part';
+      } else if (formCode === '3') {
+        studyForm = 'correspondence';
+      }
+
+      // Вызываем API для регистрации
+      const result = await register({
+        fullName,
+        password,
+        group,
+        role: 'student',
+        speciality: {
+          id: selectedSpeciality.id,
+          code: selectedSpeciality.spec_code,
+          name: selectedSpeciality.name,
+          faculty: selectedSpeciality.faculty_name,
+          form: studyForm,
+          formName: selectedSpeciality.forms[studyForm] || ''
+        }
+      });
+
+      // Show success message with generated username
+      Alert.alert(
+        'Регистрация успешна',
+        `Ваш логин: ${result.user.username}\nЗапишите его для будущего входа в систему.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // Continue with normal flow - either to verification or tabs
+              if (result.user.role === 'student' && result.user.verificationStatus === 'unverified') {
+                router.replace('/verification');
+              } else {
+                router.replace('/(tabs)');
+              }
             }
           }
-        }
-      ]
-    );
-  } catch (error) {
-    setGeneralError((error as Error).message);
-  }
-};
+        ]
+      );
+    } catch (error) {
+      setGeneralError((error as Error).message);
+    }
+  };
 
   // Переключение видимости пароля
   const toggleSecureTextEntry = () => {
@@ -178,6 +286,36 @@ const handleRegister = async () => {
               )}
             </View>
 
+            {/* Направление подготовки */}
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Направление подготовки</Text>
+              {loadingSpecialities ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color="#770002" />
+                  <Text style={styles.loadingText}>Загрузка направлений...</Text>
+                </View>
+              ) : (
+                <>
+                  <CustomDropdown
+                    items={getSpecialityDropdownItems()}
+                    selectedValue={specialityId}
+                    onValueChange={(value) => {
+                      setSpecialityId(value);
+                      if (errors.speciality) {
+                        setErrors(prev => ({ ...prev, speciality: undefined }));
+                      }
+                    }}
+                    placeholder="Выберите направление подготовки"
+                    error={Boolean(errors.speciality)}
+                    searchable={true}
+                  />
+                  {errors.speciality && (
+                    <Text style={styles.fieldErrorText}>{errors.speciality}</Text>
+                  )}
+                </>
+              )}
+            </View>
+
             {/* Группа */}
             <View style={styles.inputBlock}>
               <Text style={styles.inputLabel}>Учебная группа</Text>
@@ -188,7 +326,7 @@ const handleRegister = async () => {
                 <Ionicons name="people-outline" size={20} color="#666" style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
-                  placeholder="2211-0101.1"
+                  placeholder="xxxx-xxxx.x"
                   placeholderTextColor="#999"
                   value={group}
                   onChangeText={(text) => {
@@ -200,8 +338,13 @@ const handleRegister = async () => {
                   testID="register-group"
                 />
               </View>
-              {errors.group && (
+              {errors.group ? (
                 <Text style={styles.fieldErrorText}>{errors.group}</Text>
+              ) : (
+                <Text style={styles.helperText}>
+                  Формат: xxxx-xxxx.x, где 4-ая цифра означает форму обучения:
+                  1 - очная, 2 - очно-заочная, 3 - заочная
+                </Text>
               )}
             </View>
 
@@ -378,6 +521,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
     marginLeft: 4,
+  },
+  helperText: {
+    color: '#666',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  loadingText: {
+    marginLeft: 8,
+    color: '#666',
+    fontSize: 14,
   },
   passwordToggle: {
     padding: 10,

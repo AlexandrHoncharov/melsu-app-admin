@@ -26,6 +26,14 @@ export interface User {
   department?: string;
   position?: string;
   studentCardImage?: string;
+  // Add speciality information
+  speciality?: {
+    id: number;
+    code: string;
+    name: string;
+    form: string;
+    formName: string;
+  };
 }
 
 // Интерфейс контекста авторизации
@@ -44,12 +52,22 @@ interface AuthContextProps {
   manuallyCheckVerificationStatus: () => Promise<void>;
 }
 
-// Данные для регистрации
+// Update RegisterData interface
 interface RegisterData {
   fullName: string;
   password: string;
   group?: string;
   role: UserRole;
+  speciality?: SpecialityData;  // Add this field
+}
+
+interface SpecialityData {
+  id: number;
+  code: string;
+  name: string;
+  faculty: string;
+  form: string;  // 'full-time', 'full-part', or 'correspondence'
+  formName: string;
 }
 
 // Создание контекста
@@ -257,45 +275,44 @@ const login = async (username: string, password: string) => {
   }
 };
 
-  // Регистрация
-  const register = async (userData: RegisterData) => {
-    setIsLoading(true);
-    try {
-      // Формируем данные для регистрации
-      const registerData = {
-        fullName: userData.fullName,
-        password: userData.password,
-        group: userData.group,
-        role: userData.role
-      };
+  // Update the register function
+const register = async (userData: RegisterData) => {
+  setIsLoading(true);
+  try {
+    // Формируем данные для регистрации
+    const registerData = {
+      fullName: userData.fullName,
+      password: userData.password,
+      group: userData.group,
+      role: userData.role,
+      speciality: userData.speciality  // Add speciality data
+    };
 
-      const { token, user } = await authApi.register(registerData);
+    const { token, user } = await authApi.register(registerData);
 
-      // Сохраняем токен
-      await SecureStore.setItemAsync('userToken', token);
+    // Сохраняем токен
+    await SecureStore.setItemAsync('userToken', token);
 
-      // Сохраняем данные пользователя
-      await AsyncStorage.setItem('userData', JSON.stringify(user));
-      setUser(user);
-      setIsAuthenticated(true);
+    // Сохраняем данные пользователя
+    await AsyncStorage.setItem('userData', JSON.stringify(user));
+    setUser(user);
+    setIsAuthenticated(true);
 
-      // Перенаправление на экран верификации или главную
-      if (user.role === 'student' && user.verificationStatus === 'unverified') {
-        router.replace('/verification');
-      } else {
-        router.replace('/(tabs)');
-      }
-
-      return { token, user };
-    } catch (error) {
-      console.error('Ошибка при регистрации:', error);
-      throw error;
-    } finally {
-      setIsLoading(false);
+    // Перенаправление на экран верификации или главную
+    if (user.role === 'student' && user.verificationStatus === 'unverified') {
+      router.replace('/verification');
+    } else {
+      router.replace('/(tabs)');
     }
-  };
-// Updated logout function in useAuth.tsx
-// Replace the existing function with this improved version
+
+    return { token, user };
+  } catch (error) {
+    console.error('Ошибка при регистрации:', error);
+    throw error;
+  } finally {
+    setIsLoading(false);
+  }
+};
 
 const logout = async () => {
   setIsLoading(true);

@@ -54,7 +54,8 @@
     "react-native-webview": "13.12.5",
     "expo-image-manipulator": "~13.0.6",
     "@react-native-community/netinfo": "11.4.1",
-    "expo-linear-gradient": "~14.0.2"
+    "expo-linear-gradient": "~14.0.2",
+    "@react-native-picker/picker": "2.9.0"
   },
   "devDependencies": {
     "@babel/core": "^7.26.10",

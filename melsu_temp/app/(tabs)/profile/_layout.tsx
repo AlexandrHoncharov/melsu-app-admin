@@ -15,6 +15,27 @@ export default function ProfileLayout() {
           title: 'Профиль'
         }}
       />
+        <Stack.Screen
+        name="tickets"
+        options={{
+          headerShown: false,
+          title: 'Тикеты'
+        }}
+      />
+        <Stack.Screen
+        name="create-ticket"
+        options={{
+          headerShown: false,
+          title: 'Создать тикет'
+        }}
+      />
+        <Stack.Screen
+        name="ticket-details"
+        options={{
+          headerShown: false,
+          title: 'Подробности тикета'
+        }}
+      />
       <Stack.Screen
         name="change-password"
         options={{

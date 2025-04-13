@@ -42,6 +42,8 @@ os.makedirs(STUDENT_CARDS_FOLDER, exist_ok=True)
 TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
 os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
 if not firebase_admin._apps:
     cred = credentials.Certificate('firebase.json')
     firebase_admin.initialize_app(cred)
@@ -1000,35 +1002,60 @@ def add_ticket_message(current_user, ticket_id):
 @token_required
 def upload_ticket_attachment(current_user, ticket_id):
     try:
+        # Подробное логирование для отладки
+        print("=== DEBUG UPLOAD ===")
+        print("Request method:", request.method)
+        print("Request content_type:", request.content_type)
+        print("Request files keys:", list(request.files.keys()) if request.files else "No files")
+        print("Request form keys:", list(request.form.keys()) if request.form else "No form data")
+        print("Current user ID:", current_user.id)
+
         # Находим тикет
-        ticket = Ticket.query.get_or_404(ticket_id)
+        ticket = db.session.get(Ticket, ticket_id)
+        if not ticket:
+            print(f"Ticket {ticket_id} not found")
+            return jsonify({"message": "Ticket not found"}), 404
 
         # Проверяем права доступа
         if ticket.user_id != current_user.id and not current_user.is_admin:
+            print(f"Access denied for user {current_user.id} to ticket {ticket_id}")
             return jsonify({"message": "Access denied"}), 403
 
         # Проверяем, что файл отправлен
         if 'file' not in request.files:
+            print("No file part in the request")
             return jsonify({"message": "No file part"}), 400
 
         file = request.files['file']
 
         # Проверяем, что имя файла не пустое
         if file.filename == '':
+            print("Empty filename received")
             return jsonify({"message": "No selected file"}), 400
 
         # Текст сообщения (опционально)
         message_text = request.form.get('text', '')
+        print(f"Message text: '{message_text}'")
 
         # Безопасное имя файла
         original_filename = secure_filename(file.filename)
+        print(f"Original filename (secured): {original_filename}")
 
         # Генерируем уникальное имя файла
         filename = f"{uuid.uuid4()}{os.path.splitext(original_filename)[1]}"
         file_path = os.path.join(TICKET_ATTACHMENTS_FOLDER, filename)
+        print(f"Generated filename: {filename}")
+
+        # Убедимся, что папка существует
+        os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 
         # Сохраняем файл
-        file.save(file_path)
+        try:
+            file.save(file_path)
+            print(f"File saved to {file_path}")
+        except Exception as save_error:
+            print(f"Error saving file: {str(save_error)}")
+            return jsonify({"message": f"Error saving file: {str(save_error)}"}), 500
 
         # Определяем тип файла
         file_ext = os.path.splitext(original_filename)[1].lower()
@@ -1049,6 +1076,7 @@ def upload_ticket_attachment(current_user, ticket_id):
         )
 
         db.session.add(new_message)
+        db.session.flush()  # Чтобы получить ID сообщения
 
         # Создаем запись о прикрепленном файле
         attachment = TicketAttachment(
@@ -1067,19 +1095,74 @@ def upload_ticket_attachment(current_user, ticket_id):
         else:
             ticket.has_admin_unread = True
 
-        ticket.updated_at = datetime.datetime.utcnow()
+        ticket.updated_at = datetime.utcnow()
 
         db.session.commit()
+        print("Database transaction committed successfully")
+
+        # Если сообщение от администратора, отправляем уведомление пользователю
+        if is_from_admin:
+            try:
+                recipient_id = ticket.user_id
+                recipient = User.query.get(recipient_id)
+
+                if recipient:
+                    device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
+
+                    if device_tokens:
+                        notification_title = "Новый ответ в обращении"
+                        notification_body = f"Получен ответ на ваше обращение: {ticket.title}"
+
+                        for token_obj in device_tokens:
+                            notification_data = {
+                                'type': 'ticket_message',
+                                'ticket_id': str(ticket.id),  # Преобразуем в строку для безопасности
+                                'timestamp': datetime.utcnow().isoformat()
+                            }
+
+                            try:
+                                import json
+                                # Проверка сериализуемости
+                                json.dumps(notification_data)
+                                print(f"Notification data valid: {notification_data}")
+                            except TypeError as e:
+                                print(f"JSON serialization error: {e}, falling back to string values")
+                                notification_data = {
+                                    'type': 'ticket_message',
+                                    'ticket_id': str(ticket.id),
+                                    'timestamp': datetime.utcnow().isoformat()
+                                }
+
+                            send_push_message(
+                                token_obj.token,
+                                notification_title,
+                                notification_body,
+                                notification_data
+                            )
+            except Exception as notify_error:
+                print(f"Error sending notification: {str(notify_error)}")
 
         return jsonify({
             "message": "File uploaded successfully",
-            "ticket_message": new_message.to_dict()
+            "ticket_message": {
+                "id": new_message.id,
+                "text": new_message.text,
+                "is_from_admin": new_message.is_from_admin,
+                "created_at": new_message.created_at.isoformat(),
+                "attachment": new_message.attachment,
+                "user": {
+                    "id": current_user.id,
+                    "name": current_user.full_name or current_user.username
+                }
+            }
         }), 201
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error uploading file: {str(e)}")
-        return jsonify({"message": f"Error: {str(e)}"}), 500
+        print(f"Error in upload_ticket_attachment: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"message": f"Error uploading file: {str(e)}"}), 500
 
 
 # Получение прикрепленного файла

@@ -24,6 +24,8 @@ UPLOAD_FOLDER = 'uploads'
 STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
 TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
 
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
 # Remove this: from api import send_push_message
 
 # Instead, add the function directly:
@@ -449,10 +451,9 @@ def reply_to_ticket(ticket_id):
                         notification_title,
                         notification_body,
                         {
-                            'type': 'verification',
-                            'status': User.verification_status,
-                            'timestamp': datetime.now().isoformat()
-                            # Correct if imported as: from datetime import datetime
+                            'type': 'ticket_message',
+    'ticket_id': int(ticket.id) if ticket.id is not None else None,  # Явное преобразование в int
+    'timestamp': datetime.utcnow().isoformat()
                         }
                     )
         except Exception as notify_error:

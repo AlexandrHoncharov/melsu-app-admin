@@ -14,14 +14,21 @@ import {
   Image,
   RefreshControl,
   Dimensions,
-  Linking,
-  Modal
+  Modal,
+  Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../../../hooks/useAuth';
 import ticketsApi, { TicketDetail, TicketMessage } from '../../../src/api/ticketsApi';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
+import * as IntentLauncher from 'expo-intent-launcher';
+import * as Sharing from 'expo-sharing';
+import * as SecureStore from 'expo-secure-store';
+import * as WebBrowser from 'expo-web-browser'; // Добавляем импорт WebBrowser
+import { API_URL } from '../../../src/api/apiClient';
 
 // Получаем ширину экрана для адаптивной верстки
 const { width } = Dimensions.get('window');
@@ -70,6 +77,79 @@ const getStatusInfo = (status: string): { name: string; color: string; bgColor: 
   }
 };
 
+// Helper to determine file type and extension
+const getFileInfo = (filename: string) => {
+  // Extract extension
+  const extension = filename.split('.').pop()?.toLowerCase() || '';
+
+  // Determine mime type based on extension
+  let mimeType = 'application/octet-stream';
+  if (extension) {
+    switch (extension) {
+      case 'jpg':
+      case 'jpeg':
+        mimeType = 'image/jpeg';
+        break;
+      case 'png':
+        mimeType = 'image/png';
+        break;
+      case 'gif':
+        mimeType = 'image/gif';
+        break;
+      case 'pdf':
+        mimeType = 'application/pdf';
+        break;
+      case 'doc':
+        mimeType = 'application/msword';
+        break;
+      case 'docx':
+        mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        break;
+      case 'xls':
+        mimeType = 'application/vnd.ms-excel';
+        break;
+      case 'xlsx':
+        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        break;
+      case 'txt':
+        mimeType = 'text/plain';
+        break;
+      case 'mp3':
+        mimeType = 'audio/mpeg';
+        break;
+      case 'mp4':
+        mimeType = 'video/mp4';
+        break;
+      case 'zip':
+        mimeType = 'application/zip';
+        break;
+    }
+  }
+
+  // Determine file category
+  let fileType = 'document';
+  let icon = 'document-outline';
+
+  if (mimeType.startsWith('image/')) {
+    fileType = 'image';
+    icon = 'image-outline';
+  } else if (mimeType.startsWith('video/')) {
+    fileType = 'video';
+    icon = 'videocam-outline';
+  } else if (mimeType.startsWith('audio/')) {
+    fileType = 'audio';
+    icon = 'musical-note-outline';
+  } else if (mimeType === 'application/pdf') {
+    fileType = 'pdf';
+    icon = 'document-text-outline';
+  } else if (mimeType.includes('spreadsheet') || extension === 'xls' || extension === 'xlsx') {
+    fileType = 'spreadsheet';
+    icon = 'grid-outline';
+  }
+
+  return { extension, mimeType, fileType, icon };
+};
+
 export default function TicketDetailsScreen() {
   const { user } = useAuth();
   const params = useLocalSearchParams();
@@ -82,6 +162,7 @@ export default function TicketDetailsScreen() {
   const [isSending, setIsSending] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [showActionMenu, setShowActionMenu] = useState(false);
+  const [openingFile, setOpeningFile] = useState<string | null>(null); // Изменено с downloadingFile на openingFile
 
   // Ref для автоматической прокрутки к последнему сообщению
   const flatListRef = useRef<FlatList>(null);
@@ -242,9 +323,157 @@ export default function TicketDetailsScreen() {
 
   // Получение URL вложения
   const getAttachmentUrl = (filename: string) => {
-    // В реальном приложении здесь будет правильный URL из API
-    return `http://192.168.1.11:5001/api/uploads/ticket_attachments/${filename}`;
+    // Получаем базовый URL API без trailing slash
+    const baseUrl = API_URL.endsWith('/')
+      ? API_URL.slice(0, -1)
+      : API_URL;
+
+    // Формируем полный URL файла
+    const fullUrl = `${baseUrl}/uploads/ticket_attachments/${filename}`;
+
+    // Логируем URL для диагностики
+    console.log(`Открытие файла: ${fullUrl}`);
+
+    return fullUrl;
   };
+
+// Исправленная функция для прямого открытия файла в нативных приложениях
+const handleFileOpen = async (filename: string) => {
+  try {
+    setOpeningFile(filename);
+
+    // Получаем токен авторизации - исправление формата токена
+    const token = await SecureStore.getItemAsync('userToken');
+    if (!token) {
+      Alert.alert('Ошибка', 'Авторизация не найдена. Пожалуйста, войдите в систему заново.');
+      setOpeningFile(null);
+      return;
+    }
+
+    // Запрашиваем разрешения для медиатеки
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Ошибка', 'Необходимо разрешение на доступ к медиатеке');
+      setOpeningFile(null);
+      return;
+    }
+
+    const fileInfo = getFileInfo(filename);
+    const fileUrl = getAttachmentUrl(filename);
+
+    // ВАЖНО: Всегда скачиваем во временный файл для открытия в нативном приложении
+    // Создаем временную директорию
+    const tempDir = `${FileSystem.cacheDirectory}ticket-files/`;
+    const dirInfo = await FileSystem.getInfoAsync(tempDir);
+    if (!dirInfo.exists) {
+      await FileSystem.makeDirectoryAsync(tempDir, { intermediates: true });
+    }
+
+    // Генерируем локальное имя файла с правильным расширением
+    const localFilename = `file-${Date.now()}.${fileInfo.extension || 'bin'}`;
+    const localFile = `${tempDir}${localFilename}`;
+
+    console.log(`Скачивание файла из ${fileUrl} в ${localFile}`);
+    console.log(`Используемый токен авторизации: Bearer ${token.substring(0, 10)}...`);
+
+    // Скачиваем файл с правильным форматом авторизации
+    const downloadResult = await FileSystem.downloadAsync(
+      fileUrl,
+      localFile,
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+
+    if (downloadResult.status !== 200) {
+      throw new Error(`Ошибка загрузки файла: код ${downloadResult.status}`);
+    }
+
+    console.log('Файл успешно скачан. Размер:', await FileSystem.getInfoAsync(localFile).then(info => info.size));
+
+    // Открываем файл в соответствующем приложении
+    // На iOS используем Sharing, на Android комбинацию MediaLibrary и IntentLauncher
+    if (fileInfo.fileType === 'image') {
+      // Для изображений используем специфичный для платформы подход
+      if (Platform.OS === 'android') {
+        try {
+          // На Android сохраняем сначала в галерею
+          const asset = await MediaLibrary.createAssetAsync(localFile);
+          console.log('Создан медиа-ассет:', asset.uri);
+
+          // И открываем с правильным MIME-типом
+          await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+            data: asset.uri,
+            flags: 1,
+            type: fileInfo.mimeType
+          });
+        } catch (intentError) {
+          console.error('Ошибка при открытии через Intent:', intentError);
+          // Запасной вариант через Share
+          await Sharing.shareAsync(localFile, {
+            mimeType: fileInfo.mimeType,
+            dialogTitle: `Открыть изображение`
+          });
+        }
+      } else {
+        // На iOS просто используем Sharing
+        await Sharing.shareAsync(localFile, {
+          mimeType: fileInfo.mimeType,
+          UTI: fileInfo.mimeType
+        });
+      }
+    } else if (fileInfo.fileType === 'pdf') {
+      // PDF файлы обычно хорошо открываются через Share
+      await Sharing.shareAsync(localFile, {
+        mimeType: 'application/pdf',
+        UTI: 'com.adobe.pdf',
+        dialogTitle: 'Открыть PDF'
+      });
+    } else {
+      // Для остальных типов файлов используем общий подход
+      await Sharing.shareAsync(localFile, {
+        mimeType: fileInfo.mimeType,
+        dialogTitle: `Открыть ${fileInfo.extension ? fileInfo.extension.toUpperCase() : 'файл'}`
+      });
+    }
+  } catch (error) {
+    console.error('Ошибка при открытии файла:', error);
+    Alert.alert(
+      'Ошибка',
+      `Не удалось открыть файл: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`
+    );
+  } finally {
+    setOpeningFile(null);
+  }
+};
+
+// Обновленная функция рендеринга вложения с другой иконкой
+const renderAttachment = (attachment: string) => {
+  const fileInfo = getFileInfo(attachment);
+  const isOpening = openingFile === attachment;
+
+  return (
+    <TouchableOpacity
+      style={styles.attachmentContainer}
+      onPress={() => handleFileOpen(attachment)}
+      disabled={isOpening}
+    >
+      {isOpening ? (
+        <ActivityIndicator size="small" color="#1976D2" />
+      ) : (
+        <Ionicons name={fileInfo.icon} size={20} color="#1976D2" />
+      )}
+      <Text style={styles.attachmentText}>
+        {isOpening ? 'Открытие файла...' : `Файл${fileInfo.extension ? ' .' + fileInfo.extension.toUpperCase() : ''}`}
+      </Text>
+      {!isOpening && (
+        <Ionicons name="document-text-outline" size={16} color="#1976D2" style={styles.attachmentIcon} />
+      )}
+    </TouchableOpacity>
+  );
+};
 
   // Рендеринг сообщения
   const renderMessage = ({ item }: { item: TicketMessage }) => {
@@ -276,16 +505,7 @@ export default function TicketDetailsScreen() {
             <Text style={styles.messageText}>{item.text}</Text>
           ) : null}
 
-          {item.attachment && (
-            <TouchableOpacity
-              style={styles.attachmentContainer}
-              onPress={() => Linking.openURL(getAttachmentUrl(item.attachment!))}
-            >
-              <Ionicons name="document-attach-outline" size={20} color="#1976D2" />
-              <Text style={styles.attachmentText}>Прикрепленный файл</Text>
-              <Ionicons name="open-outline" size={16} color="#1976D2" style={styles.attachmentIcon} />
-            </TouchableOpacity>
-          )}
+          {item.attachment && renderAttachment(item.attachment)}
         </View>
       </View>
     );

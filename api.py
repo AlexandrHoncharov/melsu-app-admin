@@ -59,7 +59,7 @@ os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Инициализация Firebase Admin SDK
-firebase_cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
+firebase_cred_path = os.path.join(os.path.dirname(__file__), 'serviceAccountKey.json')
 if not firebase_admin._apps:
     try:
         # Сначала пробуем инициализировать с сервисным аккаунтом

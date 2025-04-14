@@ -1,211 +1,210 @@
-// src/api/userApi.ts
+// src/api/authApi.ts
 import apiClient from './apiClient';
 
-// Интерфейсы для типизации данных
-interface VerificationStatus {
-  status: 'unverified' | 'pending' | 'verified' | 'rejected';
-  message?: string;
-  updatedAt?: string;
+// Типы для запросов
+interface LoginRequest {
+  username: string;
+  password: string;
+}
+
+interface SpecialityData {
+  id: number;
+  code: string;
+  name: string;
+  faculty: string;
+  form: string;  // 'full-time', 'full-part', or 'correspondence'
+  formName: string;
+}
+
+interface RegisterRequest {
+  username?: string; // Может генерироваться на сервере
+  fullName: string;
+  password: string;
+  group?: string;
+  role: 'student' | 'teacher';
+  speciality?: SpecialityData;  // Add this field
+}
+
+// Типы для ответов
+interface AuthResponse {
+  token: string;
+  user: {
+    id: number;
+    username: string;
+    fullName?: string;
+    role: 'student' | 'teacher' | 'admin';
+    group?: string;
+    faculty?: string;
+    verificationStatus?: 'unverified' | 'pending' | 'verified' | 'rejected';
+    speciality?: SpecialityData; // Добавляем поле speciality
+  };
 }
 
 interface DeviceTokenRequest {
   token: string;
   platform: string;
   device_name?: string;
-  app_version?: string;
-  device_id?: string;
-  is_development?: boolean;
   replace_existing?: boolean;
-  token_type?: 'expo' | 'fcm';
 }
 
-// API для работы с профилем пользователя
-const userApi = {
+// API для работы с авторизацией
+const authApi = {
   /**
-   * Получение профиля пользователя
-   * @returns Данные профиля
+   * Аутентификация пользователя
+   * @param credentials Учетные данные
+   * @returns Результат авторизации
    */
-  getProfile: async () => {
-    const response = await apiClient.get('/user/profile');
+  login: async (credentials: LoginRequest): Promise<AuthResponse> => {
+    try {
+      const response = await apiClient.post<AuthResponse>('/auth/login', credentials);
+
+      // Log response for debugging
+      console.log('Login API response:', response.data);
+
+      return response.data;
+    } catch (error) {
+      console.error('Login API error:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Регистрация нового пользователя
+   * @param userData Данные нового пользователя
+   * @returns Результат регистрации
+   */
+  register: async (userData: RegisterRequest): Promise<AuthResponse> => {
+    // We're not sending username anymore, it will be generated on the server
+    const requestData = {
+      fullName: userData.fullName,
+      password: userData.password,
+      group: userData.group,
+      role: userData.role,
+      speciality: userData.speciality  // Include speciality data
+    };
+
+    console.log('Register API request:', requestData);
+
+    try {
+      const response = await apiClient.post<AuthResponse>('/auth/register', requestData);
+
+      // Log response for debugging
+      console.log('Register API response:', response.data);
+
+      return response.data;
+    } catch (error) {
+      console.error('Register API error:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Проверка валидности токена и получение текущего пользователя
+   * @returns Данные текущего пользователя
+   */
+  getCurrentUser: async () => {
+    try {
+      const response = await apiClient.get<AuthResponse['user']>('/user/profile');
+
+      // Log response for debugging
+      console.log('Get current user API response:', response.data);
+
+      return response.data;
+    } catch (error) {
+      console.error('Get current user API error:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * Change user password
+   * @param currentPassword Current password for verification
+   * @param newPassword New password to set
+   * @returns Result of password change operation
+   */
+  changePassword: async (currentPassword: string, newPassword: string) => {
+    const response = await apiClient.post('/user/change-password', {
+      currentPassword,
+      newPassword
+    });
+    return response.data;
+  },
+
+  /**
+   * Выход из системы
+   * @returns Результат выхода
+   */
+  logout: async () => {
+    try {
+      // Поскольку на сервере нет эндпоинта /auth/logout, не делаем запрос
+      // а просто возвращаем успешный результат
+      console.log('Performing client-side logout...');
+      return { success: true };
+    } catch (error) {
+      // Даже если запрос не удался, мы все равно хотим выйти из системы
+      console.warn('Error during logout API call (ignored):', error);
+      return { success: true };
+    }
+  },
+
+  /**
+   * Проверка доступности логина
+   * @param username Логин для проверки
+   * @returns Результат проверки
+   */
+  checkUsername: async (username: string) => {
+    const response = await apiClient.get<{ available: boolean }>(`/auth/check-username?username=${username}`);
     return response.data;
   },
 
   /**
    * Регистрация токена устройства для push-уведомлений
-   * @param deviceData Данные устройства с токеном
+   * @param deviceData Данные устройства
    * @returns Результат регистрации
    */
   registerDeviceToken: async (deviceData: DeviceTokenRequest) => {
+    console.log(`UserAPI: Registering device token: ${deviceData.token.substring(0, 10)}...`);
+
+    // Добавляем таймаут для API-запроса, чтобы избежать долгого ожидания
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд таймаут
+
     try {
-      console.log(`UserAPI: Регистрация токена устройства: ${deviceData.token.substring(0, 10)}...`);
-      console.log(`UserAPI: Тип токена: ${deviceData.token.startsWith('ExponentPushToken') ? 'Development (Expo)' : 'Production (FCM)'}`);
-      console.log(`UserAPI: Платформа: ${deviceData.platform}, Устройство: ${deviceData.device_name || 'Unknown'}`);
-
-      // Определяем тип токена для сервера
-      const tokenType = deviceData.token.startsWith('ExponentPushToken') ? 'expo' : 'fcm';
-
-      const response = await apiClient.post('/device/register', {
-        ...deviceData,
-        token_type: tokenType,
-        // Всегда запрашиваем замену существующих токенов для того же устройства
-        replace_existing: true
+      const response = await apiClient.post('/device/register', deviceData, {
+        signal: controller.signal
       });
 
-      console.log('UserAPI: Ответ сервера при регистрации токена:', response.data);
+      clearTimeout(timeoutId);
+      console.log('UserAPI: Token registration successful:', response.data);
       return response.data;
     } catch (error) {
-      console.error('UserAPI: Ошибка при регистрации токена устройства:', error);
+      clearTimeout(timeoutId);
 
-      // Улучшенная обработка ошибок
-      let errorMessage = 'Не удалось зарегистрировать токен устройства';
-      if (error.response && error.response.data && error.response.data.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.message) {
-        errorMessage = error.message;
+      // Проверяем, было ли прервано из-за таймаута
+      if (error.name === 'AbortError') {
+        console.warn('UserAPI: Token registration request timed out');
+        return {
+          message: 'Время ожидания регистрации истекло, но устройство может быть зарегистрировано.',
+          success: true,
+          timedOut: true
+        };
       }
 
-      throw new Error(errorMessage);
+      console.error('UserAPI: Error registering device token:', error);
+      throw error;
     }
   },
 
   /**
-   * Отмена регистрации токена устройства
-   * @param token Токен устройства для отмены регистрации
-   * @returns Результат отмены регистрации
+   * Генерация логина на основе ФИО
+   * Может быть реализована на сервере или на клиенте
+   * @param fullName Полное имя пользователя
+   * @returns Сгенерированный логин
    */
-  unregisterDeviceToken: async (token: string) => {
-    try {
-      console.log(`UserAPI: Отмена регистрации токена: ${token.substring(0, 10)}...`);
-
-      const response = await apiClient.post('/device/unregister', { token });
-      console.log('UserAPI: Ответ сервера при отмене регистрации токена:', response.data);
-
-      return response.data;
-    } catch (error) {
-      console.error('UserAPI: Ошибка при отмене регистрации токена:', error);
-
-      // Даже при ошибке возвращаем успех, чтобы не блокировать процесс выхода
-      return { success: true, error: error.message, forcedSuccess: true };
-    }
-  },
-
-  /**
-   * Отправка тестового push-уведомления
-   * @returns Результат отправки
-   */
-  sendTestNotification: async () => {
-    try {
-      console.log('UserAPI: Отправка тестового уведомления...');
-
-      const response = await apiClient.post('/device/test-notification');
-      console.log('UserAPI: Результат тестового уведомления:', response.data);
-
-      return response.data;
-    } catch (error) {
-      console.error('UserAPI: Ошибка при отправке тестового уведомления:', error);
-
-      let errorMessage = 'Не удалось отправить тестовое уведомление';
-      if (error.response && error.response.data && error.response.data.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-
-      throw new Error(errorMessage);
-    }
-  },
-
-  /**
-   * Загрузка фото студенческого билета
-   * @param imageUri URI изображения для загрузки
-   * @returns Результат загрузки
-   */
-  uploadStudentCard: async (imageUri: string) => {
-    // Создаем объект FormData для отправки файла
-    const formData = new FormData();
-
-    // Получаем расширение файла из URI
-    const fileExtension = imageUri.split('.').pop() || 'jpg';
-
-    // Добавляем файл изображения
-    formData.append('studentCard', {
-      uri: imageUri,
-      name: `student_card.${fileExtension}`,
-      type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`
-    } as any);
-
-    const response = await apiClient.post('/student/verify', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-
-    return response.data;
-  },
-
-  /**
-   * Проверка статуса верификации студенческого билета
-   * @returns Статус верификации
-   */
-  getVerificationStatus: async (): Promise<VerificationStatus> => {
-    const response = await apiClient.get('/student/verification-status');
-    return response.data;
-  },
-
-  /**
-   * Получение URL изображения студенческого билета
-   * @returns URL для загрузки изображения
-   */
-  getStudentCardImage: async () => {
-    const response = await apiClient.get('/student/card-image');
-    return response.data;
-  },
-
-  /**
-   * Отмена запроса на верификацию
-   * @returns Результат отмены
-   */
-  cancelVerification: async () => {
-    const response = await apiClient.post('/student/cancel-verification');
-    return response.data;
-  },
-
-  /**
-   * Повторная загрузка студенческого билета после отклонения
-   * @param imageUri URI изображения для загрузки
-   * @returns Результат загрузки
-   */
-  reuploadStudentCard: async (imageUri: string) => {
-    // Создаем объект FormData для отправки файла
-    const formData = new FormData();
-
-    // Получаем расширение файла из URI
-    const fileExtension = imageUri.split('.').pop() || 'jpg';
-
-    // Добавляем файл изображения
-    formData.append('studentCard', {
-      uri: imageUri,
-      name: `student_card.${fileExtension}`,
-      type: `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`
-    } as any);
-
-    const response = await apiClient.post('/student/reupload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-
-    return response.data;
-  },
-
-  /**
-   * Запрос на информацию о причине отклонения верификации
-   * @returns Информация о причине отклонения
-   */
-  getRejectionReason: async () => {
-    const response = await apiClient.get('/student/rejection-reason');
+  generateUsername: async (fullName: string) => {
+    const response = await apiClient.post<{ username: string }>('/auth/generate-username', { fullName });
     return response.data;
   }
 };
 
-export default userApi;
+export default authApi;

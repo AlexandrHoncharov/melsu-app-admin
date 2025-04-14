@@ -36,6 +36,7 @@ export default function ProfileLayout() {
           title: 'Подробности тикета'
         }}
       />
+
       <Stack.Screen
         name="change-password"
         options={{

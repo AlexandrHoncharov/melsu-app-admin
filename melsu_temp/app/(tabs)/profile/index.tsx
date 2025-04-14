@@ -1,3 +1,4 @@
+// File: melsu_temp/app/(tabs)/profile/index.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -12,7 +13,6 @@ import {
   Platform,
   StatusBar,
   Dimensions,
-  Image
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../hooks/useAuth';
@@ -270,15 +270,7 @@ export default function ProfileScreen() {
         iconColor: '#43A047',
         route: '/profile/edit'
       },
-      {
-        id: 'notifications',
-        title: 'Уведомления',
-        subtitle: 'Настройте параметры уведомлений',
-        icon: 'notifications-outline',
-        iconBgColor: '#FFF8E1',
-        iconColor: '#FFC107',
-        route: '/notification-settings'
-      },
+      // Notifications item removed as requested
       {
         id: 'tickets',
         title: 'Техническая поддержка',
@@ -296,7 +288,7 @@ export default function ProfileScreen() {
         icon: 'help-buoy-outline',
         iconBgColor: '#FFF3E0',
         iconColor: '#F57C00',
-        route: '/support'
+        route: '/profile/support'
       },
       {
         id: 'about',
@@ -305,7 +297,7 @@ export default function ProfileScreen() {
         icon: 'information-circle-outline',
         iconBgColor: '#E8EAF6',
         iconColor: '#3F51B5',
-        route: '/about'
+        route: '/profile/about'
       }
     ];
 
@@ -325,6 +317,15 @@ export default function ProfileScreen() {
     }
 
     return commonItems;
+  };
+
+  // Handler for support button click
+  const handleSupportClick = () => {
+    Alert.alert(
+      'Справка',
+      'Данный раздел находится в разработке.',
+      [{ text: 'OK' }]
+    );
   };
 
   // Loading state
@@ -350,17 +351,6 @@ export default function ProfileScreen() {
 
   // Get verification info
   const verificationInfo = getVerificationInfo(user.verificationStatus);
-
-  // Отладочная информация для проверки данных пользователя
-  useEffect(() => {
-    if (originalUser) {
-      console.log("Original user data:", originalUser);
-      console.log("Normalized user data:", user);
-      console.log("Speciality data:", user?.speciality);
-      console.log("Course data:", course);
-      console.log("Unread tickets:", unreadTickets);
-    }
-  }, [originalUser, user, course, unreadTickets]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -396,6 +386,8 @@ export default function ProfileScreen() {
               />
               <Text style={styles.roleText}>{getRoleText(user.role)}</Text>
             </View>
+            {/* Add username at the top as requested */}
+            <Text style={styles.usernameTopText}>Логин: {user.username}</Text>
           </View>
         </View>
 
@@ -543,25 +535,45 @@ export default function ProfileScreen() {
 
         {/* Menu Grid */}
         <View style={styles.menuGrid}>
-          {getMenuItems().map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={styles.menuItem}
-              onPress={() => router.push(item.route)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.menuIconContainer, { backgroundColor: item.iconBgColor }]}>
-                <Ionicons name={item.icon} size={24} color={item.iconColor} />
-                {typeof item.badge === 'number' && item.badge > 0 && (
-                  <View style={styles.badgeContainer}>
-                    <Text style={styles.badgeText}>{item.badge > 99 ? '99+' : item.badge}</Text>
+          {getMenuItems().map((item) => {
+            // For the "Справка" item, use custom handler instead of router navigation
+            if (item.id === 'support') {
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.menuItem}
+                  onPress={handleSupportClick}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.menuIconContainer, { backgroundColor: item.iconBgColor }]}>
+                    <Ionicons name={item.icon} size={24} color={item.iconColor} />
                   </View>
-                )}
-              </View>
-              <Text style={styles.menuTitle}>{item.title}</Text>
-              <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
-            </TouchableOpacity>
-          ))}
+                  <Text style={styles.menuTitle}>{item.title}</Text>
+                  <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
+                </TouchableOpacity>
+              );
+            }
+
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={styles.menuItem}
+                onPress={() => router.push(item.route)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.menuIconContainer, { backgroundColor: item.iconBgColor }]}>
+                  <Ionicons name={item.icon} size={24} color={item.iconColor} />
+                  {typeof item.badge === 'number' && item.badge > 0 && (
+                    <View style={styles.badgeContainer}>
+                      <Text style={styles.badgeText}>{item.badge > 99 ? '99+' : item.badge}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.menuTitle}>{item.title}</Text>
+                <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Logout button */}
@@ -576,7 +588,6 @@ export default function ProfileScreen() {
 
         {/* Footer Info */}
         <View style={styles.footerInfo}>
-          <Text style={styles.usernameText}>Логин: {user.username}</Text>
           <Text style={styles.versionText}>Версия приложения 1.0.0</Text>
         </View>
       </ScrollView>
@@ -653,12 +664,18 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 12,
     alignSelf: 'flex-start',
+    marginBottom: 6,
   },
   roleText: {
     color: '#fff',
     fontSize: 12,
     fontWeight: 'bold',
     marginLeft: 4,
+  },
+  usernameTopText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 4,
   },
 
   // User Info Card

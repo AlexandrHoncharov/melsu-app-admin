@@ -1,4 +1,3 @@
-// File: app/(tabs)/_layout.tsx
 import React, { useEffect } from 'react';
 import { Tabs, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -63,7 +62,17 @@ export default function TabLayout() {
         }}
       />
 
-      {/* Новая вкладка "Мероприятия" */}
+      {/* News tab */}
+      <Tabs.Screen
+        name="news"
+        options={{
+          title: 'Новости',
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? "newspaper" : "newspaper-outline"} color={color} size={size} />
+          ),
+        }}
+      />
+
       <Tabs.Screen
         name="events"
         options={{
@@ -86,7 +95,7 @@ export default function TabLayout() {
         name="profile"
         options={{
           title: 'Профиль',
-            headerShown: false,
+          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person-outline" color={color} size={size} />
           ),

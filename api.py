@@ -12,7 +12,11 @@ from db import db
 from models import User, Teacher, Schedule, VerificationLog, DeviceToken, ScheduleTeacher
 import firebase_admin
 from firebase_admin import credentials, auth
-
+from flask import request
+import requests
+from bs4 import BeautifulSoup
+import json
+import re
 
 import os
 import uuid
@@ -79,6 +83,181 @@ def token_required(f):
         return f(current_user, *args, **kwargs)
 
     return decorated
+
+
+@app.route('/api/news', methods=['GET'])
+def get_news():
+    """Get news from the university website"""
+    try:
+        # Get page parameter (default to 1)
+        page = request.args.get('page', 1, type=int)
+
+        # Fetch the news page
+        url = f"https://melsu.ru/news?page=1"
+        response = requests.get(url)
+
+        if response.status_code != 200:
+            return jsonify({"message": "Failed to fetch news", "success": False}), 500
+
+        # Parse HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Find news items
+        news_items = []
+        articles = soup.select('a[href^="/news/show/"]')
+
+        for article in articles:
+            try:
+                # Extract data
+                image_tag = article.select_one('img')
+                image_url = image_tag['src'] if image_tag else None
+
+                # Make image URL absolute
+                if image_url and not image_url.startswith('http'):
+                    image_url = f"https://melsu.ru{image_url}"
+
+                # Extract category
+                category_tag = article.select_one('.meta-category')
+                category = category_tag.text.strip() if category_tag else None
+
+                # Extract date
+                date_tag = article.select_one('.bi-calendar2-week')
+                date = date_tag.parent.text.strip() if date_tag else None
+
+                # Extract title
+                title_tag = article.select_one('h3')
+                title = title_tag.text.strip() if title_tag else None
+
+                # Extract description
+                description_tag = article.select_one('.description-news p')
+                description = description_tag.text.strip() if description_tag else None
+
+                # Extract ID from URL
+                news_id = None
+                href = article.get('href')
+                if href:
+                    match = re.search(r'/news/show/(\d+)', href)
+                    if match:
+                        news_id = match.group(1)
+
+                news_items.append({
+                    "id": news_id,
+                    "title": title,
+                    "category": category,
+                    "date": date,
+                    "description": description,
+                    "image_url": image_url,
+                    "url": f"https://melsu.ru{href}" if href else None
+                })
+            except Exception as item_error:
+                print(f"Error processing news item: {str(item_error)}")
+                continue
+
+        # Check if there is a next page
+        pagination = soup.select_one('.pagination')
+        has_next_page = False
+        if pagination:
+            next_link = pagination.select_one(f'a[href="/news?page={page + 1}"]')
+            has_next_page = next_link is not None
+
+        return jsonify({
+            "news": news_items,
+            "page": page,
+            "has_next_page": has_next_page,
+            "success": True
+        }), 200
+
+    except Exception as e:
+        print(f"Error getting news: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
+
+
+@app.route('/api/news/<int:news_id>', methods=['GET'])
+def get_news_detail(news_id):
+    """Get detailed news article by ID"""
+    try:
+        # Fetch the news article
+        url = f"https://melsu.ru/news/show/{news_id}"
+        response = requests.get(url)
+
+        if response.status_code != 200:
+            return jsonify({"message": "News article not found", "success": False}), 404
+
+        # Parse HTML
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Extract title
+        title_tag = soup.select_one('h1.text-4xl')
+        title = title_tag.text.strip() if title_tag else None
+
+        # Extract date
+        date_tag = soup.select_one('.bi-calendar2-week')
+        date = date_tag.parent.text.strip() if date_tag else None
+
+        # Extract content
+        content_div = soup.select_one('.content-news')
+        content_html = str(content_div) if content_div else None
+
+        # Extract plain text content
+        content_text = content_div.get_text(separator='\n').strip() if content_div else None
+
+        # Extract images
+        images = []
+        img_tags = content_div.select('img') if content_div else []
+        for img in img_tags:
+            src = img.get('src')
+            if src:
+                # Make image URL absolute
+                if not src.startswith('http'):
+                    src = f"https://melsu.ru{src}"
+                images.append(src)
+
+        # Get category from breadcrumbs
+        breadcrumbs = soup.select('.breadcrumbs .crumb-home')
+        category = breadcrumbs[1].text.strip() if len(breadcrumbs) > 1 else None
+
+        # Check for previous and next articles
+        prev_article = None
+        next_article = None
+
+        prev_link = soup.select_one('a[href^="/news/show/"]')
+        if prev_link and "Предыдущая" in prev_link.text:
+            match = re.search(r'/news/show/(\d+)', prev_link['href'])
+            if match:
+                prev_article = {
+                    "id": match.group(1),
+                    "title": prev_link.select_one('span').text.strip() if prev_link.select_one(
+                        'span') else "Предыдущая новость"
+                }
+
+        next_links = soup.select('a[href^="/news/show/"]')
+        for link in next_links:
+            if "Следующая" in link.text:
+                match = re.search(r'/news/show/(\d+)', link['href'])
+                if match:
+                    next_article = {
+                        "id": match.group(1),
+                        "title": link.select_one('span').text.strip() if link.select_one(
+                            'span') else "Следующая новость"
+                    }
+                    break
+
+        return jsonify({
+            "id": news_id,
+            "title": title,
+            "date": date,
+            "category": category,
+            "content_html": content_html,
+            "content_text": content_text,
+            "images": images,
+            "prev_article": prev_article,
+            "next_article": next_article,
+            "success": True
+        }), 200
+
+    except Exception as e:
+        print(f"Error getting news detail: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
 
 # Helper function to generate username
 def generate_username(full_name, group=None):

@@ -1,4 +1,3 @@
-// File: app/_layout.tsx
 import React from 'react';
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../hooks/useAuth';
@@ -56,6 +55,13 @@ export default function RootLayout() {
               name="chat/[id]"
               options={{
                 title: 'Чат',
+                headerTintColor: '#770002',
+              }}
+            />
+            <Stack.Screen
+              name="news/[id]"
+              options={{
+                title: 'Новость',
                 headerTintColor: '#770002',
               }}
             />

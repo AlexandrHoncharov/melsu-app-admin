@@ -639,6 +639,7 @@ def tickets_dashboard():
             closed_tickets=closed_tickets,
             category_stats=category_stats,
             admin_stats=admin_stats,
+
             chart_data=chart_data
         )
 

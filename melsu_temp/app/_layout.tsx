@@ -59,12 +59,14 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
-              name="news/[id]"
-              options={{
-                title: 'Новость',
-                headerTintColor: '#770002',
-              }}
-            />
+  name="newsitem/[id]"
+  options={{
+    title: 'Новость',
+      headerShown: false,
+    headerTintColor: '#770002',
+  }}
+/>
+
             <Stack.Screen
               name="new-chat"
               options={{

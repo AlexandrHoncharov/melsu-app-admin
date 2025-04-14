@@ -11,29 +11,92 @@
                 extend: {
                     colors: {
                         primary: '#770002',
+                        secondary: '#941c24',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        card: '0 2px 10px rgba(0, 0, 0, 0.08)',
                     }
                 }
             }
         }
     </script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+    <style>
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+        }
+
+        .fadeIn {
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Стили для скроллбара */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #d1d1d1;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a1a1a1;
+        }
+    </style>
 </head>
 <body class="bg-gray-100">
     <div class="flex min-h-screen">
         {% include 'sidebar.html' %}
 
-        <div class="flex-1 p-6">
-            {% with messages = get_flashed_messages(with_categories=true) %}
-                {% if messages %}
-                    {% for category, message in messages %}
-                        {% set bg_color = 'bg-green-100 text-green-700' if category == 'success' else 'bg-red-100 text-red-700' if category == 'error' else 'bg-yellow-100 text-yellow-700' %}
-                        <div class="mb-4 p-4 {{ bg_color }} rounded-md">
-                            {{ message }}
+        <div class="flex-1 p-6 overflow-y-auto ml-64">
+            <div class="max-w-7xl mx-auto">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        <div class="fadeIn mb-6">
+                            {% for category, message in messages %}
+                                {% set bg_color = 'bg-green-100 text-green-700 border-green-300' if category == 'success' else 'bg-red-100 text-red-700 border-red-300' if category == 'error' else 'bg-yellow-100 text-yellow-700 border-yellow-300' %}
+                                <div class="mb-4 p-4 {{ bg_color }} rounded-md border shadow-sm">
+                                    <div class="flex items-center">
+                                        {% if category == 'success' %}
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-600" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
+                                            </svg>
+                                        {% elif category == 'error' %}
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-red-600" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
+                                            </svg>
+                                        {% else %}
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-yellow-600" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                                            </svg>
+                                        {% endif %}
+                                        {{ message }}
+                                    </div>
+                                </div>
+                            {% endfor %}
                         </div>
-                    {% endfor %}
-                {% endif %}
-            {% endwith %}
+                    {% endif %}
+                {% endwith %}
 
-            {% block content %}{% endblock %}
+                <div class="fadeIn">
+                    {% block content %}{% endblock %}
+                </div>
+            </div>
         </div>
     </div>
 </body>

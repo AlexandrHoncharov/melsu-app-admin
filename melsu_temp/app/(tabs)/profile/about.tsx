@@ -42,10 +42,10 @@ export default function AboutScreen() {
         {/* Logo and App Info */}
         <View style={styles.logoContainer}>
           <View style={[styles.logoPlaceholder, { width: logoSize, height: logoSize }]}>
-            <Text style={styles.logoText}>МЕЛ</Text>
-            <Text style={styles.logoTextUniversity}>ГУ</Text>
+            <Text style={styles.logoText}>MelSU</Text>
+            <Text style={styles.logoTextUniversity}>Go</Text>
           </View>
-          <Text style={styles.appName}>МелГУ</Text>
+          <Text style={styles.appName}>MelSU Go</Text>
           <Text style={styles.appVersion}>Версия 1.0.0</Text>
         </View>
 
@@ -53,7 +53,7 @@ export default function AboutScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>О приложении</Text>
           <Text style={styles.sectionText}>
-            МелГУ — официальное мобильное приложение для студентов и преподавателей Мелитопольского государственного университета.
+            MelSU Go — официальное мобильное приложение для студентов и преподавателей Мелитопольского государственного университета.
             Приложение разработано для удобного доступа к расписанию занятий, общения между студентами и преподавателями,
             а также другой важной информации университета.
           </Text>

@@ -966,16 +966,22 @@ def username_exists(username):
         return False
 
 
-# Функция для создания JWT токена
 def create_token(user_id):
     payload = {
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7),
-        'iat': datetime.datetime.utcnow(),
-        'sub': user_id
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7), # Используйте datetime.datetime.now(datetime.UTC) для новых версий
+        'iat': datetime.datetime.utcnow(), # Используйте datetime.datetime.now(datetime.UTC) для новых версий
+        'sub': str(user_id)  # <-- ИСПРАВЛЕНИЕ: Преобразуем ID пользователя в строку
     }
+    # Убедитесь, что SECRET_KEY точно загружен и не None
+    secret_key = app.config.get('SECRET_KEY')
+    if not secret_key:
+        # В реальном приложении здесь лучше логировать ошибку или выбросить исключение
+        print("[CRITICAL ERROR] SECRET_KEY is missing during token creation!")
+        raise ValueError("Server configuration error: SECRET_KEY is missing.")
+
     return jwt.encode(
         payload,
-        app.config.get('SECRET_KEY'),
+        secret_key,
         algorithm='HS256'
     )
 

@@ -1,4 +1,4 @@
-// Исправленный хук usePushNotifications с защитой от дублирования
+// hooks/usePushNotifications.tsx
 import { useState, useEffect, useRef } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
@@ -8,6 +8,9 @@ import userApi from '../src/api/userApi';
 import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// ID проекта Expo (должен совпадать с projectId в app.json/app.config.js)
+const EXPO_PROJECT_ID = 'd9591f01-e110-4918-8b09-c422bd23baaf';
+
 // Настройка обработчика уведомлений
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -16,9 +19,6 @@ Notifications.setNotificationHandler({
     shouldSetBadge: true,
   }),
 });
-
-// ID проекта Expo
-const EXPO_PROJECT_ID = 'd9591f01-e110-4918-8b09-c422bd23baaf';
 
 // Глобальная переменная для отслеживания процесса регистрации
 // Это предотвратит двойную регистрацию даже между разными экземплярами хука
@@ -42,11 +42,11 @@ export function usePushNotifications() {
     let token;
     setRegistrationError(null);
 
-    console.log('[PushNotification] Starting push token registration...');
+    console.log('[PushNotification] Начинаем регистрацию push-токена...');
 
     if (!Device.isDevice) {
-      console.log('[PushNotification] Not a physical device, skipping');
-      setRegistrationError('Push notifications require a physical device');
+      console.log('[PushNotification] Не физическое устройство, пропускаем');
+      setRegistrationError('Push-уведомления требуют физического устройства');
       return null;
     }
 
@@ -59,38 +59,43 @@ export function usePushNotifications() {
           vibrationPattern: [0, 250, 250, 250],
           lightColor: '#770002',
         });
+        console.log('[PushNotification] Настроен канал уведомлений для Android');
       }
 
       // Проверяем/запрашиваем разрешения
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      console.log('[PushNotification] Permission status:', existingStatus);
+      console.log('[PushNotification] Статус разрешения:', existingStatus);
 
       let finalStatus = existingStatus;
       if (existingStatus !== 'granted') {
-        console.log('[PushNotification] Requesting permissions...');
+        console.log('[PushNotification] Запрашиваем разрешения...');
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
 
       if (finalStatus !== 'granted') {
-        setRegistrationError('Permission not granted for notifications');
-        console.log('[PushNotification] Permission denied');
+        setRegistrationError('Не предоставлено разрешение на уведомления');
+        console.log('[PushNotification] Разрешение отклонено');
         return null;
       }
 
-      // Получаем токен
-      console.log('[PushNotification] Getting push token...');
+      // Получаем токен с указанием projectId
+      console.log('[PushNotification] Получаем push-токен с projectId:', EXPO_PROJECT_ID);
 
-      // Используем getExpoPushTokenAsync с корректным projectId
+      // ВАЖНО! В production build, этот метод вернет FCM токен, а не ExponentPushToken
       token = (await Notifications.getExpoPushTokenAsync({
         projectId: EXPO_PROJECT_ID,
       })).data;
 
-      console.log(`[PushNotification] Token obtained: ${token}`);
+      // Логируем информацию о типе токена
+      const tokenType = token.startsWith('ExponentPushToken') ? 'Development (Expo)' : 'Production (FCM)';
+      console.log(`[PushNotification] Получен токен: ${token.substring(0, 10)}...`);
+      console.log(`[PushNotification] Тип токена: ${tokenType}`);
+
       return token;
     } catch (error) {
-      console.error('[PushNotification] Error getting token:', error);
-      setRegistrationError(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      console.error('[PushNotification] Ошибка получения токена:', error);
+      setRegistrationError(`Ошибка: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -99,45 +104,70 @@ export function usePushNotifications() {
   const registerTokenWithServer = async (token: string) => {
     try {
       if (!isAuthenticated || !user) {
-        console.log('[PushNotification] User not authenticated, skipping');
+        console.log('[PushNotification] Пользователь не аутентифицирован, пропускаем');
         return false;
       }
 
-      console.log(`[PushNotification] Registering token with server: ${token.substring(0, 10)}...`);
+      console.log(`[PushNotification] Регистрируем токен на сервере: ${token.substring(0, 10)}...`);
+
+      // Получаем уникальный ID устройства для идентификации
+      const deviceId = await getUniqueDeviceId();
 
       // Регистрируем токен через API
       const response = await userApi.registerDeviceToken({
         token,
         platform: Platform.OS,
         device_name: Device.modelName || 'Unknown',
-        replace_existing: true
+        device_id: deviceId,
+        app_version: Device.osVersion || 'Unknown',
+        is_development: token.startsWith('ExponentPushToken'),
+        replace_existing: true // Заменять существующие токены для этого устройства
       });
 
-      console.log('[PushNotification] Token registration response:', response);
+      console.log('[PushNotification] Ответ регистрации токена:', response);
       setTokenRegistered(true);
       return true;
     } catch (error) {
-      console.error('[PushNotification] Server registration error:', error);
-      setRegistrationError(`Server error: ${error instanceof Error ? error.message : String(error)}`);
+      console.error('[PushNotification] Ошибка регистрации на сервере:', error);
+      setRegistrationError(`Ошибка сервера: ${error instanceof Error ? error.message : String(error)}`);
       return false;
     }
   };
+
+  // Вспомогательная функция для получения уникального ID устройства
+  async function getUniqueDeviceId() {
+    try {
+      // Используем сохраненный ID или генерируем новый
+      let deviceId = await AsyncStorage.getItem('unique_device_id');
+
+      if (!deviceId) {
+        deviceId = `${Device.deviceName || 'device'}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        await AsyncStorage.setItem('unique_device_id', deviceId);
+        console.log(`[PushNotification] Создан новый ID устройства: ${deviceId}`);
+      }
+
+      return deviceId;
+    } catch (error) {
+      console.error('Ошибка получения уникального ID устройства:', error);
+      return `fallback_${Date.now()}`; // Fallback
+    }
+  }
 
   // Отправка тестового уведомления
   const sendTestNotification = async () => {
     try {
       if (!isAuthenticated) {
-        throw new Error('User not authenticated');
+        throw new Error('Пользователь не аутентифицирован');
       }
 
       if (!expoPushToken || !tokenRegistered) {
-        throw new Error('Push token not registered. Please restart the app.');
+        throw new Error('Push-токен не зарегистрирован. Пожалуйста, перезапустите приложение.');
       }
 
-      console.log('[PushNotification] Sending test notification...');
+      console.log('[PushNotification] Отправка тестового уведомления...');
       const result = await userApi.sendTestNotification();
 
-      console.log('[PushNotification] Test result:', result);
+      console.log('[PushNotification] Результат теста:', result);
 
       if (!result.success) {
         Alert.alert(
@@ -153,7 +183,7 @@ export function usePushNotifications() {
 
       return result;
     } catch (error) {
-      console.error('[PushNotification] Test notification error:', error);
+      console.error('[PushNotification] Ошибка тестового уведомления:', error);
       Alert.alert(
         'Ошибка отправки',
         `Не удалось отправить тестовое уведомление: ${error instanceof Error ? error.message : String(error)}`
@@ -165,13 +195,68 @@ export function usePushNotifications() {
   // Получение статуса уведомлений
   const getNotificationStatus = async () => {
     const permissionStatus = await Notifications.getPermissionsAsync();
+
+    // Получаем тип токена для отображения
+    let tokenType = "Нет";
+    if (expoPushToken) {
+      tokenType = expoPushToken.startsWith('ExponentPushToken')
+        ? 'Development (Expo)'
+        : 'Production (FCM)';
+    }
+
     return {
       enabled: permissionStatus.status === 'granted',
       token: expoPushToken,
+      tokenType: tokenType,
       tokenRegistered: tokenRegistered,
       error: registrationError,
       permissionStatus: permissionStatus.status,
     };
+  };
+
+  // Отмена регистрации токена устройства
+  const unregisterDeviceToken = async () => {
+    try {
+      console.log('[PushNotification] Отмена регистрации токенов устройства...');
+
+      // Даже если у нас нет токена в памяти, мы все равно
+      // пытаемся очистить токены с сервера для безопасности
+      if (!expoPushToken) {
+        console.log('[PushNotification] Нет токена в памяти, все равно очищаем токены на сервере');
+        await userApi.unregisterDeviceToken('force_all_tokens_removal');
+      } else {
+        console.log(`[PushNotification] Отменяем регистрацию токена: ${expoPushToken.substring(0, 10)}...`);
+        await userApi.unregisterDeviceToken(expoPushToken);
+      }
+
+      // Очищаем токены из локального хранилища независимо от ответа API
+      try {
+        await AsyncStorage.removeItem('devicePushToken');
+        console.log('[PushNotification] Токен устройства удален из AsyncStorage');
+      } catch (storageError) {
+        console.warn('[PushNotification] Ошибка удаления токена из AsyncStorage:', storageError);
+      }
+
+      // Сбрасываем состояние
+      setExpoPushToken(null);
+      setTokenRegistered(false);
+
+      return true;
+    } catch (error) {
+      console.warn('[PushNotification] Ошибка отмены регистрации токена с сервера:', error);
+
+      // Даже при ошибке, очищаем локальные данные
+      try {
+        await AsyncStorage.removeItem('devicePushToken');
+        setExpoPushToken(null);
+        setTokenRegistered(false);
+        console.log('[PushNotification] Локальный токен очищен несмотря на ошибку сервера');
+      } catch (storageError) {
+        console.warn('[PushNotification] Ошибка удаления токена из AsyncStorage:', storageError);
+      }
+
+      return false;
+    }
   };
 
   // Регистрация токена при изменении аутентификации
@@ -182,13 +267,13 @@ export function usePushNotifications() {
     const registerToken = async () => {
       // КРИТИЧЕСКАЯ ПРОВЕРКА: если регистрация уже выполняется, пропускаем
       if (globalRegistrationInProgress) {
-        console.log('[PushNotification] Registration already in progress, skipping');
+        console.log('[PushNotification] Регистрация уже выполняется, пропускаем');
         return;
       }
 
       // КРИТИЧЕСКАЯ ПРОВЕРКА: если уже регистрировались для этого пользователя, пропускаем
       if (user?.id === lastRegisteredUserId && registrationAttemptedRef.current) {
-        console.log('[PushNotification] Already registered for this user, skipping');
+        console.log('[PushNotification] Уже зарегистрировались для этого пользователя, пропускаем');
         return;
       }
 
@@ -196,7 +281,7 @@ export function usePushNotifications() {
       globalRegistrationInProgress = true;
       registrationAttemptedRef.current = true;
 
-      console.log(`[PushNotification] Starting registration for user ${user?.id}`);
+      console.log(`[PushNotification] Начинаем регистрацию для пользователя ${user?.id}`);
 
       try {
         // Получаем токен
@@ -210,15 +295,24 @@ export function usePushNotifications() {
         // Устанавливаем токен в состоянии
         setExpoPushToken(token);
 
+        // Сохраняем токен в AsyncStorage для возможного восстановления
+        try {
+          await AsyncStorage.setItem('devicePushToken', token);
+          console.log('[PushNotification] Токен сохранен в AsyncStorage');
+        } catch (storageErr) {
+          console.warn('[PushNotification] Ошибка сохранения токена в AsyncStorage:', storageErr);
+        }
+
         // Регистрируем на сервере
         const success = await registerTokenWithServer(token);
 
         if (success && user?.id) {
           // Запоминаем ID пользователя, для которого зарегистрировали токен
           lastRegisteredUserId = user.id;
+          console.log(`[PushNotification] Токен успешно зарегистрирован для пользователя ${user.id}`);
         }
       } catch (error) {
-        console.error('[PushNotification] Error in registration process:', error);
+        console.error('[PushNotification] Ошибка в процессе регистрации:', error);
       } finally {
         // Снимаем глобальный флаг
         globalRegistrationInProgress = false;
@@ -227,18 +321,18 @@ export function usePushNotifications() {
 
     // Запускаем регистрацию, если пользователь аутентифицирован
     if (isAuthenticated && user?.id) {
-      console.log(`[PushNotification] User ${user.id} authenticated, registering token`);
+      console.log(`[PushNotification] Пользователь ${user.id} аутентифицирован, регистрируем токен`);
       registerToken();
     }
 
     // Настройка слушателей уведомлений
     notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-      console.log('[PushNotification] Notification received');
+      console.log('[PushNotification] Получено уведомление');
       setNotification(notification);
     });
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log('[PushNotification] Notification clicked');
+      console.log('[PushNotification] Нажатие на уведомление');
       const data = response.notification.request.content.data;
 
       // Навигация в зависимости от типа уведомления
@@ -258,10 +352,44 @@ export function usePushNotifications() {
 
     return () => {
       isMounted = false;
-      Notifications.removeNotificationSubscription(notificationListener.current);
-      Notifications.removeNotificationSubscription(responseListener.current);
+
+      // Отписываемся от слушателей при размонтировании
+      if (notificationListener.current) {
+        Notifications.removeNotificationSubscription(notificationListener.current);
+      }
+
+      if (responseListener.current) {
+        Notifications.removeNotificationSubscription(responseListener.current);
+      }
     };
   }, [isAuthenticated, user?.id]);
+
+  // При монтировании компонента, пробуем восстановить токен из хранилища
+  useEffect(() => {
+    const recoverSavedToken = async () => {
+      try {
+        const savedToken = await AsyncStorage.getItem('devicePushToken');
+        if (savedToken && !expoPushToken) {
+          console.log('[PushNotification] Восстановлен сохраненный токен:', savedToken.substring(0, 10) + '...');
+          setExpoPushToken(savedToken);
+
+          // Проверяем, если пользователь аутентифицирован, пробуем повторно зарегистрировать токен
+          if (isAuthenticated && user?.id) {
+            console.log('[PushNotification] Повторная регистрация восстановленного токена');
+            const success = await registerTokenWithServer(savedToken);
+            if (success) {
+              setTokenRegistered(true);
+              lastRegisteredUserId = user.id;
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[PushNotification] Ошибка при восстановлении токена:', error);
+      }
+    };
+
+    recoverSavedToken();
+  }, []);
 
   return {
     expoPushToken,
@@ -269,6 +397,7 @@ export function usePushNotifications() {
     sendTestNotification,
     tokenRegistered,
     registrationError,
-    getNotificationStatus
+    getNotificationStatus,
+    unregisterDeviceToken
   };
 }

@@ -1,10 +1,13 @@
 // app.config.js
 module.exports = {
   "expo": {
-    "name": "Университет",
+    "name": "MelSU Go",
     "slug": "melsu",
-    "version": "1.0.0",
+    "version": "1.1.40",
     "orientation": "portrait",
+    "description": "MelSU Go — официальное мобильное приложение для студентов и преподавателей Мелитопольского государственного университета.\n" +
+        "            Приложение разработано для удобного доступа к расписанию занятий, общения между студентами и преподавателями,\n" +
+        "            а также другой важной информации университета.",
     "icon": "./assets/images/icon.png",
     "scheme": "melsu",
     "userInterfaceStyle": "automatic",
@@ -27,15 +30,24 @@ module.exports = {
       "bundleIdentifier": "com.melsu.app"
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.melsu.app"
+      "package": "com.melsu.app",
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "VIBRATE",
+        "RECEIVE_BOOT_COMPLETED"]
     },
     "plugins": [
-      "expo-router"
+      "expo-router",
+        "expo-notifications"
     ],
+
     "experiments": {
       "typedRoutes": true
     }

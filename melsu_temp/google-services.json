@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "614010409697",
+    "firebase_url": "https://melsuchat-default-rtdb.europe-west1.firebasedatabase.app",
+    "project_id": "melsuchat",
+    "storage_bucket": "melsuchat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:614010409697:android:2ee0cb44263138689ddda0",
+        "android_client_info": {
+          "package_name": "com.melsu.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAm-S7sLnfAPoVQYbzvvVpIU2gPq0ZnQ64"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

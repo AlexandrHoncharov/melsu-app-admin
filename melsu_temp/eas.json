@@ -9,7 +9,8 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug"
+        "gradleCommand": ":app:assembleDebug",
+        "withoutCredentials": false
       }
     },
     "preview": {
@@ -19,15 +20,16 @@
         "gradleCommand": ":app:assembleRelease"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://univappschedule.ru/api"
+        "EXPO_PUBLIC_API_URL": "https://app.melsu.ru/api"
       }
     },
     "production": {
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "withoutCredentials": false
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://univappschedule.ru/api"
+        "EXPO_PUBLIC_API_URL": "https://app.melsu.ru/api"
       }
     }
   }

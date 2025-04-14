@@ -286,6 +286,10 @@ def unregister_device(current_user):
         }), 200
 
 
+# Исправление для api.py - маршрут /api/users/<int:user_id>
+
+# Исправление для api.py - функция get_user
+
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 @token_required
 def get_user(current_user, user_id):
@@ -294,29 +298,48 @@ def get_user(current_user, user_id):
     if not user:
         return jsonify({'message': 'Пользователь не найден'}), 404
 
+    # Базовая информация о пользователе
     user_data = {
         'id': user.id,
         'username': user.username,
-        'name': user.full_name,
+        'fullName': user.full_name,  # Используем camelCase формат
         'role': user.role,
         'group': user.group,
         'faculty': user.faculty,
-        # Добавляем информацию о специальности
         'speciality': {
             'id': user.speciality_id,
             'code': user.speciality_code,
             'name': user.speciality_name,
             'form': user.study_form,
             'formName': user.study_form_name
-        }
+        } if user.speciality_id else None
     }
 
-    # Для преподавателей добавляем информацию о кафедре
+    # ВАЖНОЕ ИСПРАВЛЕНИЕ: Для преподавателей всегда включаем данные из таблицы Teacher
     if user.role == 'teacher':
+        # Поиск преподавателя в таблице Teacher
         teacher = Teacher.query.filter_by(user_id=user.id).first()
+
         if teacher:
             user_data['department'] = teacher.department
             user_data['position'] = teacher.position
+
+            # КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Используем имя из таблицы Teacher
+            # и гарантируем, что fullName будет заполнено
+            if teacher.name:
+                user_data['fullName'] = teacher.name  # Переопределяем имя
+                user_data['teacher_name'] = teacher.name  # Дополнительное поле для совместимости
+
+                # Если имя в профиле пользователя пустое, но есть в таблице Teacher
+                if not user.full_name:
+                    # Обновляем имя пользователя в базе данных
+                    try:
+                        user.full_name = teacher.name
+                        db.session.commit()
+                        print(f"Updated user {user.id} full_name with teacher name: {teacher.name}")
+                    except Exception as e:
+                        print(f"Error updating user full_name: {str(e)}")
+                        db.session.rollback()
 
     # Добавляем информацию о курсе для студентов
     if user.role == 'student' and user.group:
@@ -327,7 +350,93 @@ def get_user(current_user, user_id):
         except Exception as e:
             print(f"Error getting course from schedule: {str(e)}")
 
+    # Для отладки
+    print(f"Returning user data for ID {user_id}: {user_data}")
+
     return jsonify(user_data)
+
+
+@app.route('/api/teachers/<int:user_id>', methods=['GET'])
+@token_required
+def get_teacher_info(current_user, user_id):
+    """Получение детальной информации о преподавателе по user_id"""
+    try:
+        # Сначала получаем данные пользователя
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({'message': 'Пользователь не найден'}), 404
+
+        # Проверяем, что это преподаватель
+        if user.role != 'teacher':
+            return jsonify({'message': 'Указанный пользователь не является преподавателем'}), 400
+
+        # Получаем запись преподавателя из таблицы Teacher
+        teacher = Teacher.query.filter_by(user_id=user.id).first()
+
+        if not teacher:
+            return jsonify({
+                'message': 'Информация о преподавателе не найдена',
+                'user_data': {
+                    'id': user.id,
+                    'username': user.username,
+                    'fullName': user.full_name
+                }
+            }), 404
+
+        # Формируем полный ответ с информацией о преподавателе
+        teacher_data = {
+            'id': user.id,
+            'teacher_id': teacher.id,
+            'username': user.username,
+            'fullName': teacher.name or user.full_name,
+            'name': teacher.name,
+            'department': teacher.department,
+            'position': teacher.position,
+            'role': 'teacher'
+        }
+
+        return jsonify(teacher_data), 200
+
+    except Exception as e:
+        print(f"Error getting teacher info: {str(e)}")
+        return jsonify({'message': f'Ошибка при получении данных преподавателя: {str(e)}'}), 500
+
+
+# Добавьте также эндпоинт для поиска преподавателя по его имени в таблице
+@app.route('/api/teachers/search', methods=['GET'])
+@token_required
+def search_teachers(current_user):
+    """Поиск преподавателей по имени"""
+    try:
+        name = request.args.get('name', '')
+        if not name or len(name) < 3:
+            return jsonify({'message': 'Для поиска требуется не менее 3 символов'}), 400
+
+        # Ищем преподавателей с похожим именем
+        teachers = Teacher.query.filter(Teacher.name.ilike(f'%{name}%')).all()
+
+        # Формируем результаты
+        results = []
+        for teacher in teachers:
+            # Получаем связанного пользователя, если есть
+            user = None
+            if teacher.user_id:
+                user = User.query.get(teacher.user_id)
+
+            results.append({
+                'id': teacher.id,
+                'name': teacher.name,
+                'department': teacher.department,
+                'position': teacher.position,
+                'user_id': teacher.user_id,
+                'has_account': teacher.has_account and user is not None
+            })
+
+        return jsonify(results), 200
+
+    except Exception as e:
+        print(f"Error searching teachers: {str(e)}")
+        return jsonify({'message': f'Ошибка при поиске преподавателей: {str(e)}'}), 500
 
 
 # Fix the password validation in api.py

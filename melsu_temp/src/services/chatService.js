@@ -30,6 +30,32 @@ class ChatService {
         this.unreadCountCallback = null; // Callback для обновления счетчика непрочитанных сообщений
     }
 
+    /**
+     * Получение полной информации о преподавателе из специального API
+     * @param {string|number} userId - ID пользователя преподавателя
+     * @returns {Promise<Object|null>} - Данные преподавателя или null при ошибке
+     */
+    async getTeacherInfo(userId) {
+        if (!userId) return null;
+
+        try {
+            console.log(`Запрашиваем данные преподавателя с ID: ${userId}`);
+            const response = await apiClient.get(`/teachers/${userId}`);
+            console.log(`Данные преподавателя получены:`, response.data);
+            return response.data;
+        } catch (error) {
+            // Если ошибка 404, значит преподаватель не найден в таблице Teacher
+            if (error.response && error.response.status === 404) {
+                console.log(`Преподаватель с ID ${userId} не найден в таблице Teacher`);
+                return null;
+            }
+
+            // Для других ошибок - логируем и возвращаем null
+            console.error(`Ошибка при получении данных преподавателя ${userId}:`, error);
+            return null;
+        }
+    }
+
     // Принудительно установить ID текущего пользователя (для исправления ошибок идентификации)
     forceCurrentUserId(userId) {
         if (!userId) {
@@ -400,9 +426,22 @@ class ChatService {
 
             // Получаем данные о другом пользователе из API
             try {
+                console.log(`Запрашиваем данные пользователя с ID: ${otherUserId}`);
                 const response = await apiClient.get(`/users/${otherUserId}`);
                 otherUserInfo = response.data;
-                console.log(`Got other user info from API:`, otherUserInfo);
+                console.log(`Данные пользователя получены:`, otherUserInfo);
+
+                // Для преподавателей проверяем специфические поля
+                if (otherUserInfo.role === 'teacher') {
+                    // ВАЖНОЕ ИСПРАВЛЕНИЕ: Если fullName есть, используем его
+                    if (otherUserInfo.fullName) {
+                        console.log(`Используем fullName преподавателя: ${otherUserInfo.fullName}`);
+                    }
+                    // Если также есть teacher_name, логируем это для отладки
+                    if (otherUserInfo.teacher_name) {
+                        console.log(`В ответе также присутствует teacher_name: ${otherUserInfo.teacher_name}`);
+                    }
+                }
             } catch (apiError) {
                 console.warn(`Failed to get user ${otherUserId} data from API:`, apiError);
 
@@ -411,19 +450,88 @@ class ChatService {
                     const userSnapshot = await get(ref(database, `users/${otherUserId}`));
                     if (userSnapshot.exists()) {
                         otherUserInfo = userSnapshot.val();
-                        console.log(`Got other user info from Firebase:`, otherUserInfo);
+                        console.log(`Получены данные пользователя из Firebase:`, otherUserInfo);
                     }
                 } catch (fbError) {
                     console.warn(`Failed to get user ${otherUserId} data from Firebase:`, fbError);
                 }
             }
 
-            // Если не удалось получить информацию, создаем заглушку
+            // Если не удалось получить информацию, создаем заглушку с минимальными данными
             if (!otherUserInfo) {
                 otherUserInfo = {
-                    id: otherUserId, displayName: `Пользователь ${otherUserId}`, role: 'unknown'
+                    id: otherUserId,
+                    role: 'unknown'
                 };
             }
+
+            // Определение имени пользователя
+            let otherUserName = '';
+
+            // СПЕЦИАЛЬНАЯ ОБРАБОТКА ДЛЯ ПРЕПОДАВАТЕЛЕЙ
+            if (otherUserInfo.role === 'teacher') {
+                try {
+                    // Получаем полную информацию о преподавателе через специальный API-эндпоинт
+                    const teacherInfo = await this.getTeacherInfo(otherUserId);
+
+                    // Если получили данные из Teacher
+                    if (teacherInfo && teacherInfo.name) {
+                        otherUserName = teacherInfo.name;
+                        console.log(`Получено имя преподавателя из таблицы Teacher: ${otherUserName}`);
+
+                        // Также обновляем информацию о кафедре и должности
+                        if (teacherInfo.department) {
+                            otherUserInfo.department = teacherInfo.department;
+                        }
+                        if (teacherInfo.position) {
+                            otherUserInfo.position = teacherInfo.position;
+                        }
+                    } else if (otherUserInfo.fullName) {
+                        // Если не нашли в Teacher, но есть fullName в User
+                        otherUserName = otherUserInfo.fullName;
+                        console.log(`Используем fullName из User: ${otherUserName}`);
+                    } else {
+                        // Совсем не нашли имя - используем заглушку
+                        otherUserName = `Преподаватель ${otherUserId}`;
+                        console.log(`Не удалось получить имя преподавателя, используем: ${otherUserName}`);
+                    }
+                } catch (e) {
+                    console.error(`Ошибка при получении данных преподавателя:`, e);
+                    if (otherUserInfo.fullName) {
+                        otherUserName = otherUserInfo.fullName;
+                    } else {
+                        otherUserName = `Преподаватель ${otherUserId}`;
+                    }
+                }
+            } else {
+                // Обычный код для не-преподавателей
+                if (otherUserInfo.fullName) {
+                    otherUserName = otherUserInfo.fullName;
+                } else if (otherUserInfo.name) {
+                    otherUserName = otherUserInfo.name;
+                } else if (otherUserInfo.displayName) {
+                    otherUserName = otherUserInfo.displayName;
+                } else {
+                    otherUserName = `Пользователь ${otherUserId}`;
+                }
+            }
+
+            // ИСПРАВЛЕНИЕ: Добавление дополнительной информации
+            let otherUserDetails = '';
+            if (otherUserInfo.role === 'student' && otherUserInfo.group) {
+                otherUserDetails = ` (${otherUserInfo.group})`;
+            } else if (otherUserInfo.role === 'teacher') {
+                if (otherUserInfo.department) {
+                    otherUserDetails = ` (${otherUserInfo.department})`;
+                } else if (otherUserInfo.position) {
+                    otherUserDetails = ` (${otherUserInfo.position})`;
+                }
+            }
+
+            // Объединяем имя и детали
+            const otherUserDisplayName = otherUserName + otherUserDetails;
+
+            console.log(`Итоговое отображаемое имя пользователя: ${otherUserDisplayName}`);
 
             // Проверяем, существует ли уже такой чат
             const chatRef = ref(database, `chats/${chatId}`);
@@ -438,33 +546,6 @@ class ChatService {
                         [myUserId]: true, [otherUserId]: true
                     }
                 });
-
-                // Формируем имя другого пользователя для отображения
-                // ВАЖНО: Для студента показываем полное имя преподавателя
-                let otherUserName = '';
-
-                if (otherUserInfo.fullName) {
-                    otherUserName = otherUserInfo.fullName;
-                } else if (otherUserInfo.displayName) {
-                    otherUserName = otherUserInfo.displayName;
-                } else if (otherUserInfo.name) {
-                    otherUserName = otherUserInfo.name;
-                } else {
-                    otherUserName = `Пользователь ${otherUserId}`;
-                }
-
-                // Добавляем дополнительную информацию зависящую от роли
-                let otherUserDetails = '';
-                if (otherUserInfo.role === 'student' && otherUserInfo.group) {
-                    otherUserDetails = ` (${otherUserInfo.group})`;
-                } else if (otherUserInfo.role === 'teacher' && otherUserInfo.department) {
-                    otherUserDetails = ` (${otherUserInfo.department})`;
-                }
-
-                // Объединяем имя и детали
-                const otherUserDisplayName = otherUserName + otherUserDetails;
-
-                console.log(`Other user display name: ${otherUserDisplayName}`);
 
                 // Добавляем чат в список чатов текущего пользователя
                 await set(ref(database, `userChats/${myUserId}/${chatId}`), {
@@ -511,13 +592,14 @@ class ChatService {
 
                     if (myUserChatSnapshot.exists()) {
                         const chatData = myUserChatSnapshot.val();
-                        const otherUserName = otherUserInfo.fullName || otherUserInfo.displayName || otherUserInfo.name || `Пользователь ${otherUserId}`;
 
                         // Если имя поменялось или отсутствует, обновляем
-                        if (!chatData.withUserName || chatData.withUserName === `Пользователь ${otherUserId}`) {
-                            console.log(`Updating other user name to: ${otherUserName}`);
+                        if (!chatData.withUserName || chatData.withUserName === `Пользователь ${otherUserId}` ||
+                            chatData.withUserName.startsWith('Преподаватель ')) {
+                            console.log(`Updating other user name to: ${otherUserDisplayName}`);
                             await update(myUserChatRef, {
-                                withUserName: otherUserName, updatedAt: serverTimestamp()
+                                withUserName: otherUserDisplayName,
+                                updatedAt: serverTimestamp()
                             });
                         }
                     }

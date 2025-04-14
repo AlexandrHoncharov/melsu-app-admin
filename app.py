@@ -30,13 +30,13 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Remove this: from api import send_push_message
 
-# Instead, add the function directly:
 def send_push_message(token, title, message, extra=None):
     """
-    Отправляет push-уведомление через HTTP запрос к Expo Push Service
+    Отправляет push-уведомление через FCM или Expo Push Service
+    в зависимости от типа токена.
 
     Args:
-        token (str): Expo Push Token
+        token (str): FCM или Expo Push токен
         title (str): Заголовок уведомления
         message (str): Текст уведомления
         extra (dict, optional): Дополнительные данные для уведомления
@@ -45,53 +45,130 @@ def send_push_message(token, title, message, extra=None):
         dict: Результат отправки с информацией об успехе/ошибке
     """
     try:
-        import requests
-        import json
+        # Проверяем, что extra не None
+        if extra is None:
+            extra = {}
 
-        # Экспо API для push-уведомлений
-        expo_push_url = "https://exp.host/--/api/v2/push/send"
+        # Определяем тип токена (Expo или FCM)
+        is_expo_token = token.startswith('ExponentPushToken')
 
-        # Подготовка данных для отправки
-        push_message = {
-            "to": token,
-            "title": title,
-            "body": message,
-            "data": extra or {},
-            "sound": "default",
-            "priority": "high"
-        }
+        # Логируем информацию о типе токена
+        print(f"Sending notification to {token[:10]}... (Type: {'Expo' if is_expo_token else 'FCM'})")
 
-        # Выполнение запроса
-        headers = {
-            "Accept": "application/json",
-            "Accept-encoding": "gzip, deflate",
-            "Content-Type": "application/json",
-        }
+        if is_expo_token:
+            # Используем Expo Push Service для токенов Expo
+            import requests
+            import json
 
-        response = requests.post(
-            expo_push_url,
-            data=json.dumps(push_message),
-            headers=headers
-        )
+            expo_push_url = "https://exp.host/--/api/v2/push/send"
 
-        # Проверка ответа
-        if response.status_code != 200:
-            error_msg = f"Push message to {token} failed with status code {response.status_code}: {response.text}"
-            print(error_msg)
-            return {"success": False, "error": error_msg}
+            # Подготовка данных для отправки
+            push_message = {
+                "to": token,
+                "title": title,
+                "body": message,
+                "data": extra or {},
+                "sound": "default",
+                "priority": "high"
+            }
 
-        # Корректная обработка ответа Expo
-        # Expo возвращает массив объектов с полями id, status
-        result = response.json()
+            # Выполнение запроса
+            headers = {
+                "Accept": "application/json",
+                "Accept-encoding": "gzip, deflate",
+                "Content-Type": "application/json",
+            }
 
-        # Проверка на наличие ошибок в ответе
-        if "errors" in result or "data" in result and "error" in result["data"]:
-            error_msg = f"Push message to {token} failed: {result}"
-            print(error_msg)
-            return {"success": False, "error": error_msg}
+            response = requests.post(
+                expo_push_url,
+                data=json.dumps(push_message),
+                headers=headers
+            )
 
-        print(f"Successfully sent push notification to {token}")
-        return {"success": True, "receipt": result}
+            # Проверка ответа
+            if response.status_code != 200:
+                error_msg = f"Expo push failed with status {response.status_code}: {response.text}"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+
+            print(f"Successfully sent Expo push notification")
+            return {"success": True, "receipt": response.json()}
+
+        else:
+            # Проверяем наличие Firebase Admin SDK
+            try:
+                import firebase_admin
+                from firebase_admin import messaging
+                firebase_available = True
+            except ImportError:
+                firebase_available = False
+                print("Firebase Admin SDK недоступен. FCM уведомления не будут работать.")
+                return {"success": False, "error": "Firebase Admin SDK не установлен"}
+
+            if firebase_available:
+                # Инициализируем Firebase если еще не сделано
+                if not firebase_admin._apps:
+                    try:
+                        from firebase_admin import credentials
+
+                        # Попробуем найти файл сервисного аккаунта
+                        import os
+                        firebase_cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
+                        if os.path.exists(firebase_cred_path):
+                            cred = credentials.Certificate(firebase_cred_path)
+                        else:
+                            # Резервный вариант - стандартный файл конфигурации
+                            cred = credentials.Certificate('firebase.json')
+
+                        firebase_admin.initialize_app(cred)
+                        print("Firebase Admin SDK инициализирован успешно")
+                    except Exception as e:
+                        print(f"Ошибка инициализации Firebase: {e}")
+                        return {"success": False, "error": f"Ошибка инициализации Firebase: {e}"}
+
+                # Используем Firebase Cloud Messaging для FCM токенов
+                print(f"Sending FCM notification via Firebase Admin SDK")
+
+                # Преобразуем все значения в data в строки (требование FCM)
+                data_payload = {}
+                for key, value in extra.items():
+                    data_payload[str(key)] = str(value)
+
+                # Создаем сообщение
+                notification = messaging.Notification(
+                    title=title,
+                    body=message
+                )
+
+                android_config = messaging.AndroidConfig(
+                    priority="high",
+                    notification=messaging.AndroidNotification(
+                        sound="default",
+                        priority="high",
+                        channel_id="default"  # Должно соответствовать ID канала в приложении
+                    )
+                )
+
+                fcm_message = messaging.Message(
+                    notification=notification,
+                    data=data_payload,
+                    token=token,
+                    android=android_config
+                )
+
+                # Отправляем сообщение
+                try:
+                    response = messaging.send(fcm_message)
+                    print(f"Successfully sent FCM notification: {response}")
+                    return {"success": True, "receipt": response}
+                except Exception as fcm_error:
+                    error_msg = f"FCM message failed: {fcm_error}"
+                    print(error_msg)
+                    return {"success": False, "error": error_msg}
+            else:
+                error_msg = "FCM token received but Firebase Admin SDK is not available"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
 
     except Exception as exc:
         error_msg = f"Push message failed: {exc}"

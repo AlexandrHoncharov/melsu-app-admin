@@ -11,7 +11,7 @@ from functools import wraps
 from db import db
 from models import User, Teacher, Schedule, VerificationLog, DeviceToken, ScheduleTeacher
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import credentials, auth, messaging
 from flask import request
 import requests
 from bs4 import BeautifulSoup
@@ -19,7 +19,7 @@ import json
 import re
 from flask import Response
 import requests
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import os
 import uuid
@@ -27,8 +27,15 @@ from flask import request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 from models import Ticket, TicketMessage, TicketAttachment
 
-# Папка для хранения прикрепленных файлов
+# Проверяем доступность Firebase Admin SDK
+try:
+    FIREBASE_AVAILABLE = True
+    print("Firebase Admin SDK доступен для отправки FCM уведомлений")
+except ImportError:
+    print("Firebase Admin SDK недоступен. FCM уведомления не будут работать.")
+    FIREBASE_AVAILABLE = False
 
+# Папка для хранения прикрепленных файлов
 
 app = Flask(__name__)
 CORS(app)
@@ -51,9 +58,23 @@ os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+# Инициализация Firebase Admin SDK
+firebase_cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
 if not firebase_admin._apps:
-    cred = credentials.Certificate('firebase.json')
-    firebase_admin.initialize_app(cred)
+    try:
+        # Сначала пробуем инициализировать с сервисным аккаунтом
+        if FIREBASE_AVAILABLE and os.path.exists(firebase_cred_path):
+            cred = credentials.Certificate(firebase_cred_path)
+            firebase_admin.initialize_app(cred)
+            print("Firebase Admin SDK инициализирован успешно с сервисным аккаунтом")
+        else:
+            # Иначе используем обычный файл конфигурации
+            cred = credentials.Certificate('firebase.json')
+            firebase_admin.initialize_app(cred)
+            print("Firebase Admin SDK инициализирован успешно с обычным файлом конфигурации")
+    except Exception as e:
+        print(f"Ошибка инициализации Firebase Admin SDK: {e}")
+
 
 def token_required(f):
     @wraps(f)
@@ -472,8 +493,6 @@ def image_proxy():
         return jsonify({"message": f"Error: {str(e)}"}), 500
 
 
-
-
 # Helper function to generate username
 def generate_username(full_name, group=None):
     """Generate a username based on full name and group"""
@@ -618,7 +637,6 @@ def get_users(current_user):
             result.append(user_data)
 
     return jsonify(result)
-
 
 
 # Update the unregister_device function in api.py
@@ -955,6 +973,7 @@ def send_chat_notification(current_user):
         print(f"Error sending chat notification: {str(e)}")
         return jsonify({'message': f'Error: {str(e)}', 'success': False}), 500
 
+
 # Helper function to check if username exists
 def username_exists(username):
     try:
@@ -968,8 +987,9 @@ def username_exists(username):
 
 def create_token(user_id):
     payload = {
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7), # Используйте datetime.datetime.now(datetime.UTC) для новых версий
-        'iat': datetime.datetime.utcnow(), # Используйте datetime.datetime.now(datetime.UTC) для новых версий
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(days=7),
+        # Используйте datetime.datetime.now(datetime.UTC) для новых версий
+        'iat': datetime.datetime.utcnow(),  # Используйте datetime.datetime.now(datetime.UTC) для новых версий
         'sub': str(user_id)  # <-- ИСПРАВЛЕНИЕ: Преобразуем ID пользователя в строку
     }
     # Убедитесь, что SECRET_KEY точно загружен и не None
@@ -987,7 +1007,6 @@ def create_token(user_id):
 
 
 # Декоратор для проверки токена
-
 
 
 # Маршрут для регистрации студента
@@ -1097,6 +1116,7 @@ def register():
             } if new_user.speciality_id else None
         }
     }), 201
+
 
 # Маршрут для авторизации
 @app.route('/api/auth/login', methods=['POST'])
@@ -1764,6 +1784,7 @@ def get_unread_tickets_count(current_user):
         print(f"Error getting unread tickets count: {str(e)}")
         return jsonify({"message": f"Error: {str(e)}"}), 500
 
+
 # Маршрут для загрузки фото студенческого билета
 @app.route('/api/student/verify', methods=['POST'])
 @token_required
@@ -2062,10 +2083,11 @@ def internal_error(error):
 
 def send_push_message(token, title, message, extra=None):
     """
-    Отправляет push-уведомление через HTTP запрос к Expo Push Service
+    Отправляет push-уведомление через FCM или Expo Push Service
+    в зависимости от типа токена.
 
     Args:
-        token (str): Expo Push Token
+        token (str): FCM или Expo Push токен
         title (str): Заголовок уведомления
         message (str): Текст уведомления
         extra (dict, optional): Дополнительные данные для уведомления
@@ -2074,53 +2096,100 @@ def send_push_message(token, title, message, extra=None):
         dict: Результат отправки с информацией об успехе/ошибке
     """
     try:
-        import requests
-        import json
+        # Проверяем, что extra не None
+        if extra is None:
+            extra = {}
 
-        # Экспо API для push-уведомлений
-        expo_push_url = "https://exp.host/--/api/v2/push/send"
+        # Определяем тип токена (Expo или FCM)
+        is_expo_token = token.startswith('ExponentPushToken')
 
-        # Подготовка данных для отправки
-        push_message = {
-            "to": token,
-            "title": title,
-            "body": message,
-            "data": extra or {},
-            "sound": "default",
-            "priority": "high"
-        }
+        # Логируем информацию о типе токена
+        print(f"Sending notification to {token[:10]}... (Type: {'Expo' if is_expo_token else 'FCM'})")
 
-        # Выполнение запроса
-        headers = {
-            "Accept": "application/json",
-            "Accept-encoding": "gzip, deflate",
-            "Content-Type": "application/json",
-        }
+        if is_expo_token:
+            # Используем Expo Push Service для токенов Expo
+            import requests
+            import json
 
-        response = requests.post(
-            expo_push_url,
-            data=json.dumps(push_message),
-            headers=headers
-        )
+            expo_push_url = "https://exp.host/--/api/v2/push/send"
 
-        # Проверка ответа
-        if response.status_code != 200:
-            error_msg = f"Push message to {token} failed with status code {response.status_code}: {response.text}"
+            # Подготовка данных для отправки
+            push_message = {
+                "to": token,
+                "title": title,
+                "body": message,
+                "data": extra or {},
+                "sound": "default",
+                "priority": "high"
+            }
+
+            # Выполнение запроса
+            headers = {
+                "Accept": "application/json",
+                "Accept-encoding": "gzip, deflate",
+                "Content-Type": "application/json",
+            }
+
+            response = requests.post(
+                expo_push_url,
+                data=json.dumps(push_message),
+                headers=headers
+            )
+
+            # Проверка ответа
+            if response.status_code != 200:
+                error_msg = f"Expo push failed with status {response.status_code}: {response.text}"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+
+            print(f"Successfully sent Expo push notification")
+            return {"success": True, "receipt": response.json()}
+
+        elif FIREBASE_AVAILABLE:
+            # Используем Firebase Cloud Messaging для FCM токенов
+            print(f"Sending FCM notification via Firebase Admin SDK")
+
+            # Преобразуем все значения в data в строки (требование FCM)
+            data_payload = {}
+            for key, value in extra.items():
+                data_payload[str(key)] = str(value)
+
+            # Создаем сообщение
+            notification = messaging.Notification(
+                title=title,
+                body=message
+            )
+
+            android_config = messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    sound="default",
+                    priority="high",
+                    channel_id="default"  # Должно соответствовать ID канала в приложении
+                )
+            )
+
+            fcm_message = messaging.Message(
+                notification=notification,
+                data=data_payload,
+                token=token,
+                android=android_config
+            )
+
+            # Отправляем сообщение
+            try:
+                response = messaging.send(fcm_message)
+                print(f"Successfully sent FCM notification: {response}")
+                return {"success": True, "receipt": response}
+            except Exception as fcm_error:
+                error_msg = f"FCM message failed: {fcm_error}"
+                print(error_msg)
+                return {"success": False, "error": error_msg}
+
+        else:
+            error_msg = "FCM token received but Firebase Admin SDK is not available"
             print(error_msg)
             return {"success": False, "error": error_msg}
-
-        # Корректная обработка ответа Expo
-        # Expo возвращает массив объектов с полями id, status
-        result = response.json()
-
-        # Проверка на наличие ошибок в ответе
-        if "errors" in result or "data" in result and "error" in result["data"]:
-            error_msg = f"Push message to {token} failed: {result}"
-            print(error_msg)
-            return {"success": False, "error": error_msg}
-
-        print(f"Successfully sent push notification to {token}")
-        return {"success": True, "receipt": result}
 
     except Exception as exc:
         error_msg = f"Push message failed: {exc}"
@@ -2195,8 +2264,6 @@ def register_device(current_user):
                 print(f"Error removing old tokens: {str(e)}")
                 # Продолжаем выполнение даже при ошибке
                 db.session.rollback()
-
-        # Шаг 3: Создаем новую запись токена
         try:
             new_token = DeviceToken(
                 user_id=current_user.id,
@@ -2244,8 +2311,6 @@ def register_device(current_user):
             'error': str(e)
         }), 500
 
-
-# Маршрут для тестовой отправки уведомления
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
@@ -2281,6 +2346,7 @@ def test_notification(current_user):
             "platform": token_obj.platform,
             "token_preview": token_obj.token[:10] + "...",
             "success": result["success"],
+            "token_type": "FCM" if not token_obj.token.startswith('ExponentPushToken') else "Expo",
             "details": result.get("receipt") if result["success"] else result.get("error")
         })
 

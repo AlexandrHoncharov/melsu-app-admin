@@ -17,6 +17,9 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import re
+from flask import Response
+import requests
+from urllib.parse import quote
 
 import os
 import uuid
@@ -87,16 +90,21 @@ def token_required(f):
 
 @app.route('/api/news', methods=['GET'])
 def get_news():
-    """Get news from the university website"""
+    """Get news from the university website with image proxy"""
     try:
         # Get page parameter (default to 1)
         page = request.args.get('page', 1, type=int)
+        print(f"Fetching news page: {page}")
+
+        # Create base URL for absolute links
+        host_url = request.host_url.rstrip('/')
 
         # Fetch the news page
-        url = f"https://melsu.ru/news?page=1"
-        response = requests.get(url)
+        url = f"https://melsu.ru/news?page={page}"
+        response = requests.get(url, timeout=15)
 
         if response.status_code != 200:
+            print(f"Failed to fetch news, status code: {response.status_code}")
             return jsonify({"message": "Failed to fetch news", "success": False}), 500
 
         # Parse HTML
@@ -104,42 +112,92 @@ def get_news():
 
         # Find news items
         news_items = []
-        articles = soup.select('a[href^="/news/show/"]')
 
-        for article in articles:
+        # Ищем блоки новостей (как первые, так и обычные)
+        news_boxes = soup.select('.news-box, .first-news-box')
+
+        for news_box in news_boxes:
             try:
-                # Extract data
-                image_tag = article.select_one('img')
-                image_url = image_tag['src'] if image_tag else None
+                # Извлекаем ссылку на новость
+                link = news_box.select_one('a')
+                if not link:
+                    continue
 
-                # Make image URL absolute
-                if image_url and not image_url.startswith('http'):
-                    image_url = f"https://melsu.ru{image_url}"
+                href = link.get('href')
+                if not href:
+                    continue
 
-                # Extract category
-                category_tag = article.select_one('.meta-category')
+                # Получаем ID новости
+                match = re.search(r'/news/show/(\d+)', href)
+                if not match:
+                    continue
+
+                news_id = match.group(1)
+
+                # Получаем изображение и используем прокси
+                image_tag = news_box.select_one('img')
+                image_url = None
+                original_src = None
+
+                if image_tag and image_tag.get('src'):
+                    original_src = image_tag['src']
+
+                    # Формируем URL для прокси
+                    if original_src.startswith('http'):
+                        original_url = original_src
+                    else:
+                        original_url = f"https://melsu.ru/{original_src.lstrip('/')}"
+
+                    # Кодируем URL для передачи через прокси
+                    from urllib.parse import quote
+                    encoded_url = quote(original_url)
+                    image_url = f"{host_url}/api/image-proxy?url={encoded_url}"
+
+                # Получаем категорию
+                category_tag = news_box.select_one('.meta-category')
                 category = category_tag.text.strip() if category_tag else None
 
-                # Extract date
-                date_tag = article.select_one('.bi-calendar2-week')
-                date = date_tag.parent.text.strip() if date_tag else None
+                # Получаем дату
+                date_tag = news_box.select_one('.bi-calendar2-week')
+                date = date_tag.parent.text.strip() if date_tag and date_tag.parent else None
 
-                # Extract title
-                title_tag = article.select_one('h3')
-                title = title_tag.text.strip() if title_tag else None
+                # Получаем заголовок
+                title_container = news_box.select_one('h2') or news_box.select_one('h3') or news_box.select_one(
+                    '.title')
+                title = title_container.text.strip() if title_container else None
 
-                # Extract description
-                description_tag = article.select_one('.description-news p')
-                description = description_tag.text.strip() if description_tag else None
+                # Получаем описание - для разных типов блоков используются разные селекторы
+                description = None
 
-                # Extract ID from URL
-                news_id = None
-                href = article.get('href')
-                if href:
-                    match = re.search(r'/news/show/(\d+)', href)
-                    if match:
-                        news_id = match.group(1)
+                # Проверяем разные селекторы для описания
+                if "first-news-box" in news_box.get('class', []):
+                    # Для главной новости
+                    description_selectors = ['.line-clamp-10 p', '.line-clamp-10', 'p']
+                else:
+                    # Для обычных новостей
+                    description_selectors = ['.description-news p', '.description-news', '.line-clamp-3', 'p']
 
+                for selector in description_selectors:
+                    description_elements = news_box.select(selector)
+                    if description_elements:
+                        # Берем первый непустой элемент
+                        for elem in description_elements:
+                            text = elem.text.strip()
+                            if text and text != title:  # Избегаем дубликатов заголовка
+                                description = text
+                                break
+                    if description:
+                        break
+
+                # Правильно формируем URL новости
+                if href.startswith('http'):
+                    news_url = href
+                else:
+                    if href.startswith('/'):
+                        href = href[1:]
+                    news_url = f"https://melsu.ru/{href}"
+
+                # Добавляем новость в список
                 news_items.append({
                     "id": news_id,
                     "title": title,
@@ -147,7 +205,8 @@ def get_news():
                     "date": date,
                     "description": description,
                     "image_url": image_url,
-                    "url": f"https://melsu.ru{href}" if href else None
+                    "url": news_url,
+                    "_debug_original_src": original_src  # Для отладки
                 })
             except Exception as item_error:
                 print(f"Error processing news item: {str(item_error)}")
@@ -156,9 +215,24 @@ def get_news():
         # Check if there is a next page
         pagination = soup.select_one('.pagination')
         has_next_page = False
+
         if pagination:
-            next_link = pagination.select_one(f'a[href="/news?page={page + 1}"]')
-            has_next_page = next_link is not None
+            next_page = page + 1
+            # Проверяем наличие ссылки на следующую страницу
+            next_page_links = pagination.select(f'a[href="/news?page={next_page}"]')
+            if next_page_links:
+                has_next_page = True
+            else:
+                # Альтернативный способ: проверяем по тексту номера страницы
+                page_links = pagination.select('a')
+                for link in page_links:
+                    if str(next_page) == link.text.strip():
+                        has_next_page = True
+                        break
+
+        print(f"Processed {len(news_items)} news items, has_next_page: {has_next_page}")
+        if news_items:
+            print(f"First news item: {news_items[0]['title']}, image: {news_items[0]['image_url']}")
 
         return jsonify({
             "news": news_items,
@@ -174,76 +248,161 @@ def get_news():
 
 @app.route('/api/news/<int:news_id>', methods=['GET'])
 def get_news_detail(news_id):
-    """Get detailed news article by ID"""
+    """Get detailed news article by ID with image proxy"""
     try:
+        print(f"Fetching news detail for ID: {news_id}")
+
+        # Create base URL for absolute links
+        host_url = request.host_url.rstrip('/')
+
         # Fetch the news article
         url = f"https://melsu.ru/news/show/{news_id}"
-        response = requests.get(url)
+        response = requests.get(url, timeout=15)
 
         if response.status_code != 200:
+            print(f"News article not found, status code: {response.status_code}")
             return jsonify({"message": "News article not found", "success": False}), 404
 
         # Parse HTML
         soup = BeautifulSoup(response.text, 'html.parser')
 
         # Extract title
-        title_tag = soup.select_one('h1.text-4xl')
+        title_tag = soup.select_one('h1.text-4xl') or soup.select_one('h1')
         title = title_tag.text.strip() if title_tag else None
 
         # Extract date
         date_tag = soup.select_one('.bi-calendar2-week')
-        date = date_tag.parent.text.strip() if date_tag else None
+        date = date_tag.parent.text.strip() if date_tag and date_tag.parent else None
 
         # Extract content
         content_div = soup.select_one('.content-news')
+
+        # Модифицируем контент, чтобы все изображения использовали прокси
+        if content_div:
+            for img in content_div.select('img'):
+                if img.get('src'):
+                    original_src = img['src']
+
+                    # Формируем URL для прокси
+                    if original_src.startswith('http'):
+                        original_url = original_src
+                    else:
+                        original_url = f"https://melsu.ru/{original_src.lstrip('/')}"
+
+                    # Кодируем URL для передачи через прокси
+                    from urllib.parse import quote
+                    encoded_url = quote(original_url)
+                    proxy_url = f"{host_url}/api/image-proxy?url={encoded_url}"
+
+                    # Заменяем src на прокси-URL
+                    img['src'] = proxy_url
+
         content_html = str(content_div) if content_div else None
 
         # Extract plain text content
         content_text = content_div.get_text(separator='\n').strip() if content_div else None
 
-        # Extract images
+        # Extract images and use proxy
         images = []
-        img_tags = content_div.select('img') if content_div else []
-        for img in img_tags:
-            src = img.get('src')
-            if src:
-                # Make image URL absolute
-                if not src.startswith('http'):
-                    src = f"https://melsu.ru{src}"
-                images.append(src)
+        # Основное изображение (может быть в шапке статьи)
+        header_img = soup.select_one('.img-news-box img') or soup.select_one('.header-image img')
 
-        # Get category from breadcrumbs
-        breadcrumbs = soup.select('.breadcrumbs .crumb-home')
-        category = breadcrumbs[1].text.strip() if len(breadcrumbs) > 1 else None
+        if header_img and header_img.get('src'):
+            src = header_img['src']
+            # Формируем URL для прокси
+            if src.startswith('http'):
+                original_url = src
+            else:
+                original_url = f"https://melsu.ru/{src.lstrip('/')}"
+
+            # Кодируем URL для передачи через прокси
+            from urllib.parse import quote
+            encoded_url = quote(original_url)
+            proxy_url = f"{host_url}/api/image-proxy?url={encoded_url}"
+            images.append(proxy_url)
+
+        # Дополнительные изображения в контенте
+        if content_div:
+            for img in content_div.select('img'):
+                src = img.get('src')
+                if src and src not in images:  # Избегаем дубликатов
+                    images.append(src)  # Уже заменен на прокси выше
+
+        # Get category from breadcrumbs or meta tag
+        category = None
+        category_tag = soup.select_one('.meta-category')
+        if category_tag:
+            category = category_tag.text.strip()
+        else:
+            # Попробуем найти в хлебных крошках
+            breadcrumbs = soup.select('.breadcrumbs .crumb-home')
+            if len(breadcrumbs) > 1:
+                category = breadcrumbs[1].text.strip()
 
         # Check for previous and next articles
         prev_article = None
         next_article = None
 
-        prev_link = soup.select_one('a[href^="/news/show/"]')
-        if prev_link and "Предыдущая" in prev_link.text:
-            match = re.search(r'/news/show/(\d+)', prev_link['href'])
-            if match:
+        # Ищем ссылки на предыдущую/следующую новость
+        navigation_links = soup.select('a[href^="/news/show/"]')
+
+        for link in navigation_links:
+            link_text = link.text.strip().lower()
+            href = link.get('href', '')
+
+            if not href:
+                continue
+
+            match = re.search(r'/news/show/(\d+)', href)
+            if not match:
+                continue
+
+            news_id_from_link = match.group(1)
+
+            # Определяем по тексту ссылки, это предыдущая или следующая новость
+            if 'предыдущ' in link_text or 'пред' in link_text or '←' in link_text:
+                title_span = link.select_one('span')
+                prev_title = title_span.text.strip() if title_span else "Предыдущая новость"
                 prev_article = {
-                    "id": match.group(1),
-                    "title": prev_link.select_one('span').text.strip() if prev_link.select_one(
-                        'span') else "Предыдущая новость"
+                    "id": news_id_from_link,
+                    "title": prev_title
+                }
+            elif 'следующ' in link_text or 'след' in link_text or '→' in link_text:
+                title_span = link.select_one('span')
+                next_title = title_span.text.strip() if title_span else "Следующая новость"
+                next_article = {
+                    "id": news_id_from_link,
+                    "title": next_title
                 }
 
-        next_links = soup.select('a[href^="/news/show/"]')
-        for link in next_links:
-            if "Следующая" in link.text:
-                match = re.search(r'/news/show/(\d+)', link['href'])
-                if match:
-                    next_article = {
-                        "id": match.group(1),
-                        "title": link.select_one('span').text.strip() if link.select_one(
-                            'span') else "Следующая новость"
-                    }
-                    break
+        # Если не нашли по тексту, попробуем по расположению (первая/последняя ссылка)
+        if not prev_article and not next_article and len(navigation_links) >= 2:
+            first_link = navigation_links[0]
+            last_link = navigation_links[-1]
+
+            # Первая ссылка - предыдущая, последняя - следующая
+            first_match = re.search(r'/news/show/(\d+)', first_link.get('href', ''))
+            last_match = re.search(r'/news/show/(\d+)', last_link.get('href', ''))
+
+            if first_match:
+                prev_article = {
+                    "id": first_match.group(1),
+                    "title": "Предыдущая новость"
+                }
+
+            if last_match:
+                next_article = {
+                    "id": last_match.group(1),
+                    "title": "Следующая новость"
+                }
+
+        print(f"Successfully fetched news detail for ID {news_id}")
+        if images:
+            print(f"Found {len(images)} images with proxy URLs")
+            print(f"First image: {images[0]}")
 
         return jsonify({
-            "id": news_id,
+            "id": str(news_id),
             "title": title,
             "date": date,
             "category": category,
@@ -258,6 +417,63 @@ def get_news_detail(news_id):
     except Exception as e:
         print(f"Error getting news detail: {str(e)}")
         return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
+
+
+@app.route('/api/image-proxy', methods=['GET'])
+def image_proxy():
+    """Прокси для изображений с сайта университета"""
+    try:
+        image_url = request.args.get('url')
+        if not image_url:
+            return jsonify({"message": "URL parameter is required"}), 400
+
+        # Декодируем URL если он был закодирован
+        try:
+            image_url = unquote(image_url)
+        except:
+            pass
+
+        # Если URL относительный, делаем его абсолютным
+        if not image_url.startswith(('http://', 'https://')):
+            if not image_url.startswith('/'):
+                image_url = f"/{image_url}"
+            image_url = f"https://melsu.ru{image_url}"
+
+        print(f"Proxying image from: {image_url}")
+
+        # Получаем изображение с сайта университета
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': 'https://melsu.ru/',
+            'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8'
+        }
+
+        response = requests.get(image_url, stream=True, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            print(f"Failed to fetch image, status code: {response.status_code}")
+            return jsonify({"message": "Failed to fetch image"}), response.status_code
+
+        # Определяем тип контента
+        content_type = response.headers.get('Content-Type', 'image/jpeg')
+
+        # Создаем ответ с изображением
+        return Response(
+            response.content,
+            content_type=content_type,
+            headers={
+                'Access-Control-Allow-Origin': '*',  # Разрешаем доступ из любого источника
+                'Cache-Control': 'public, max-age=86400',  # Кэшируем на 24 часа
+                'Content-Length': str(len(response.content))
+            }
+        )
+
+    except Exception as e:
+        print(f"Error in image proxy: {str(e)}")
+        return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
+
 
 # Helper function to generate username
 def generate_username(full_name, group=None):

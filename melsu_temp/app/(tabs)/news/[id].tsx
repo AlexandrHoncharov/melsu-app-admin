@@ -7,9 +7,11 @@ import {
   Image,
   ActivityIndicator,
   TouchableOpacity,
-  Linking
+  Linking,
+  SafeAreaView,
+  StatusBar
 } from 'react-native';
-import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import newsApi, { NewsDetail } from '../../../src/api/newsApi';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -19,6 +21,7 @@ export default function NewsDetailScreen() {
   const [newsDetail, setNewsDetail] = useState<NewsDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const fetchNewsDetail = async () => {
@@ -53,109 +56,223 @@ export default function NewsDetailScreen() {
     router.replace(`/news/${newsId}`);
   };
 
+  // Обработчик ошибки загрузки изображения
+  const handleImageError = (index: number) => {
+    console.log(`Image error for index ${index}`);
+    setImageErrors(prev => ({...prev, [index]: true}));
+  };
+
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#770002" />
-        <Text style={styles.loadingText}>Загрузка статьи...</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.customHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="chevron-back" size={24} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Загрузка...</Text>
+          <View style={styles.placeholderRight} />
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#770002" />
+          <Text style={styles.loadingText}>Загрузка статьи...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (error || !newsDetail) {
     return (
-      <View style={styles.errorContainer}>
-        <Stack.Screen options={{ title: 'Ошибка' }} />
-        <Ionicons name="alert-circle-outline" size={50} color="#770002" />
-        <Text style={styles.errorText}>{error || 'Failed to load news details'}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Назад</Text>
-        </TouchableOpacity>
-      </View>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.customHeader}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="chevron-back" size={24} color="#000" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Ошибка</Text>
+          <View style={styles.placeholderRight} />
+        </View>
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={50} color="#770002" />
+          <Text style={styles.errorText}>{error || 'Failed to load news details'}</Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Text style={styles.backButtonText}>Назад</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <ScrollView style={styles.container}>
-      <Stack.Screen options={{ title: newsDetail.title || 'Новость' }} />
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="dark-content" />
+      {/* Custom Header */}
+      <View style={styles.customHeader}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="chevron-back" size={24} color="#000" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {newsDetail.title || 'Новость'}
+        </Text>
+        <View style={styles.placeholderRight} />
+      </View>
 
-      {newsDetail.images && newsDetail.images.length > 0 && (
-        <Image
-          source={{ uri: newsDetail.images[0] }}
-          style={styles.headerImage}
-          resizeMode="cover"
-        />
-      )}
+      <ScrollView style={styles.container}>
+        {newsDetail.images && newsDetail.images.length > 0 && (
+          <View style={styles.imageContainer}>
+            <Image
+              source={{ uri: newsDetail.images[0] }}
+              style={styles.headerImage}
+              resizeMode="cover"
+              onError={() => handleImageError(0)}
+            />
+            {imageErrors[0] && (
+              <View style={styles.imageErrorOverlay}>
+                <Ionicons name="image-outline" size={40} color="#ccc" />
+                <Text style={styles.imageErrorText}>Не удалось загрузить изображение</Text>
+              </View>
+            )}
+          </View>
+        )}
 
-      <View style={styles.contentContainer}>
-        <Text style={styles.title}>{newsDetail.title}</Text>
+        <View style={styles.contentContainer}>
+          <Text style={styles.title}>{newsDetail.title}</Text>
 
-        <View style={styles.metaContainer}>
-          {newsDetail.category && (
-            <View style={styles.categoryPill}>
-              <Text style={styles.categoryText}>{newsDetail.category}</Text>
+          <View style={styles.metaContainer}>
+            {newsDetail.category && (
+              <View style={styles.categoryPill}>
+                <Text style={styles.categoryText}>{newsDetail.category}</Text>
+              </View>
+            )}
+            {newsDetail.date && (
+              <Text style={styles.dateText}>
+                <Ionicons name="calendar-outline" size={14} color="#666" /> {newsDetail.date}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.divider} />
+
+          {/* Display plain text content */}
+          <Text style={styles.plainText}>{newsDetail.content_text}</Text>
+
+          {/* Display additional images if available */}
+          {newsDetail.images && newsDetail.images.length > 1 && (
+            <View style={styles.imagesContainer}>
+              {newsDetail.images.slice(1).map((imageUrl, index) => (
+                <View key={`image-${index + 1}`} style={styles.additionalImageContainer}>
+                  <Image
+                    source={{ uri: imageUrl }}
+                    style={styles.contentImage}
+                    resizeMode="contain"
+                    onError={() => handleImageError(index + 1)}
+                  />
+                  {imageErrors[index + 1] && (
+                    <View style={styles.imageErrorOverlay}>
+                      <Ionicons name="image-outline" size={40} color="#ccc" />
+                      <Text style={styles.imageErrorText}>Не удалось загрузить изображение</Text>
+                    </View>
+                  )}
+                </View>
+              ))}
             </View>
           )}
-          {newsDetail.date && (
-            <Text style={styles.dateText}>
-              <Ionicons name="calendar-outline" size={14} color="#666" /> {newsDetail.date}
-            </Text>
+
+          {(newsDetail.prev_article || newsDetail.next_article) && (
+            <View style={styles.navigationContainer}>
+              {newsDetail.prev_article && (
+                <TouchableOpacity
+                  style={[styles.navButton, styles.prevButton]}
+                  onPress={() => navigateToNews(newsDetail.prev_article.id)}
+                >
+                  <Ionicons name="arrow-back" size={20} color="#770002" />
+                  <Text style={styles.navButtonText}>Предыдущая</Text>
+                </TouchableOpacity>
+              )}
+
+              <View style={styles.navSpacer} />
+
+              {newsDetail.next_article && (
+                <TouchableOpacity
+                  style={[styles.navButton, styles.nextButton]}
+                  onPress={() => navigateToNews(newsDetail.next_article.id)}
+                >
+                  <Text style={styles.navButtonText}>Следующая</Text>
+                  <Ionicons name="arrow-forward" size={20} color="#770002" />
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
-
-        <View style={styles.divider} />
-
-        {/* Display plain text content */}
-        <Text style={styles.plainText}>{newsDetail.content_text}</Text>
-
-        {/* Display additional images if available */}
-        {newsDetail.images && newsDetail.images.length > 1 && (
-          <View style={styles.imagesContainer}>
-            {newsDetail.images.slice(1).map((imageUrl, index) => (
-              <Image
-                key={`image-${index}`}
-                source={{ uri: imageUrl }}
-                style={styles.contentImage}
-                resizeMode="contain"
-              />
-            ))}
-          </View>
-        )}
-
-        {(newsDetail.prev_article || newsDetail.next_article) && (
-          <View style={styles.navigationContainer}>
-            {newsDetail.prev_article && (
-              <TouchableOpacity
-                style={[styles.navButton, styles.prevButton]}
-                onPress={() => navigateToNews(newsDetail.prev_article.id)}
-              >
-                <Ionicons name="arrow-back" size={20} color="#770002" />
-                <Text style={styles.navButtonText}>Предыдущая</Text>
-              </TouchableOpacity>
-            )}
-
-            <View style={styles.navSpacer} />
-
-            {newsDetail.next_article && (
-              <TouchableOpacity
-                style={[styles.navButton, styles.nextButton]}
-                onPress={() => navigateToNews(newsDetail.next_article.id)}
-              >
-                <Text style={styles.navButtonText}>Следующая</Text>
-                <Ionicons name="arrow-forward" size={20} color="#770002" />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'white',
+  },
+  customHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+    backgroundColor: '#FFFFFF',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
+  },
+  placeholderRight: {
+    width: 40,
+    height: 40,
+  },
   container: {
     flex: 1,
     backgroundColor: 'white',
+  },
+  imageContainer: {
+    width: '100%',
+    height: 250,
+    position: 'relative',
+  },
+  headerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  imageErrorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  imageErrorText: {
+    color: '#999',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,
@@ -181,19 +298,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 20,
   },
-  backButton: {
+  backButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
     backgroundColor: '#770002',
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 5,
-  },
-  backButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  headerImage: {
-    width: '100%',
-    height: 250,
   },
   contentContainer: {
     padding: 16,
@@ -240,10 +351,14 @@ const styles = StyleSheet.create({
   imagesContainer: {
     marginTop: 16,
   },
+  additionalImageContainer: {
+    marginBottom: 16,
+    position: 'relative',
+    height: 200,
+  },
   contentImage: {
     width: '100%',
-    height: 200,
-    marginBottom: 16,
+    height: '100%',
     borderRadius: 8,
   },
   navigationContainer: {

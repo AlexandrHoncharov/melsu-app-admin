@@ -214,21 +214,20 @@ def get_news():
 
         # Check if there is a next page
         pagination = soup.select_one('.pagination')
-        has_next_page = False
+        has_next_page = True
 
+        # Можно оставить оригинальную логику проверки для отладки, но не использовать её результат
         if pagination:
             next_page = page + 1
             # Проверяем наличие ссылки на следующую страницу
             next_page_links = pagination.select(f'a[href="/news?page={next_page}"]')
-            if next_page_links:
-                has_next_page = True
-            else:
-                # Альтернативный способ: проверяем по тексту номера страницы
-                page_links = pagination.select('a')
-                for link in page_links:
-                    if str(next_page) == link.text.strip():
-                        has_next_page = True
-                        break
+            original_has_next_page = len(next_page_links) > 0
+
+            # Для логирования
+            print(f"Оригинальная проверка наличия страницы {next_page}: {original_has_next_page}")
+            print(f"Игнорируем результат проверки и всегда возвращаем has_next_page=True")
+
+        print(f"Обработано {len(news_items)} новостей, has_next_page: {has_next_page}")
 
         print(f"Processed {len(news_items)} news items, has_next_page: {has_next_page}")
         if news_items:

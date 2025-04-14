@@ -30,54 +30,58 @@ export default function NewsScreen() {
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
   const fetchNews = useCallback(async (pageNumber = 1, refresh = false) => {
-    try {
-      setError(null);
+  try {
+    setError(null);
 
-      if (refresh) {
-        setRefreshing(true);
-      } else if (pageNumber === 1) {
-        setLoading(true);
+    if (refresh) {
+      setRefreshing(true);
+    } else if (pageNumber === 1) {
+      setLoading(true);
+    } else {
+      setLoadingMore(true);
+    }
+
+    console.log(`Fetching news page ${pageNumber}`);
+    const response = await newsApi.getNews(pageNumber);
+
+    if (response.success) {
+      if (refresh || pageNumber === 1) {
+        setNews(response.news);
+        // Сбрасываем ошибки изображений при обновлении
+        setImageErrors({});
       } else {
-        setLoadingMore(true);
-      }
-
-      console.log(`Fetching news page ${pageNumber}`);
-      const response = await newsApi.getNews(pageNumber);
-
-      if (response.success) {
-        if (refresh || pageNumber === 1) {
-          setNews(response.news);
-          // Сбрасываем ошибки изображений при обновлении
-          setImageErrors({});
-        } else {
+        // Using functional update to avoid stale closure issues
+        setNews(prevNews => {
           // Убедимся, что мы не дублируем новости
-          const existingIds = new Set(news.map(item => item.id));
+          const existingIds = new Set(prevNews.map(item => item.id));
           const newItems = response.news.filter(item => !existingIds.has(item.id));
 
           if (newItems.length > 0) {
-            setNews(prevNews => [...prevNews, ...newItems]);
             console.log(`Added ${newItems.length} new news items`);
+            return [...prevNews, ...newItems];
           } else {
             console.log('No new items in response');
+            return prevNews;
           }
-        }
-
-        setPage(response.page);
-        setHasNextPage(response.has_next_page);
-        console.log(`Page: ${response.page}, hasNextPage: ${response.has_next_page}`);
-      } else {
-        setError('Failed to load news');
-        console.error('API returned failure');
+        });
       }
-    } catch (error) {
-      console.error('Error fetching news:', error);
-      setError(error instanceof Error ? error.message : 'Unknown error occurred');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-      setLoadingMore(false);
+
+      setPage(response.page);
+      setHasNextPage(response.has_next_page);
+      console.log(`Page: ${response.page}, hasNextPage: ${response.has_next_page}`);
+    } else {
+      setError('Failed to load news');
+      console.error('API returned failure');
     }
-  }, [news]);
+  } catch (error) {
+    console.error('Error fetching news:', error);
+    setError(error instanceof Error ? error.message : 'Unknown error occurred');
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+    setLoadingMore(false);
+  }
+}, []); // Removed news from dependency array
 
   useEffect(() => {
     fetchNews();

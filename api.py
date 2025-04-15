@@ -2244,7 +2244,7 @@ def register_device(current_user):
                 is_onesignal=is_onesignal,
                 is_expo_token=False if is_onesignal else False,  # Не Expo если OneSignal
                 is_active=True,
-                last_used=datetime.utcnow()
+                last_used=datetime.datetime.utcnow()
             )
 
             db.session.add(new_token)

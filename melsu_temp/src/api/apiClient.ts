@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
 // Base URL for your API server
-export const API_URL = 'http://192.168.0.4:5001/api';
+export const API_URL = 'https://app.melsu.ru/api';
 
 // Create axios instance with base settings
 const apiClient = axios.create({

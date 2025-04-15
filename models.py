@@ -154,8 +154,8 @@ class DeviceToken(db.Model):
     device_name = db.Column(db.String(100))
     device_id = db.Column(db.String(100))
     app_version = db.Column(db.String(20))
-    is_expo_token = db.Column(db.Boolean, default=False)
-    is_onesignal = db.Column(db.Boolean, default=False)  # New field for OneSignal
+    is_expo_token = db.Column(db.Boolean, default=True)
+    is_onesignal = db.Column(db.Boolean, default=True)  # New field for OneSignal
     is_active = db.Column(db.Boolean, default=True)
     last_used = db.Column(db.DateTime, default=db.func.now())
     created_at = db.Column(db.DateTime, default=db.func.now())

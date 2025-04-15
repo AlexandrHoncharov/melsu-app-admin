@@ -18,6 +18,17 @@ import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import { useNotifications } from '../../../hooks/useNotifications';
+import { isExpoGo } from '../../../src/utils/environmentUtils';
+import LocalNotificationsService from '../../../src/services/LocalNotificationsService';
+
+// Настраиваем предварительно обработчик уведомлений для отображения в приложении
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export default function NotificationTestScreen() {
   const {
@@ -33,7 +44,31 @@ export default function NotificationTestScreen() {
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [localSending, setLocalSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [isExpoGoEnv, setIsExpoGoEnv] = useState(false);
+  const [notificationEnabled, setNotificationEnabled] = useState(false);
+
+  // Проверка окружения при первом рендере
+  useEffect(() => {
+    setIsExpoGoEnv(isExpoGo());
+
+    // Проверка настроек уведомлений
+    const checkNotificationSetup = async () => {
+      try {
+        // Проверяем разрешения на отправку уведомлений
+        const permissionGranted = await LocalNotificationsService.checkPermissions();
+        setNotificationEnabled(permissionGranted);
+        if (!permissionGranted) {
+          console.log('Notification permissions are not granted yet');
+        }
+      } catch (e) {
+        console.warn('Error checking notification permissions:', e);
+      }
+    };
+
+    checkNotificationSetup();
+  }, []);
 
   // Загрузка статуса уведомлений при открытии экрана
   useEffect(() => {
@@ -51,6 +86,11 @@ export default function NotificationTestScreen() {
   const refreshStatus = async () => {
     setLoading(true);
     try {
+      // Обновляем статус разрешений для локальных уведомлений
+      const localPermissionGranted = await LocalNotificationsService.checkPermissions();
+      setNotificationEnabled(localPermissionGranted);
+
+      // Получаем статус OneSignal/уведомлений
       const notificationStatus = await getNotificationStatus();
       setStatus(notificationStatus);
     } catch (e) {
@@ -65,10 +105,21 @@ export default function NotificationTestScreen() {
   const handleSendTest = async () => {
     setSending(true);
     try {
-      await sendTestNotification();
+      const result = await sendTestNotification();
+      if (result) {
+        Alert.alert(
+          'Успешно',
+          'Тестовое уведомление отправлено. Проверьте уведомления на устройстве.'
+        );
+      } else {
+        Alert.alert(
+          'Внимание',
+          'Запрос на отправку уведомления выполнен, но сервер не подтвердил успешную доставку.'
+        );
+      }
     } catch (e) {
       console.error('Ошибка при отправке тестового уведомления:', e);
-      Alert.alert('Ошибка', 'Не удалось отправить тестовое уведомление');
+      Alert.alert('Ошибка', `Не удалось отправить тестовое уведомление: ${(e as any).message || e}`);
     } finally {
       setSending(false);
       refreshStatus();
@@ -77,17 +128,59 @@ export default function NotificationTestScreen() {
 
   // Функция отправки локального уведомления (для тестирования без сервера)
   const handleSendLocalTest = async () => {
+    setLocalSending(true);
     try {
-      await scheduleLocalNotification(
+      // Используем прямой сервис для локальных уведомлений
+      const notificationId = await LocalNotificationsService.scheduleLocalNotification(
         'Локальное уведомление',
         'Это тестовое локальное уведомление',
-        { type: 'test', local: true },
-        { seconds: 5 } // будет показано через 5 секунд
+        {
+          type: 'test',
+          local: true,
+          source: 'NotificationTestScreen'
+        },
+        {
+          seconds: 5,  // будет показано через 5 секунд
+          channelId: 'default',
+          sound: true
+        }
       );
-      Alert.alert('Успешно', 'Локальное уведомление будет показано через 5 секунд');
+
+      Alert.alert(
+        'Успешно',
+        `Локальное уведомление будет показано через 5 секунд (ID: ${notificationId})`
+      );
     } catch (e) {
       console.error('Ошибка при отправке локального уведомления:', e);
-      Alert.alert('Ошибка', 'Не удалось отправить локальное уведомление');
+      Alert.alert('Ошибка', `Не удалось отправить локальное уведомление: ${(e as any).message || String(e)}`);
+    } finally {
+      setLocalSending(false);
+    }
+  };
+
+  // Функция немедленной отправки тестового уведомления
+  const handleSendInstantTest = async () => {
+    setLocalSending(true);
+    try {
+      // Отправляем немедленное уведомление
+      const notificationId = await LocalNotificationsService.scheduleLocalNotification(
+        'Мгновенное уведомление',
+        'Это тестовое мгновенное уведомление',
+        {
+          type: 'test',
+          local: true,
+          source: 'immediate_test'
+        },
+        {
+          seconds: 1,  // минимальная задержка
+          channelId: 'default',
+          sound: true
+        }
+      );
+    } catch (e) {
+      console.error('Ошибка при отправке мгновенного уведомления:', e);
+    } finally {
+      setLocalSending(false);
     }
   };
 
@@ -95,11 +188,19 @@ export default function NotificationTestScreen() {
   const checkPermissions = async () => {
     try {
       setRefreshing(true);
-      const result = await requestPermissions();
+
+      // Запрашиваем напрямую разрешения через LocalNotificationsService
+      const directResult = await LocalNotificationsService.requestPermissions();
+
+      // Также запрашиваем через OneSignal для синхронизации
+      const oneSignalResult = await requestPermissions();
+
+      // Обновляем статус
+      setNotificationEnabled(directResult);
 
       Alert.alert(
         'Статус разрешений',
-        `Результат запроса: ${result ? 'Разрешено' : 'Отклонено'}`
+        `Результат запроса: ${directResult ? 'Разрешено' : 'Отклонено'}`
       );
 
       refreshStatus();
@@ -139,9 +240,30 @@ export default function NotificationTestScreen() {
     }
   };
 
+  // Рендерит баннер о режиме приложения (Expo Go или Development Build)
+  const renderEnvironmentBanner = () => {
+    return (
+      <View style={[
+        styles.environmentBanner,
+        { backgroundColor: isExpoGoEnv ? '#FFF3E0' : '#E8F5E9' }
+      ]}>
+        <Ionicons
+          name={isExpoGoEnv ? "warning" : "checkmark-circle"}
+          size={20}
+          color={isExpoGoEnv ? "#FF9800" : "#4CAF50"}
+        />
+        <Text style={styles.environmentText}>
+          {isExpoGoEnv
+            ? 'Запущено в Expo Go: Используются имитационные уведомления'
+            : 'Запущено в Development Build: Используются реальные уведомления'}
+        </Text>
+      </View>
+    );
+  };
+
   // Компонент для отображения информации о токене
   const TokenInfo = () => {
-    if (!status || !status.token) {
+    if (!status || !status.playerID) {
       return (
         <View style={styles.infoCard}>
           <Text style={styles.infoText}>
@@ -150,6 +272,9 @@ export default function NotificationTestScreen() {
           <Text style={styles.infoItem}>- Недостаточно разрешений</Text>
           <Text style={styles.infoItem}>- Устройство не поддерживается</Text>
           <Text style={styles.infoItem}>- Ошибка при регистрации токена</Text>
+          {isExpoGoEnv && (
+            <Text style={styles.infoItem}>- Приложение запущено в Expo Go (только имитация)</Text>
+          )}
 
           {registrationError && (
             <Text style={styles.errorText}>Ошибка: {registrationError}</Text>
@@ -172,9 +297,9 @@ export default function NotificationTestScreen() {
           <Text style={styles.infoLabel}>Тип токена:</Text>
           <Text style={[
             styles.infoValue,
-            {color: status.tokenType === 'fcm' ? '#43A047' : '#FF9800'}
+            {color: isExpoGoEnv ? '#FF9800' : '#43A047'}
           ]}>
-            {status.tokenType === 'fcm' ? 'Production (FCM)' : 'Development (Expo)'}
+            {isExpoGoEnv ? 'Имитация (Expo Go)' : 'Production (OneSignal)'}
           </Text>
         </View>
 
@@ -196,18 +321,18 @@ export default function NotificationTestScreen() {
         </View>
 
         <View style={styles.infoSection}>
-          <Text style={styles.infoLabel}>Разрешения:</Text>
+          <Text style={styles.infoLabel}>Разрешения уведомлений:</Text>
           <View style={styles.statusBadge}>
             <Ionicons
-              name={status.enabled ? "checkmark-circle" : "close-circle"}
+              name={notificationEnabled ? "checkmark-circle" : "close-circle"}
               size={16}
-              color={status.enabled ? "#43A047" : "#E53935"}
+              color={notificationEnabled ? "#43A047" : "#E53935"}
             />
             <Text style={[
               styles.statusText,
-              {color: status.enabled ? "#43A047" : "#E53935"}
+              {color: notificationEnabled ? "#43A047" : "#E53935"}
             ]}>
-              {status.enabled ? "Предоставлены" : "Отклонены"}
+              {notificationEnabled ? "Предоставлены" : "Отклонены"}
             </Text>
           </View>
         </View>
@@ -232,7 +357,7 @@ export default function NotificationTestScreen() {
         <View style={styles.tokenContainer}>
           <Text style={styles.tokenLabel}>Токен (начало):</Text>
           <Text style={styles.tokenValue}>
-            {status.token.substring(0, 25)}...
+            {status.playerID.substring(0, 25)}...
           </Text>
         </View>
 
@@ -256,6 +381,9 @@ export default function NotificationTestScreen() {
         <Text style={styles.headerTitle}>Тестирование уведомлений</Text>
       </View>
 
+      {/* Environment banner */}
+      {renderEnvironmentBanner()}
+
       <ScrollView style={styles.scrollView}>
         {/* Title section */}
         <View style={styles.titleSection}>
@@ -278,6 +406,9 @@ export default function NotificationTestScreen() {
             </Text>
             <Text style={styles.deviceInfoItem}>
               <Text style={styles.infoKey}>Версия приложения:</Text> {Constants.expoConfig?.version || 'Неизвестно'}
+            </Text>
+            <Text style={styles.deviceInfoItem}>
+              <Text style={styles.infoKey}>Режим:</Text> {isExpoGoEnv ? 'Expo Go' : 'Development Build'}
             </Text>
           </View>
         </View>
@@ -319,14 +450,23 @@ export default function NotificationTestScreen() {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Отправка тестового уведомления</Text>
 
-          {!status?.enabled ? (
+          {isExpoGoEnv && (
+            <View style={styles.warningContainer}>
+              <Ionicons name="information-circle" size={24} color="#1976D2" />
+              <Text style={[styles.warningText, {color: '#1976D2'}]}>
+                В режиме Expo Go работают только локальные уведомления. Для полноценных push-уведомлений требуется Development Build.
+              </Text>
+            </View>
+          )}
+
+          {!notificationEnabled ? (
             <View style={styles.warningContainer}>
               <Ionicons name="warning" size={24} color="#FF9800" />
               <Text style={styles.warningText}>
-                Для отправки тестового уведомления необходимо предоставить разрешения.
+                Для отправки тестового уведомления необходимо предоставить разрешения. Нажмите кнопку "Проверить разрешения" выше.
               </Text>
             </View>
-          ) : !status?.token ? (
+          ) : (!status?.playerID && !isExpoGoEnv) ? (
             <View style={styles.warningContainer}>
               <Ionicons name="warning" size={24} color="#FF9800" />
               <Text style={styles.warningText}>
@@ -339,32 +479,35 @@ export default function NotificationTestScreen() {
                 Нажмите кнопку ниже, чтобы отправить тестовое уведомление. Для успешного теста:
               </Text>
               <Text style={styles.testInfoItem}>
-                • Убедитесь, что приложение находится в фоновом режиме или закрыто
+                • Убедитесь, что уведомления разрешены в настройках устройства
               </Text>
               <Text style={styles.testInfoItem}>
-                • Проверьте, что уведомления разрешены в настройках устройства
+                • Для тестирования локальных уведомлений можно использовать приложение в текущем состоянии
               </Text>
               <Text style={styles.testInfoItem}>
-                • На некоторых устройствах может потребоваться отключить режим "Не беспокоить"
+                • Для push-уведомлений с сервера приложение должно быть в фоновом режиме или закрыто
               </Text>
             </View>
           )}
 
+          {/* "Мгновенное уведомление" кнопка - для быстрой проверки */}
           <TouchableOpacity
             style={[
               styles.testButton,
-              (!status?.enabled || !status?.token || sending) && styles.disabledButton
+              styles.instantButton,
+              !notificationEnabled && styles.disabledButton,
+              localSending && styles.disabledButton
             ]}
-            onPress={handleSendTest}
-            disabled={!status?.enabled || !status?.token || sending}
+            onPress={handleSendInstantTest}
+            disabled={!notificationEnabled || localSending}
           >
-            {sending ? (
+            {localSending ? (
               <ActivityIndicator size="small" color="#FFF" />
             ) : (
-              <Ionicons name="paper-plane" size={20} color="#FFF" />
+              <Ionicons name="flash" size={20} color="#FFF" />
             )}
             <Text style={styles.testButtonText}>
-              {sending ? 'Отправка...' : 'Отправить тестовое уведомление'}
+              Мгновенное тестовое уведомление
             </Text>
           </TouchableOpacity>
 
@@ -373,14 +516,38 @@ export default function NotificationTestScreen() {
             style={[
               styles.testButton,
               styles.localButton,
-              !status?.enabled && styles.disabledButton
+              !notificationEnabled && styles.disabledButton,
+              localSending && styles.disabledButton
             ]}
             onPress={handleSendLocalTest}
-            disabled={!status?.enabled}
+            disabled={!notificationEnabled || localSending}
           >
-            <Ionicons name="notifications-outline" size={20} color="#FFF" />
+            {localSending ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="notifications-outline" size={20} color="#FFF" />
+            )}
             <Text style={styles.testButtonText}>
-              Тестовое локальное уведомление
+              Тестовое локальное уведомление (через 5 сек)
+            </Text>
+          </TouchableOpacity>
+
+          {/* Серверное уведомление - отключено в Expo Go */}
+          <TouchableOpacity
+            style={[
+              styles.testButton,
+              ((!notificationEnabled || (!status?.playerID && !isExpoGoEnv) || sending) || isExpoGoEnv) && styles.disabledButton
+            ]}
+            onPress={handleSendTest}
+            disabled={(!notificationEnabled || (!status?.playerID && !isExpoGoEnv) || sending) || isExpoGoEnv}
+          >
+            {sending ? (
+              <ActivityIndicator size="small" color="#FFF" />
+            ) : (
+              <Ionicons name="paper-plane" size={20} color="#FFF" />
+            )}
+            <Text style={styles.testButtonText}>
+              {sending ? 'Отправка...' : 'Отправить серверное уведомление'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -411,6 +578,24 @@ export default function NotificationTestScreen() {
               • Разрешите показывать уведомления на экране блокировки
             </Text>
           </View>
+
+          {isExpoGoEnv && (
+            <View style={styles.problemItem}>
+              <Text style={styles.problemTitle}>Ограничения Expo Go</Text>
+              <Text style={styles.problemText}>
+                • В Expo Go доступны только локальные уведомления
+              </Text>
+              <Text style={styles.problemText}>
+                • Локальные уведомления могут не работать в эмуляторах
+              </Text>
+              <Text style={styles.problemText}>
+                • Для полноценных push-уведомлений создайте Development Build
+              </Text>
+              <Text style={styles.problemText}>
+                • Используйте команду 'eas build' для создания Development Build
+              </Text>
+            </View>
+          )}
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -644,7 +829,9 @@ const styles = StyleSheet.create({
   },
   localButton: {
     backgroundColor: '#2196F3',
-    marginTop: 8,
+  },
+  instantButton: {
+    backgroundColor: '#009688',
   },
   disabledButton: {
     backgroundColor: '#ddd',
@@ -669,5 +856,18 @@ const styles = StyleSheet.create({
     color: '#555',
     marginBottom: 4,
     marginLeft: 4,
+  },
+  environmentBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFF3E0',
+  },
+  environmentText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#555',
+    marginLeft: 8,
   },
 });

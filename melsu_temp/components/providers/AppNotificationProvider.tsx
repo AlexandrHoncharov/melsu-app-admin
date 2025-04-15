@@ -1,10 +1,12 @@
 // components/providers/AppNotificationProvider.tsx
-import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
-import { AppState, AppStateStatus } from 'react-native';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { useAuth } from '../../hooks/useAuth';
 import notificationService from '../../src/services/NotificationService';
 import InAppNotification from '../InAppNotification';
+import Constants from 'expo-constants';
+import { router } from 'expo-router';
 
 interface NotificationContextType {
   showNotification: (title: string, message: string, type: string, data?: any) => void;
@@ -13,13 +15,15 @@ interface NotificationContextType {
   setBadgeCount: (count: number) => Promise<void>;
   clearBadge: () => Promise<void>;
   lastNotification: Notifications.Notification | null;
+  sendTestNotification: () => Promise<boolean>;
+  checkPermissions: () => Promise<boolean>;
 }
 
-// Создаем контекст
+// Create context
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export const AppNotificationProvider = ({ children }: { children: ReactNode }) => {
-  // Состояние для показа уведомлений в приложении
+  // In-app notification state
   const [activeNotification, setActiveNotification] = useState<{
     title: string;
     message: string;
@@ -28,25 +32,36 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
     id: number;
   } | null>(null);
 
-  // Счетчик непрочитанных уведомлений (бейдж)
+  // Badge count
   const [badgeCount, setBadgeCountState] = useState<number>(0);
 
-  // Последнее полученное уведомление
+  // Last received notification
   const [lastNotification, setLastNotification] = useState<Notifications.Notification | null>(null);
 
-  // Хук для работы с аутентификацией пользователя
+  // Permission alert tracking
+  const permissionAlertShown = useRef(false);
+
+  // App state tracking
+  const appState = useRef(AppState.currentState);
+
+  // Auth hook
   const { user, isAuthenticated } = useAuth();
 
-  // Инициализация сервиса уведомлений при загрузке приложения
+  // Initialize notification service
   useEffect(() => {
     const initializeNotifications = async () => {
       try {
         await notificationService.initialize();
         console.log('[AppNotificationProvider] Notification service initialized');
 
-        // Получаем текущий бейдж
+        // Get current badge
         const currentBadge = await notificationService.getBadgeCount();
         setBadgeCountState(currentBadge);
+
+        // Check initial permissions if authenticated
+        if (isAuthenticated && user?.id) {
+          await checkAndRequestPermissions();
+        }
       } catch (error) {
         console.error('[AppNotificationProvider] Failed to initialize notifications:', error);
       }
@@ -55,25 +70,22 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
     initializeNotifications();
   }, []);
 
-  // Отслеживаем изменения состояния приложения
+  // App state change handler
   useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [isAuthenticated, user?.id]);
 
-  // Настраиваем слушатели уведомлений
+  // Set up notification listeners
   useEffect(() => {
     const setupListeners = async () => {
       try {
-        // Настраиваем обработчики уведомлений
         const cleanup = notificationService.setupNotificationListeners(
           handleNotificationReceived,
           handleNotificationResponse
         );
-
-        // Возвращаем функцию очистки
         return cleanup;
       } catch (error) {
         console.error('[AppNotificationProvider] Failed to setup notification listeners:', error);
@@ -87,13 +99,13 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
     };
   }, []);
 
-  // Регистрируем токен устройства при аутентификации
+  // Register device token when authenticated
   useEffect(() => {
     if (isAuthenticated && user?.id) {
       const registerDevice = async () => {
         try {
-          await notificationService.registerForPushNotifications(String(user.id));
-          console.log('[AppNotificationProvider] Device registered for push notifications');
+          const result = await notificationService.registerForPushNotifications(String(user.id));
+          console.log('[AppNotificationProvider] Device registration result:', result);
         } catch (error) {
           console.error('[AppNotificationProvider] Failed to register device:', error);
         }
@@ -103,47 +115,106 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
     }
   }, [isAuthenticated, user?.id]);
 
-  // Обработчик изменения состояния приложения
+  // App state change handler
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
-    if (nextAppState === 'active') {
-      // При возвращении в приложение обновляем бейдж
+    // App came to foreground
+    if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+      console.log('[AppNotificationProvider] App has come to the foreground');
+
+      // Update badge count
       try {
         const currentBadge = await notificationService.getBadgeCount();
         setBadgeCountState(currentBadge);
       } catch (error) {
         console.error('[AppNotificationProvider] Failed to get badge count:', error);
       }
-    }
-  }, []);
 
-  // Обработчик получения уведомления
+      // Check permissions if authenticated
+      if (isAuthenticated && user?.id) {
+        await checkAndRequestPermissions();
+      }
+    }
+
+    appState.current = nextAppState;
+  }, [isAuthenticated, user?.id]);
+
+  // Check and request permissions if needed
+  const checkAndRequestPermissions = async () => {
+    try {
+      const status = await notificationService.getNotificationStatus();
+      console.log('[AppNotificationProvider] Notification status:', status);
+
+      if (!status.enabled) {
+        if (!permissionAlertShown.current) {
+          permissionAlertShown.current = true;
+          return await notificationService.requestPermissions();
+        }
+      }
+
+      return status.enabled;
+    } catch (err) {
+      console.error('[AppNotificationProvider] Error checking permissions:', err);
+      return false;
+    }
+  };
+
+  // Public method to check permissions
+  const checkPermissions = async () => {
+    return await checkAndRequestPermissions();
+  };
+
+  // Handle incoming notification
   const handleNotificationReceived = (notification: Notifications.Notification) => {
     console.log('[AppNotificationProvider] Notification received:', notification.request.identifier);
     setLastNotification(notification);
 
-    // Показываем уведомление внутри приложения, если приложение в фокусе
+    // Show in-app notification if app is active
     if (AppState.currentState === 'active') {
       const { title, body, data } = notification.request.content;
 
-      // Показываем in-app уведомление для сообщений в чате и тикетах
+      // Show in-app notification for chat and ticket messages
       if (data?.type === 'chat_message' || data?.type === 'ticket_message') {
         showNotification(title, body, data.type, data);
       }
 
-      // Увеличиваем счетчик непрочитанных уведомлений
+      // Increase badge count
       setBadgeCountState(prev => prev + 1);
     }
   };
 
-  // Обработчик нажатия на уведомление
+  // Handle notification tap
   const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
     console.log('[AppNotificationProvider] Notification response received:',
       response.notification.request.identifier);
+
+    try {
+      const data = response.notification.request.content.data;
+      console.log('[AppNotificationProvider] Notification data:', data);
+
+      if (!data) return;
+
+      // Navigate based on notification type
+      if (data.type === 'chat_message' && data.chat_id) {
+        // Wait a moment to ensure chat service is ready
+        setTimeout(() => {
+          router.push(`/chat/${data.chat_id}`);
+        }, 300);
+      } else if (data.type === 'ticket_message' && data.ticket_id) {
+        router.push({
+          pathname: '/profile/ticket-details',
+          params: { ticketId: data.ticket_id }
+        });
+      } else if (data.type === 'verification') {
+        router.push('/verification');
+      }
+    } catch (err) {
+      console.error('[AppNotificationProvider] Error handling notification tap:', err);
+    }
   };
 
-  // Показ уведомления внутри приложения
+  // Show in-app notification
   const showNotification = (title: string, message: string, type: string, data: any = {}) => {
-    // Генерируем уникальный ID для уведомления
+    // Generate unique ID
     const id = Date.now();
 
     setActiveNotification({
@@ -154,21 +225,21 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
       id
     });
 
-    // Автоматически скрываем уведомление через 5 секунд
+    // Auto-hide after 5 seconds
     setTimeout(() => {
       hideNotification(id);
     }, 5000);
   };
 
-  // Скрытие уведомления
+  // Hide notification
   const hideNotification = (id?: number) => {
     if (id && activeNotification?.id !== id) {
-      return; // Не скрываем, если ID не совпадают
+      return; // Don't hide if IDs don't match
     }
     setActiveNotification(null);
   };
 
-  // Установка значения бейджа
+  // Set badge count
   const setBadgeCount = async (count: number) => {
     try {
       await notificationService.setBadgeCount(count);
@@ -178,13 +249,23 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
     }
   };
 
-  // Сброс бейджа
+  // Clear badge
   const clearBadge = async () => {
     try {
       await notificationService.setBadgeCount(0);
       setBadgeCountState(0);
     } catch (error) {
       console.error('[AppNotificationProvider] Failed to clear badge:', error);
+    }
+  };
+
+  // Send test notification
+  const sendTestNotification = async () => {
+    try {
+      return await notificationService.sendTestNotification();
+    } catch (error) {
+      console.error('[AppNotificationProvider] Failed to send test notification:', error);
+      return false;
     }
   };
 
@@ -196,7 +277,9 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
         badgeCount,
         setBadgeCount,
         clearBadge,
-        lastNotification
+        lastNotification,
+        sendTestNotification,
+        checkPermissions
       }}
     >
       {children}
@@ -214,7 +297,7 @@ export const AppNotificationProvider = ({ children }: { children: ReactNode }) =
   );
 };
 
-// Хук для использования контекста уведомлений
+// Hook for using notification context
 export const useAppNotifications = () => {
   const context = useContext(NotificationContext);
 

@@ -6,26 +6,25 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from '../api/apiClient';
 
-// Настройка логов для отладки
-const DEBUG = true; // можно изменить для production
+// Debug settings - set to false in production
+const DEBUG = true;
 const log = (...args: any[]) => DEBUG && console.log('[NotificationService]', ...args);
 const error = (...args: any[]) => console.error('[NotificationService]', ...args);
 
-// ID проекта из app.json/app.config.js для получения токенов
+// Expo project ID from app.json/app.config.js
 const EXPO_PROJECT_ID = 'd9591f01-e110-4918-8b09-c422bd23baaf';
 
-// Ключи для хранения данных
+// Storage keys
 const STORAGE_KEYS = {
   DEVICE_TOKEN: 'notification_device_token',
   DEVICE_ID: 'notification_device_id',
-  TOKEN_TYPE: 'notification_token_type', // 'expo' или 'fcm'
-  REGISTRATION_STATUS: 'notification_registration_status', // 'success', 'failed', or 'pending'
-  LAST_REGISTRATION_TIME: 'notification_last_registration_time', // Unix timestamp
+  TOKEN_TYPE: 'notification_token_type',
+  REGISTRATION_STATUS: 'notification_registration_status',
+  LAST_REGISTRATION_TIME: 'notification_last_registration_time',
 };
 
 /**
- * Главный сервис для работы с уведомлениями
- * Разработан для надежной работы как в development, так и в production режимах
+ * Enhanced Notification Service with better Android support
  */
 class NotificationService {
   private deviceToken: string | null = null;
@@ -33,26 +32,16 @@ class NotificationService {
   private isInitialized = false;
   private onNotificationReceivedCallback: ((notification: Notifications.Notification) => void) | null = null;
   private onNotificationResponseCallback: ((response: Notifications.NotificationResponse) => void) | null = null;
-
-  // Для предотвращения множественных инициализаций
   private initPromise: Promise<boolean> | null = null;
   private registrationPromise: Promise<boolean> | null = null;
 
   /**
-   * Инициализация сервиса - должна быть вызвана при старте приложения
+   * Initialize the notification service
    */
   public async initialize(): Promise<boolean> {
-    // Если уже идет инициализация, ждем её результат
-    if (this.initPromise) {
-      return this.initPromise;
-    }
+    if (this.initPromise) return this.initPromise;
+    if (this.isInitialized) return true;
 
-    // Если уже инициализировано, просто возвращаем true
-    if (this.isInitialized) {
-      return true;
-    }
-
-    // Создаем и сохраняем promise для инициализации
     this.initPromise = this._doInitialize();
     const result = await this.initPromise;
     this.initPromise = null;
@@ -60,13 +49,13 @@ class NotificationService {
   }
 
   /**
-   * Внутренняя функция инициализации, не вызывать напрямую
+   * Internal initialization method
    */
   private async _doInitialize(): Promise<boolean> {
     log('Initializing notification service...');
 
     try {
-      // Настраиваем глобальный обработчик уведомлений
+      // Configure notification handler
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
           shouldShowAlert: true,
@@ -75,23 +64,17 @@ class NotificationService {
         }),
       });
 
-      // Восстанавливаем токен из хранилища
+      // Load stored token
       await this.loadStoredToken();
 
-      // Создаем каналы для Android
+      // Create Android notification channels
       if (Platform.OS === 'android') {
         await this.createNotificationChannels();
       }
 
-      // Запрашиваем разрешения и проверяем/обновляем токен
-      const hasPermission = await this.requestPermissions();
-      if (hasPermission) {
-        // Не выполняем регистрацию при инициализации, это будет отдельным шагом
-        // Это предотвращает вызов API до того, как аутентификация будет установлена
-        log('Initialization complete with permissions granted');
-      } else {
-        log('Initialization complete but notifications permission denied');
-      }
+      // Check permissions but don't request yet
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      log('Current notification permission status:', existingStatus);
 
       this.isInitialized = true;
       return true;
@@ -103,11 +86,11 @@ class NotificationService {
   }
 
   /**
-   * Создает каналы уведомлений для Android
+   * Create notification channels for Android
    */
   private async createNotificationChannels(): Promise<void> {
     try {
-      // Основной канал
+      // Default channel
       await Notifications.setNotificationChannelAsync('default', {
         name: 'По умолчанию',
         importance: Notifications.AndroidImportance.MAX,
@@ -117,7 +100,7 @@ class NotificationService {
         bypassDnd: false,
       });
 
-      // Канал для чатов
+      // Chat messages channel
       await Notifications.setNotificationChannelAsync('chat', {
         name: 'Сообщения',
         description: 'Уведомления о новых сообщениях в чатах',
@@ -125,11 +108,10 @@ class NotificationService {
         vibrationPattern: [0, 100, 100, 100, 100, 100],
         lightColor: '#0077FF',
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        bypassDnd: false,
         sound: 'default',
       });
 
-      // Канал для тикетов
+      // Support tickets channel
       await Notifications.setNotificationChannelAsync('tickets', {
         name: 'Обращения',
         description: 'Уведомления о статусе обращений в поддержку',
@@ -137,18 +119,17 @@ class NotificationService {
         vibrationPattern: [0, 200, 200, 200],
         lightColor: '#33CC66',
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        bypassDnd: false,
         sound: 'default',
       });
 
-      log('Notification channels created');
+      log('Android notification channels created successfully');
     } catch (err) {
       error('Failed to create notification channels:', err);
     }
   }
 
   /**
-   * Запрашивает разрешения на показ уведомлений
+   * Request permissions for notifications
    */
   public async requestPermissions(): Promise<boolean> {
     try {
@@ -157,18 +138,17 @@ class NotificationService {
         return false;
       }
 
-      // Проверяем текущие разрешения
+      // Check current permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      log('Current permission status:', existingStatus);
 
-      // Если уже есть разрешение, возвращаем true
+      // If already granted, return true
       if (existingStatus === 'granted') {
         return true;
       }
 
-      // Запрашиваем разрешение, если еще нет
+      // Request permissions if not already granted
       const { status } = await Notifications.requestPermissionsAsync();
-      log('New permission status:', status);
+      log('New notification permission status:', status);
 
       return status === 'granted';
     } catch (err) {
@@ -178,17 +158,14 @@ class NotificationService {
   }
 
   /**
-   * Регистрирует устройство для получения уведомлений
-   * Должен вызываться после успешной аутентификации
+   * Register device for push notifications
    */
   public async registerForPushNotifications(userId: string): Promise<boolean> {
-    // Если пользователь не предоставил ID, отменяем регистрацию
     if (!userId) {
       error('User ID is required for registration');
       return false;
     }
 
-    // Если процесс регистрации уже идет, ждем его завершения
     if (this.registrationPromise) {
       return this.registrationPromise;
     }
@@ -200,18 +177,18 @@ class NotificationService {
   }
 
   /**
-   * Внутренний метод для регистрации push-уведомлений
+   * Internal method for push notification registration
    */
   private async _doRegisterForPushNotifications(userId: string): Promise<boolean> {
     try {
       log(`Starting push token registration for user ${userId}`);
 
-      // Убедимся, что инициализация выполнена
+      // Ensure initialization
       if (!this.isInitialized) {
         await this.initialize();
       }
 
-      // Проверяем разрешения
+      // Check permissions
       const hasPermission = await this.requestPermissions();
       if (!hasPermission) {
         log('No permission for notifications, aborting registration');
@@ -219,7 +196,7 @@ class NotificationService {
         return false;
       }
 
-      // Всегда запрашиваем новый токен - это важно!
+      // Always request a new token
       const token = await this.getExpoPushToken();
       if (!token) {
         error('Failed to get push token');
@@ -227,18 +204,18 @@ class NotificationService {
         return false;
       }
 
-      // Сохраняем тип токена и сам токен
+      // Save token type and the token itself
       this.deviceToken = token;
       this.tokenType = token.startsWith('ExponentPushToken') ? 'expo' : 'fcm';
 
-      // Получаем или генерируем ID устройства
+      // Get or generate device ID
       const deviceId = await this.getDeviceId();
 
-      // Регистрируем на сервере
+      // Register with server
       const registrationSuccess = await this.registerTokenWithServer(userId, token, this.tokenType, deviceId);
 
       if (registrationSuccess) {
-        // Сохраняем токен и статус в хранилище
+        // Save token and status to storage
         await this.saveTokenToStorage(token, this.tokenType);
         await this.saveRegistrationStatus('success');
         log('Push notification setup completed successfully');
@@ -255,18 +232,18 @@ class NotificationService {
   }
 
   /**
-   * Получает токен для push-уведомлений
+   * Get Expo push token
    */
   private async getExpoPushToken(): Promise<string | null> {
     try {
       log('Getting push token with project ID:', EXPO_PROJECT_ID);
 
-      // Получаем токен с указанием projectId
+      // Get token with projectId specified
       const { data: token } = await Notifications.getExpoPushTokenAsync({
         projectId: EXPO_PROJECT_ID,
       });
 
-      // Определяем тип токена для отладки
+      // Determine token type for debugging
       const tokenType = token.startsWith('ExponentPushToken') ? 'Development (Expo)' : 'Production (FCM)';
       log(`Token received: ${token.substring(0, 10)}... (${tokenType})`);
 
@@ -278,14 +255,14 @@ class NotificationService {
   }
 
   /**
-   * Получает или генерирует уникальный ID устройства
+   * Get or generate unique device ID
    */
   private async getDeviceId(): Promise<string> {
     try {
-      // Пытаемся получить сохраненный ID
+      // Try to get saved ID
       let deviceId = await AsyncStorage.getItem(STORAGE_KEYS.DEVICE_ID);
 
-      // Если нет сохраненного ID, генерируем новый
+      // If no saved ID, generate a new one
       if (!deviceId) {
         deviceId = this.generateDeviceId();
         await AsyncStorage.setItem(STORAGE_KEYS.DEVICE_ID, deviceId);
@@ -294,14 +271,14 @@ class NotificationService {
 
       return deviceId;
     } catch (err) {
-      // Если произошла ошибка, генерируем временный ID
+      // If error, generate a temporary ID
       error('Error getting device ID:', err);
       return this.generateDeviceId();
     }
   }
 
   /**
-   * Генерирует уникальный ID устройства
+   * Generate unique device ID
    */
   private generateDeviceId(): string {
     const random = Math.random().toString(36).substring(2);
@@ -311,7 +288,7 @@ class NotificationService {
   }
 
   /**
-   * Регистрирует токен на сервере
+   * Register token with server
    */
   private async registerTokenWithServer(
     userId: string,
@@ -330,7 +307,6 @@ class NotificationService {
         app_version: Constants.expoConfig?.version || 'Unknown',
         is_expo_token: tokenType === 'expo',
         replace_existing: true,
-        user_id: userId
       });
 
       if (response.data.success) {
@@ -347,7 +323,7 @@ class NotificationService {
   }
 
   /**
-   * Загружает сохраненный токен из хранилища
+   * Load stored token from storage
    */
   private async loadStoredToken(): Promise<void> {
     try {
@@ -366,7 +342,7 @@ class NotificationService {
   }
 
   /**
-   * Сохраняет токен в хранилище
+   * Save token to storage
    */
   private async saveTokenToStorage(token: string, tokenType: 'expo' | 'fcm'): Promise<void> {
     try {
@@ -379,7 +355,7 @@ class NotificationService {
   }
 
   /**
-   * Сохраняет статус регистрации
+   * Save registration status
    */
   private async saveRegistrationStatus(status: 'success' | 'failed' | 'pending'): Promise<void> {
     try {
@@ -391,7 +367,80 @@ class NotificationService {
   }
 
   /**
-   * Отправляет тестовое уведомление
+   * Unregister device token
+   */
+  public async unregisterDeviceToken(): Promise<boolean> {
+    try {
+      log('Unregistering device token');
+
+      // Send request to server
+      try {
+        const tokenToUse = this.deviceToken || 'force_all_tokens_removal';
+        const response = await apiClient.post('/device/unregister', { token: tokenToUse });
+        log('Unregister response:', response.data);
+      } catch (err) {
+        // Continue even on server error
+        error('Server error during unregister:', err);
+      }
+
+      // Clear local data regardless of server result
+      this.deviceToken = null;
+      this.tokenType = null;
+
+      // Clear storage
+      await AsyncStorage.removeItem(STORAGE_KEYS.DEVICE_TOKEN);
+      await AsyncStorage.removeItem(STORAGE_KEYS.TOKEN_TYPE);
+      await AsyncStorage.removeItem(STORAGE_KEYS.REGISTRATION_STATUS);
+
+      log('Device token unregistered and cleared from storage');
+      return true;
+    } catch (err) {
+      error('Error unregistering device token:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Set up notification listeners
+   */
+  public setupNotificationListeners(
+    onReceived: (notification: Notifications.Notification) => void,
+    onResponse: (response: Notifications.NotificationResponse) => void
+  ): () => void {
+    // Save callbacks
+    this.onNotificationReceivedCallback = onReceived;
+    this.onNotificationResponseCallback = onResponse;
+
+    // Subscribe to notification receipt
+    const receivedSubscription = Notifications.addNotificationReceivedListener((notification) => {
+      log('Notification received', notification.request.identifier);
+      if (this.onNotificationReceivedCallback) {
+        this.onNotificationReceivedCallback(notification);
+      }
+    });
+
+    // Subscribe to notification response
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      log('Notification response received', response.notification.request.identifier);
+      if (this.onNotificationResponseCallback) {
+        this.onNotificationResponseCallback(response);
+      }
+    });
+
+    log('Notification listeners set up');
+
+    // Return function to unsubscribe
+    return () => {
+      receivedSubscription.remove();
+      responseSubscription.remove();
+      this.onNotificationReceivedCallback = null;
+      this.onNotificationResponseCallback = null;
+      log('Notification listeners removed');
+    };
+  }
+
+  /**
+   * Send test notification
    */
   public async sendTestNotification(): Promise<boolean> {
     try {
@@ -417,84 +466,12 @@ class NotificationService {
   }
 
   /**
-   * Отменяет регистрацию токена на сервере
-   */
-  public async unregisterDeviceToken(): Promise<boolean> {
-    try {
-      log('Unregistering device token');
-
-      // Отправляем запрос на сервер
-      try {
-        const tokenToUse = this.deviceToken || 'force_all_tokens_removal';
-        const response = await apiClient.post('/device/unregister', { token: tokenToUse });
-        log('Unregister response:', response.data);
-      } catch (err) {
-        // Продолжаем даже при ошибке сервера
-        error('Server error during unregister:', err);
-      }
-
-      // Очищаем локальные данные независимо от результата запроса
-      this.deviceToken = null;
-      this.tokenType = null;
-
-      // Очищаем хранилище
-      await AsyncStorage.removeItem(STORAGE_KEYS.DEVICE_TOKEN);
-      await AsyncStorage.removeItem(STORAGE_KEYS.TOKEN_TYPE);
-      await AsyncStorage.removeItem(STORAGE_KEYS.REGISTRATION_STATUS);
-
-      log('Device token unregistered and cleared from storage');
-      return true;
-    } catch (err) {
-      error('Error unregistering device token:', err);
-      return false;
-    }
-  }
-
-  /**
-   * Подписывается на получение уведомлений
-   */
-  public setupNotificationListeners(
-    onReceived: (notification: Notifications.Notification) => void,
-    onResponse: (response: Notifications.NotificationResponse) => void
-  ): () => void {
-    // Сохраняем callbacks
-    this.onNotificationReceivedCallback = onReceived;
-    this.onNotificationResponseCallback = onResponse;
-
-    // Подписываемся на получение уведомлений
-    const receivedSubscription = Notifications.addNotificationReceivedListener((notification) => {
-      log('Notification received', notification.request.identifier);
-      if (this.onNotificationReceivedCallback) {
-        this.onNotificationReceivedCallback(notification);
-      }
-    });
-
-    // Подписываемся на действия с уведомлениями
-    const responseSubscription = Notifications.addNotificationResponseReceivedListener((response) => {
-      log('Notification response received', response.notification.request.identifier);
-      if (this.onNotificationResponseCallback) {
-        this.onNotificationResponseCallback(response);
-      }
-    });
-
-    log('Notification listeners set up');
-
-    // Возвращаем функцию для отписки
-    return () => {
-      receivedSubscription.remove();
-      responseSubscription.remove();
-      this.onNotificationReceivedCallback = null;
-      this.onNotificationResponseCallback = null;
-      log('Notification listeners removed');
-    };
-  }
-
-  /**
-   * Получает количество непрочитанных уведомлений (бейдж)
+   * Get badge count
    */
   public async getBadgeCount(): Promise<number> {
     try {
-      return await Notifications.getBadgeCountAsync();
+      const count = await Notifications.getBadgeCountAsync();
+      return count;
     } catch (err) {
       error('Error getting badge count:', err);
       return 0;
@@ -502,7 +479,7 @@ class NotificationService {
   }
 
   /**
-   * Устанавливает количество непрочитанных уведомлений (бейдж)
+   * Set badge count
    */
   public async setBadgeCount(count: number): Promise<void> {
     try {
@@ -514,7 +491,7 @@ class NotificationService {
   }
 
   /**
-   * Проверяет статус уведомлений
+   * Get notification status
    */
   public async getNotificationStatus(): Promise<{
     enabled: boolean;
@@ -526,10 +503,10 @@ class NotificationService {
     permissionStatus: Notifications.PermissionStatus;
   }> {
     try {
-      // Получаем данные о разрешениях
+      // Get permission status
       const permissionStatus = await Notifications.getPermissionsAsync();
 
-      // Получаем данные о последней регистрации
+      // Get last registration data
       const lastRegistrationStatus = await AsyncStorage.getItem(STORAGE_KEYS.REGISTRATION_STATUS);
       const lastRegistrationTime = await AsyncStorage.getItem(STORAGE_KEYS.LAST_REGISTRATION_TIME);
 
@@ -557,22 +534,7 @@ class NotificationService {
   }
 
   /**
-   * Получает все локальные уведомления
-   */
-  public async getAllScheduledNotifications(): Promise<Notifications.NotificationRequest[]> {
-    return await Notifications.getAllScheduledNotificationsAsync();
-  }
-
-  /**
-   * Отменяет все локальные уведомления
-   */
-  public async cancelAllNotifications(): Promise<void> {
-    await Notifications.cancelAllScheduledNotificationsAsync();
-    log('All scheduled notifications canceled');
-  }
-
-  /**
-   * Планирует локальное уведомление
+   * Schedule local notification
    */
   public async scheduleLocalNotification(
     title: string,
@@ -604,6 +566,6 @@ class NotificationService {
   }
 }
 
-// Создаем и экспортируем синглтон
+// Create and export singleton
 const notificationService = new NotificationService();
 export default notificationService;

@@ -15,7 +15,7 @@ from firebase_admin import credentials, auth, messaging
 from flask import request
 import requests
 from bs4 import BeautifulSoup
-import json
+from json import dumps
 import re
 from flask import Response
 import requests
@@ -649,18 +649,24 @@ def unregister_device(current_user):
         # Если токен предоставлен, пытаемся отключить конкретный токен
         if 'token' in data and data['token'] and data['token'] != 'force_all_tokens_removal':
             device_token = data['token']
+            is_onesignal = data.get('is_onesignal', False)
 
             # Ищем запись с этим токеном для текущего пользователя
-            token_record = DeviceToken.query.filter_by(
+            token_query = DeviceToken.query.filter_by(
                 user_id=current_user.id,
-                token=device_token,
-                is_active=True
-            ).first()
+                token=device_token
+            )
+
+            # Если указан тип токена, добавляем в запрос
+            if is_onesignal:
+                token_query = token_query.filter_by(is_onesignal=True)
+
+            token_record = token_query.first()
 
             # Если токен найден, отключаем его (но не удаляем)
             if token_record:
                 token_record.is_active = False
-                token_record.updated_at = datetime.datetime.utcnow()
+                token_record.updated_at = datetime.utcnow()
                 db.session.commit()
 
                 return jsonify({
@@ -681,7 +687,7 @@ def unregister_device(current_user):
         # Отключаем все найденные токены
         for token in active_tokens:
             token.is_active = False
-            token.updated_at = datetime.datetime.utcnow()
+            token.updated_at = datetime.utcnow()
 
         db.session.commit()
 
@@ -2142,7 +2148,7 @@ def internal_error(error):
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Регистрация токена устройства для push-уведомлений с приоритетом FCM токенов"""
+    """Регистрация токена устройства для push-уведомлений с поддержкой OneSignal"""
     try:
         data = request.json
         required_fields = ['token', 'platform']
@@ -2160,22 +2166,10 @@ def register_device(current_user):
         platform = data.get('platform')
         device_name = data.get('device_name', '')
         device_id = data.get('device_id', '')
-        force_expo = data.get('force_expo', False)  # Новый параметр для принудительного использования Expo токена
-
-        # Определяем тип токена
-        is_expo_token = token.startswith('ExponentPushToken')
-
-        # Если это Expo токен и не запрошено принудительное использование, отклоняем регистрацию
-        if is_expo_token and not force_expo:
-            print(f"Rejecting Expo token registration from user {current_user.id}, please use FCM token")
-            return jsonify({
-                'message': 'Пожалуйста, используйте FCM токен вместо Expo токена. Для использования Expo токена, установите параметр force_expo=true',
-                'success': False,
-                'error': 'expo_token_rejected'
-            }), 400
+        is_onesignal = data.get('is_onesignal', False)  # Новый параметр для OneSignal
 
         print(f"Registering device token for user {current_user.id}, device: {device_name}")
-        print(f"Token type: {'Expo' if is_expo_token else 'FCM'}, Platform: {platform}")
+        print(f"Token type: {'OneSignal' if is_onesignal else 'FCM/Expo'}, Platform: {platform}")
 
         # Шаг 1: Проверяем, существует ли уже такой токен
         existing_token = DeviceToken.query.filter_by(
@@ -2184,26 +2178,28 @@ def register_device(current_user):
         ).first()
 
         if existing_token:
-            # Безопасное обновление существующего токена - проверяем наличие атрибутов перед установкой
+            # Безопасное обновление существующего токена
             existing_token.platform = platform
             existing_token.device_name = device_name
 
-            # Безопасная установка атрибутов, которые могут отсутствовать
+            # Обновляем поля, которые могут отсутствовать в старых записях
             if hasattr(existing_token, 'device_id') and device_id:
                 existing_token.device_id = device_id
 
+            if hasattr(existing_token, 'is_onesignal'):
+                existing_token.is_onesignal = is_onesignal
+
             if hasattr(existing_token, 'is_expo_token'):
-                existing_token.is_expo_token = is_expo_token
+                existing_token.is_expo_token = False if is_onesignal else existing_token.is_expo_token
 
             if hasattr(existing_token, 'is_active'):
-                # Для Expo токенов делаем неактивными по умолчанию, если не запрошено иное
-                existing_token.is_active = not is_expo_token or force_expo
+                existing_token.is_active = True  # Всегда активен для OneSignal
 
             if hasattr(existing_token, 'last_used'):
-                existing_token.last_used = datetime.datetime.utcnow()
+                existing_token.last_used = datetime.utcnow()
 
             if hasattr(existing_token, 'updated_at'):
-                existing_token.updated_at = datetime.datetime.utcnow()
+                existing_token.updated_at = datetime.utcnow()
 
             db.session.commit()
 
@@ -2215,7 +2211,7 @@ def register_device(current_user):
             }), 200
 
         # Шаг 2: Деактивируем старые токены устройства (если есть device_id)
-        if device_id and hasattr(DeviceToken, 'is_active') and hasattr(DeviceToken, 'device_id'):
+        if device_id:
             try:
                 # Находим все токены для этого устройства
                 same_device_tokens = DeviceToken.query.filter_by(
@@ -2226,10 +2222,8 @@ def register_device(current_user):
                 # Деактивируем все существующие токены устройства
                 for old_token in same_device_tokens:
                     print(f"Deactivating old token for user {current_user.id}, device: {device_id}")
-                    if hasattr(old_token, 'is_active'):
-                        old_token.is_active = False
-                    if hasattr(old_token, 'updated_at'):
-                        old_token.updated_at = datetime.datetime.utcnow()
+                    old_token.is_active = False
+                    old_token.updated_at = datetime.utcnow()
 
                 if same_device_tokens:
                     db.session.commit()
@@ -2240,42 +2234,28 @@ def register_device(current_user):
 
         # Шаг 3: Создаем новую запись токена
         try:
-            # Формируем базовые параметры
-            new_token_args = {
-                'user_id': current_user.id,
-                'token': token,
-                'platform': platform,
-                'device_name': device_name
-            }
+            # Создаем запись нового токена
+            new_token = DeviceToken(
+                user_id=current_user.id,
+                token=token,
+                platform=platform,
+                device_name=device_name,
+                device_id=device_id,
+                is_onesignal=is_onesignal,
+                is_expo_token=False if is_onesignal else False,  # Не Expo если OneSignal
+                is_active=True,
+                last_used=datetime.utcnow()
+            )
 
-            # Добавляем дополнительные параметры, если поля существуют в модели
-            token_model_columns = [c.key for c in DeviceToken.__table__.columns]
-
-            if 'device_id' in token_model_columns and device_id:
-                new_token_args['device_id'] = device_id
-
-            if 'is_expo_token' in token_model_columns:
-                new_token_args['is_expo_token'] = is_expo_token
-
-            if 'is_active' in token_model_columns:
-                # Expo токены по умолчанию неактивны, если не запрошено иное
-                new_token_args['is_active'] = not is_expo_token or force_expo
-
-            if 'last_used' in token_model_columns:
-                new_token_args['last_used'] = datetime.datetime.utcnow()
-
-            # Создаем новую запись
-            new_token = DeviceToken(**new_token_args)
             db.session.add(new_token)
             db.session.commit()
 
-            print(
-                f"Successfully registered new token for user {current_user.id}, active: {not is_expo_token or force_expo}")
+            print(f"Successfully registered new token for user {current_user.id}, OneSignal: {is_onesignal}")
             return jsonify({
                 'message': 'Токен устройства успешно зарегистрирован',
                 'success': True,
-                'token_type': 'expo' if is_expo_token else 'fcm',
-                'is_active': not is_expo_token or force_expo,
+                'token_type': 'onesignal' if is_onesignal else 'fcm',
+                'is_active': True,
                 'action': 'created'
             }), 201
         except Exception as e:
@@ -2298,11 +2278,11 @@ def register_device(current_user):
 
 def send_push_message(token, title, message, extra=None):
     """
-    Отправляет push-уведомление через FCM или Expo Push Service
+    Отправляет push-уведомление через FCM, Expo Push Service или OneSignal
     в зависимости от типа токена и логирует результат.
 
     Args:
-        token (str): FCM или Expo Push токен или объект DeviceToken
+        token (str or DeviceToken): FCM, Expo Push или OneSignal токен или объект DeviceToken
         title (str): Заголовок уведомления
         message (str): Текст уведомления
         extra (dict, optional): Дополнительные данные для уведомления
@@ -2311,7 +2291,7 @@ def send_push_message(token, title, message, extra=None):
         dict: Результат отправки с информацией об успехе/ошибке
     """
     # Начало времени отправки для отслеживания
-    start_time = datetime.datetime.utcnow()
+    start_time = datetime.utcnow()
     log_entry = None
     device_token_record = None
     user_id = None
@@ -2319,7 +2299,7 @@ def send_push_message(token, title, message, extra=None):
 
     try:
         # Проверяем, что Firebase SDK доступен
-        if not FIREBASE_AVAILABLE:
+        if not FIREBASE_AVAILABLE and not isinstance(token, DeviceToken):
             error_msg = "Firebase Admin SDK not available"
             print(f"Error: {error_msg}")
             return {"success": False, "error": error_msg}
@@ -2328,17 +2308,23 @@ def send_push_message(token, title, message, extra=None):
         if isinstance(token, DeviceToken):
             device_token_record = token
             token_str = token.token
-            is_expo_token = token.is_expo_token
+            is_expo_token = hasattr(token, 'is_expo_token') and token.is_expo_token
+            is_onesignal = hasattr(token, 'is_onesignal') and token.is_onesignal
             user_id = token.user_id
         else:
             # Это строка, пробуем найти в базе
             token_str = token
             is_expo_token = token.startswith('ExponentPushToken')
+            is_onesignal = False  # По умолчанию False, проверим в базе
 
             # Пытаемся найти запись в базе
             device_token_record = DeviceToken.query.filter_by(token=token_str).first()
             if device_token_record:
                 user_id = device_token_record.user_id
+                if hasattr(device_token_record, 'is_onesignal'):
+                    is_onesignal = device_token_record.is_onesignal
+                if hasattr(device_token_record, 'is_expo_token'):
+                    is_expo_token = device_token_record.is_expo_token
 
         # Определяем канал для Android
         android_channel_id = extra.get('channel_id', 'default')
@@ -2346,6 +2332,8 @@ def send_push_message(token, title, message, extra=None):
             android_channel_id = 'chat'
         elif notification_type == 'ticket_message':
             android_channel_id = 'tickets'
+        elif notification_type == 'verification':
+            android_channel_id = 'verification'
 
         # Создаем запись в логе
         log_entry = PushNotificationLog(
@@ -2354,17 +2342,128 @@ def send_push_message(token, title, message, extra=None):
             notification_type=notification_type,
             title=title,
             body=message,
-            data=extra,
+            data=dumps(extra) if extra else None,  # Сохраняем как JSON строку
             status='pending',
             sent_at=start_time
         )
         db.session.add(log_entry)
         db.session.commit()
 
-        print(f"Sending notification to {token_str[:10]}... (Type: {'Expo' if is_expo_token else 'FCM'})")
+        # Определяем сервис уведомлений для использования
+        service_type = 'OneSignal' if is_onesignal else ('Expo' if is_expo_token else 'FCM')
+        print(f"Sending notification to {token_str[:10]}... (Type: {service_type})")
 
-        # В зависимости от типа токена используем разные методы отправки
-        if is_expo_token:
+        # OneSignal уведомление
+        if is_onesignal:
+            try:
+                import requests
+                import json
+
+                # OneSignal API конфигурация
+                one_signal_app_id = "6ef82a9b-b49d-4800-8080-4f493b62768a"  # Ваш OneSignal App ID
+                one_signal_rest_api_key = os.environ.get("ONESIGNAL_REST_API_KEY",
+                                                         "")  # Рекомендуется хранить в переменных окружения
+
+                # Если нет API ключа, используем только player_id, не использовать REST API
+                # Этого достаточно для большинства случаев
+                if not one_signal_rest_api_key:
+                    # Формируем данные сообщения для OneSignal
+                    push_data = {
+                        "include_player_ids": [token_str],
+                        "app_id": one_signal_app_id,
+                        "headings": {"en": title, "ru": title},
+                        "contents": {"en": message, "ru": message},
+                        "data": extra or {},
+                        "android_channel_id": android_channel_id,
+                        "android_group": notification_type
+                    }
+
+                    # Добавляем приоритет для Android
+                    push_data["android_sound"] = "default"
+                    push_data["priority"] = 10  # Высокий приоритет для Android
+
+                    # Отправляем запрос в OneSignal
+                    headers = {
+                        "Content-Type": "application/json"
+                    }
+
+                    response = requests.post(
+                        "https://onesignal.com/api/v1/notifications",
+                        headers=headers,
+                        data=json.dumps(push_data)
+                    )
+                else:
+                    # Если есть REST API ключ, используем его для расширенных возможностей
+                    push_data = {
+                        "include_player_ids": [token_str],
+                        "app_id": one_signal_app_id,
+                        "headings": {"en": title, "ru": title},
+                        "contents": {"en": message, "ru": message},
+                        "data": extra or {},
+                        "android_channel_id": android_channel_id,
+                        "android_group": notification_type
+                    }
+
+                    # Добавляем приоритет для Android
+                    push_data["android_sound"] = "default"
+                    push_data["priority"] = 10  # Высокий приоритет для Android
+
+                    # Отправляем запрос в OneSignal
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Basic {one_signal_rest_api_key}"
+                    }
+
+                    response = requests.post(
+                        "https://onesignal.com/api/v1/notifications",
+                        headers=headers,
+                        data=json.dumps(push_data)
+                    )
+
+                # Проверяем ответ
+                if response.status_code not in [200, 201]:
+                    error_msg = f"OneSignal push failed with status {response.status_code}: {response.text}"
+                    print(error_msg)
+
+                    # Обновляем запись в логе
+                    if log_entry:
+                        log_entry.status = 'failed'
+                        log_entry.error = error_msg
+                        log_entry.updated_at = datetime.utcnow()
+                        db.session.commit()
+
+                    return {"success": False, "error": error_msg}
+
+                # Получаем ID уведомления из ответа
+                response_data = response.json()
+                notification_id = response_data.get('id')
+                print(f"Successfully sent OneSignal push notification: {notification_id}")
+
+                # Обновляем запись в логе
+                if log_entry:
+                    log_entry.status = 'sent'
+                    log_entry.updated_at = datetime.utcnow()
+                    db.session.commit()
+
+                # Обновляем запись токена
+                if device_token_record:
+                    device_token_record.last_used = datetime.utcnow()
+                    db.session.commit()
+
+                return {"success": True, "receipt": response_data}
+            except Exception as onesignal_error:
+                error_msg = f"OneSignal push error: {str(onesignal_error)}"
+                print(error_msg)
+
+                # Обновляем запись в логе
+                if log_entry:
+                    log_entry.status = 'failed'
+                    log_entry.error = error_msg
+                    log_entry.updated_at = datetime.utcnow()
+                    db.session.commit()
+
+                return {"success": False, "error": error_msg}
+        elif is_expo_token:
             # Используем Expo Push Service для токенов Expo
             try:
                 import requests
@@ -2405,7 +2504,7 @@ def send_push_message(token, title, message, extra=None):
                     if log_entry:
                         log_entry.status = 'failed'
                         log_entry.error = error_msg
-                        log_entry.updated_at = datetime.datetime.utcnow()
+                        log_entry.updated_at = datetime.utcnow()
                         db.session.commit()
 
                     return {"success": False, "error": error_msg}
@@ -2415,12 +2514,12 @@ def send_push_message(token, title, message, extra=None):
                 # Обновляем запись в логе
                 if log_entry:
                     log_entry.status = 'sent'
-                    log_entry.updated_at = datetime.datetime.utcnow()
+                    log_entry.updated_at = datetime.utcnow()
                     db.session.commit()
 
                 # Обновляем запись токена
                 if device_token_record:
-                    device_token_record.last_used = datetime.datetime.utcnow()
+                    device_token_record.last_used = datetime.utcnow()
                     db.session.commit()
 
                 return {"success": True, "receipt": response.json()}
@@ -2432,7 +2531,7 @@ def send_push_message(token, title, message, extra=None):
                 if log_entry:
                     log_entry.status = 'failed'
                     log_entry.error = error_msg
-                    log_entry.updated_at = datetime.datetime.utcnow()
+                    log_entry.updated_at = datetime.utcnow()
                     db.session.commit()
 
                 return {"success": False, "error": error_msg}
@@ -2473,12 +2572,12 @@ def send_push_message(token, title, message, extra=None):
                 # Обновляем запись в логе
                 if log_entry:
                     log_entry.status = 'sent'
-                    log_entry.updated_at = datetime.datetime.utcnow()
+                    log_entry.updated_at = datetime.utcnow()
                     db.session.commit()
 
                 # Обновляем запись токена
                 if device_token_record:
-                    device_token_record.last_used = datetime.datetime.utcnow()
+                    device_token_record.last_used = datetime.utcnow()
                     db.session.commit()
 
                 return {"success": True, "receipt": response}
@@ -2490,14 +2589,14 @@ def send_push_message(token, title, message, extra=None):
                 if log_entry:
                     log_entry.status = 'failed'
                     log_entry.error = error_msg
-                    log_entry.updated_at = datetime.datetime.utcnow()
+                    log_entry.updated_at = datetime.utcnow()
                     db.session.commit()
 
                 # Если ошибка связана с невалидным токеном, отмечаем его как неактивный
                 if isinstance(fcm_error, messaging.UnregisteredError) and device_token_record:
                     print(f"Token {token_str[:10]}... is no longer valid. Deactivating.")
                     device_token_record.is_active = False
-                    device_token_record.updated_at = datetime.datetime.utcnow()
+                    device_token_record.updated_at = datetime.utcnow()
                     db.session.commit()
 
                 return {"success": False, "error": error_msg}
@@ -2509,7 +2608,7 @@ def send_push_message(token, title, message, extra=None):
         if log_entry:
             log_entry.status = 'failed'
             log_entry.error = error_msg
-            log_entry.updated_at = datetime.datetime.utcnow()
+            log_entry.updated_at = datetime.utcnow()
             db.session.commit()
 
         return {"success": False, "error": error_msg}
@@ -2541,7 +2640,7 @@ def test_notification(current_user):
             extra_data = {
                 'type': 'test',
                 'channel_id': 'default',
-                'test_time': datetime.datetime.utcnow().isoformat()
+                'test_time': datetime.utcnow().isoformat()
             }
 
             result = send_push_message(
@@ -2554,12 +2653,21 @@ def test_notification(current_user):
             if result.get("success", False):
                 success_count += 1
 
+            # Определяем тип токена для отображения в ответе
+            token_type = "Неизвестный"
+            if hasattr(token_obj, 'is_onesignal') and token_obj.is_onesignal:
+                token_type = "OneSignal"
+            elif hasattr(token_obj, 'is_expo_token') and token_obj.is_expo_token:
+                token_type = "Expo"
+            else:
+                token_type = "FCM"
+
             # Сохраняем результат для каждого устройства
             results.append({
                 "device_name": token_obj.device_name,
                 "platform": token_obj.platform,
                 "token_preview": token_obj.token[:10] + "...",
-                "token_type": "Expo" if token_obj.is_expo_token else "FCM",
+                "token_type": token_type,
                 "success": result.get("success", False),
                 "details": result.get("receipt") if result.get("success", False) else result.get("error")
             })

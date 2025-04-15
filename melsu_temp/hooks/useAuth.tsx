@@ -252,14 +252,18 @@ const login = async (username: string, password: string) => {
   try {
     console.log('Starting login process...');
 
-    // Перед входом в новый аккаунт сбрасываем сервис чатов
-    console.log('Resetting chat service before login');
+    // Before logging into a new account, reset OneSignal
+    console.log('Resetting OneSignal service before login');
 
-    // Полный сброс chatService
+    // Import OneSignal service
+    const oneSignalService = (await import('../src/services/OneSignalService')).default;
+    await oneSignalService.reset();
+
+    // Reset chat service
     if (typeof chatService.reset === 'function') {
       chatService.reset();
     } else {
-      chatService.cleanup(); // Используем cleanup, если reset не доступен
+      chatService.cleanup();
       chatService.initialized = false;
       chatService.currentUser = null;
     }
@@ -267,23 +271,32 @@ const login = async (username: string, password: string) => {
     const { token, user } = await authApi.login({ username, password });
     console.log('Login successful, storing tokens...');
 
-    // Сохраняем токен
+    // Save token
     await SecureStore.setItemAsync('userToken', token);
 
-    // Сохраняем данные пользователя
+    // Save user data
     await AsyncStorage.setItem('userData', JSON.stringify(user));
     setUser(user);
     setIsAuthenticated(true);
 
-    // Ожидаем малую паузу для инициализации состояния
+    // Initialize OneSignal with user ID
+    try {
+      await oneSignalService.initialize();
+      await oneSignalService.registerForPushNotifications(user.id.toString());
+    } catch (oneSignalError) {
+      console.error('Error initializing OneSignal:', oneSignalError);
+      // Continue with login even if OneSignal initialization fails
+    }
+
+    // Wait for small pause for state initialization
     await new Promise(resolve => setTimeout(resolve, 300));
 
     console.log('Login complete, redirecting to main app');
 
-    // Перенаправление в зависимости от роли и статуса верификации
+    // Redirect based on role and verification status
     router.replace('/(tabs)');
 
-    // Явно возвращаем данные для возможности использования в компонентах
+    // Explicitly return data for potential use in components
     return { user, token };
   } catch (error) {
     console.error('Error during login:', error);
@@ -339,6 +352,19 @@ const logout = async () => {
 
     // CRITICAL: First unregister device tokens before any other logout actions
     console.log('Unregistering device tokens before logout...');
+
+    // Import OneSignal service
+    const oneSignalService = (await import('../src/services/OneSignalService')).default;
+
+    try {
+      // Reset OneSignal - this will unregister device tokens and clean up
+      await oneSignalService.reset();
+      console.log('OneSignal reset completed');
+    } catch (oneSignalError) {
+      console.error('Error during OneSignal reset:', oneSignalError);
+      // Continue with logout even if this fails
+    }
+
     if (chatService) {
       try {
         // First, force unregistration of ALL device tokens
@@ -389,6 +415,10 @@ const logout = async () => {
 
     // Emergency cleanup
     try {
+      // Import OneSignal service
+      const oneSignalService = (await import('../src/services/OneSignalService')).default;
+      await oneSignalService.reset();
+
       // One more attempt to reset chat service
       if (chatService) await chatService.reset();
 

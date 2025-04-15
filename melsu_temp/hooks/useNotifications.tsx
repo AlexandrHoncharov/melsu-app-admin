@@ -1,30 +1,29 @@
 // hooks/useNotifications.tsx
 import { useState, useEffect, useRef, useCallback } from 'react';
-import * as Notifications from 'expo-notifications';
 import { useAuth } from './useAuth';
 import { router } from 'expo-router';
-import notificationService from '../src/services/NotificationService';
+import oneSignalService, { NotificationCategory } from '../src/services/OneSignalService';
 
 export function useNotifications() {
-  const [notification, setNotification] = useState<Notifications.Notification | null>(null);
-  const [notificationResponse, setNotificationResponse] = useState<Notifications.NotificationResponse | null>(null);
+  const [notification, setNotification] = useState<any | null>(null);
+  const [notificationResponse, setNotificationResponse] = useState<any | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isRegistered, setIsRegistered] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [status, setStatus] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const cleanupRef = useRef<() => void | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
   const { user, isAuthenticated } = useAuth();
 
-  // Инициализация сервиса уведомлений
+  // Initialize OneSignal service
   useEffect(() => {
     let isMounted = true;
 
     const initialize = async () => {
       try {
-        // Инициализируем сервис
-        const initResult = await notificationService.initialize();
+        // Initialize the OneSignal service
+        const initResult = await oneSignalService.initialize();
 
         if (isMounted) {
           setIsInitialized(initResult);
@@ -46,29 +45,29 @@ export function useNotifications() {
     };
   }, []);
 
-  // Обновляем обработчики уведомлений при изменении статуса инициализации
+  // Set up notification listeners when initialized
   useEffect(() => {
     if (!isInitialized) return;
 
-    // Настраиваем обработчики уведомлений
-    const handleNotification = (notification: Notifications.Notification) => {
+    // Set up notification handlers
+    const handleNotification = (notification: any) => {
       setNotification(notification);
     };
 
-    const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+    const handleNotificationResponse = (response: any) => {
       setNotificationResponse(response);
 
-      // Обрабатываем нажатие на уведомление
+      // Handle notification navigation
       handleNotificationNavigation(response);
     };
 
-    // Устанавливаем обработчики
-    const cleanup = notificationService.setupNotificationListeners(
+    // Set up OneSignal notification listeners
+    const cleanup = oneSignalService.setupNotificationListeners(
       handleNotification,
       handleNotificationResponse
     );
 
-    // Сохраняем функцию очистки
+    // Save cleanup function
     cleanupRef.current = cleanup;
 
     return () => {
@@ -79,26 +78,23 @@ export function useNotifications() {
     };
   }, [isInitialized]);
 
-  // Регистрируем устройство для уведомлений при аутентификации
+  // Register device for notifications when authenticated
   useEffect(() => {
     let isMounted = true;
 
     const registerDevice = async () => {
-      // Если не инициализирован, пропускаем
-      if (!isInitialized) return;
-
-      // Если не аутентифицирован или уже регистрируется/зарегистрирован, пропускаем
-      if (!isAuthenticated || !user || !user.id || isRegistering || isRegistered) return;
+      // Skip if not initialized, not authenticated, or already registering/registered
+      if (!isInitialized || !isAuthenticated || !user || !user.id || isRegistering || isRegistered) return;
 
       try {
         setIsRegistering(true);
         setError(null);
 
-        // Регистрируем устройство
+        // Register device with OneSignal
         const userId = String(user.id);
         console.log(`[useNotifications] Registering device for user ${userId}`);
 
-        const registrationResult = await notificationService.registerForPushNotifications(userId);
+        const registrationResult = await oneSignalService.registerForPushNotifications(userId);
 
         if (isMounted) {
           setIsRegistered(registrationResult);
@@ -124,13 +120,14 @@ export function useNotifications() {
     };
   }, [isInitialized, isAuthenticated, user?.id, isRegistering, isRegistered]);
 
-  // Обработка навигации по нажатию на уведомление
-  const handleNotificationNavigation = useCallback((response: Notifications.NotificationResponse) => {
+  // Handle navigation based on notification data
+  const handleNotificationNavigation = useCallback((response: any) => {
     try {
-      const data = response.notification.request.content.data;
+      // Extract notification data from OneSignal format
+      const data = response.notification.additionalData || {};
       console.log('[useNotifications] Notification data:', data);
 
-      // Навигация в зависимости от типа уведомления
+      // Navigate based on notification type
       if (data?.type === 'chat_message' && data?.chat_id) {
         router.push(`/chat/${data.chat_id}`);
       } else if (data?.type === 'verification') {
@@ -146,10 +143,10 @@ export function useNotifications() {
     }
   }, []);
 
-  // Получение статуса уведомлений
+  // Get notification status
   const getNotificationStatus = useCallback(async () => {
     try {
-      const statusInfo = await notificationService.getNotificationStatus();
+      const statusInfo = await oneSignalService.getNotificationStatus();
       setStatus(statusInfo);
       return statusInfo;
     } catch (err) {
@@ -158,11 +155,11 @@ export function useNotifications() {
     }
   }, []);
 
-  // Отправка тестового уведомления
+  // Send test notification
   const sendTestNotification = useCallback(async () => {
     try {
       setError(null);
-      const result = await notificationService.sendTestNotification();
+      const result = await oneSignalService.sendTestNotification();
       if (!result) {
         setError('Не удалось отправить тестовое уведомление');
       }
@@ -173,15 +170,15 @@ export function useNotifications() {
     }
   }, []);
 
-  // Запрос разрешений на уведомления
+  // Request notification permissions
   const requestPermissions = useCallback(async () => {
     try {
       setError(null);
-      const result = await notificationService.requestPermissions();
+      const result = await oneSignalService.requestPermissions();
       if (!result) {
         setError('Не удалось получить разрешения на уведомления');
       }
-      // Обновляем статус после запроса разрешений
+      // Update status after requesting permissions
       await getNotificationStatus();
       return result;
     } catch (err) {
@@ -190,11 +187,11 @@ export function useNotifications() {
     }
   }, [getNotificationStatus]);
 
-  // Отмена регистрации токена
+  // Unregister device token
   const unregisterDeviceToken = useCallback(async () => {
     try {
       setError(null);
-      const result = await notificationService.unregisterDeviceToken();
+      const result = await oneSignalService.unregisterDeviceToken();
       setIsRegistered(false);
       return result;
     } catch (err) {
@@ -203,7 +200,7 @@ export function useNotifications() {
     }
   }, []);
 
-  // Отправка локального уведомления (для тестирования)
+  // Schedule local notification
   const scheduleLocalNotification = useCallback(async (
     title: string,
     body: string,
@@ -211,7 +208,20 @@ export function useNotifications() {
     options?: { seconds?: number; channelId?: string; sound?: boolean }
   ) => {
     try {
-      return await notificationService.scheduleLocalNotification(title, body, data, options);
+      // Map the channelId to OneSignal category
+      let category: NotificationCategory = NotificationCategory.DEFAULT;
+      if (options?.channelId === 'chat') {
+        category = NotificationCategory.CHAT;
+      } else if (options?.channelId === 'ticket') {
+        category = NotificationCategory.TICKET;
+      } else if (options?.channelId === 'verification') {
+        category = NotificationCategory.VERIFICATION;
+      }
+
+      return await oneSignalService.scheduleLocalNotification(title, body, data, {
+        seconds: options?.seconds,
+        category
+      });
     } catch (err) {
       setError(`Ошибка отправки локального уведомления: ${err instanceof Error ? err.message : String(err)}`);
       return null;

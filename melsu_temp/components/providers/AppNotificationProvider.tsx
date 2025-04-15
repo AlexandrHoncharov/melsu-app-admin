@@ -1,309 +1,243 @@
 // components/providers/AppNotificationProvider.tsx
-import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
-import * as Notifications from 'expo-notifications';
-import { AppState, AppStateStatus, Platform } from 'react-native';
-import { useAuth } from '../../hooks/useAuth';
-import notificationService from '../../src/services/NotificationService';
-import InAppNotification from '../InAppNotification';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
+import { useAuth } from '../../hooks/useAuth';
+import { Ionicons } from '@expo/vector-icons';
 
-interface NotificationContextType {
-  showNotification: (title: string, message: string, type: string, data?: any) => void;
+// Define context types
+interface AppNotificationContextProps {
+  showNotification: (title: string, message: string, type?: string, data?: any) => void;
   hideNotification: () => void;
-  badgeCount: number;
-  setBadgeCount: (count: number) => Promise<void>;
-  clearBadge: () => Promise<void>;
-  lastNotification: Notifications.Notification | null;
-  sendTestNotification: () => Promise<boolean>;
-  checkPermissions: () => Promise<boolean>;
 }
 
 // Create context
-const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
+const AppNotificationContext = createContext<AppNotificationContextProps | undefined>(undefined);
 
-export const AppNotificationProvider = ({ children }: { children: ReactNode }) => {
-  // In-app notification state
-  const [activeNotification, setActiveNotification] = useState<{
-    title: string;
-    message: string;
-    type: string;
-    data: any;
-    id: number;
-  } | null>(null);
+// Provider props
+interface AppNotificationProviderProps {
+  children: ReactNode;
+}
 
-  // Badge count
-  const [badgeCount, setBadgeCountState] = useState<number>(0);
+export const AppNotificationProvider: React.FC<AppNotificationProviderProps> = ({ children }) => {
+  // State for in-app notifications
+  const [visible, setVisible] = useState(false);
+  const [title, setTitle] = useState('');
+  const [message, setMessage] = useState('');
+  const [type, setType] = useState('');
+  const [data, setData] = useState<any>(null);
+  const [autoHideTimer, setAutoHideTimer] = useState<NodeJS.Timeout | null>(null);
 
-  // Last received notification
-  const [lastNotification, setLastNotification] = useState<Notifications.Notification | null>(null);
+  const { isAuthenticated } = useAuth();
 
-  // Permission alert tracking
-  const permissionAlertShown = useRef(false);
-
-  // App state tracking
-  const appState = useRef(AppState.currentState);
-
-  // Auth hook
-  const { user, isAuthenticated } = useAuth();
-
-  // Initialize notification service
+  // Initialize OneSignal when component mounts
   useEffect(() => {
-    const initializeNotifications = async () => {
+    const initOneSignal = async () => {
+      if (Platform.OS === 'web') {
+        console.log('OneSignal not supported on web platform');
+        return;
+      }
+
       try {
-        await notificationService.initialize();
-        console.log('[AppNotificationProvider] Notification service initialized');
-
-        // Get current badge
-        const currentBadge = await notificationService.getBadgeCount();
-        setBadgeCountState(currentBadge);
-
-        // Check initial permissions if authenticated
-        if (isAuthenticated && user?.id) {
-          await checkAndRequestPermissions();
+        // Dynamically import OneSignal to prevent issues in Expo Go
+        if (isAuthenticated) {
+          try {
+            // We'll initialize OneSignal only in production or development build, not in Expo Go
+            if (Constants?.expoConfig?.extra?.oneSignalAppId) {
+              // Don't actually import here to avoid the native module error in Expo Go
+              console.log('Would initialize OneSignal with app ID:',
+                Constants.expoConfig.extra.oneSignalAppId);
+            }
+          } catch (error) {
+            console.log('OneSignal initialization skipped (expected in Expo Go)');
+          }
         }
       } catch (error) {
-        console.error('[AppNotificationProvider] Failed to initialize notifications:', error);
+        console.error('Error in OneSignal initialization:', error);
       }
     };
 
-    initializeNotifications();
-  }, []);
+    initOneSignal();
+  }, [isAuthenticated]);
 
-  // App state change handler
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => {
-      subscription.remove();
-    };
-  }, [isAuthenticated, user?.id]);
+  // Show notification
+  const showNotification = (
+    notificationTitle: string,
+    notificationMessage: string,
+    notificationType = 'default',
+    notificationData = null
+  ) => {
+    // Set notification content
+    setTitle(notificationTitle);
+    setMessage(notificationMessage);
+    setType(notificationType);
+    setData(notificationData);
+    setVisible(true);
 
-  // Set up notification listeners
-  useEffect(() => {
-    const setupListeners = async () => {
-      try {
-        const cleanup = notificationService.setupNotificationListeners(
-          handleNotificationReceived,
-          handleNotificationResponse
-        );
-        return cleanup;
-      } catch (error) {
-        console.error('[AppNotificationProvider] Failed to setup notification listeners:', error);
-        return () => {};
-      }
-    };
-
-    const cleanupListener = setupListeners();
-    return () => {
-      cleanupListener.then(cleanup => cleanup());
-    };
-  }, []);
-
-  // Register device token when authenticated
-  useEffect(() => {
-    if (isAuthenticated && user?.id) {
-      const registerDevice = async () => {
-        try {
-          const result = await notificationService.registerForPushNotifications(String(user.id));
-          console.log('[AppNotificationProvider] Device registration result:', result);
-        } catch (error) {
-          console.error('[AppNotificationProvider] Failed to register device:', error);
-        }
-      };
-
-      registerDevice();
-    }
-  }, [isAuthenticated, user?.id]);
-
-  // App state change handler
-  const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
-    // App came to foreground
-    if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-      console.log('[AppNotificationProvider] App has come to the foreground');
-
-      // Update badge count
-      try {
-        const currentBadge = await notificationService.getBadgeCount();
-        setBadgeCountState(currentBadge);
-      } catch (error) {
-        console.error('[AppNotificationProvider] Failed to get badge count:', error);
-      }
-
-      // Check permissions if authenticated
-      if (isAuthenticated && user?.id) {
-        await checkAndRequestPermissions();
-      }
+    // Clear existing auto-hide timer
+    if (autoHideTimer) {
+      clearTimeout(autoHideTimer);
     }
 
-    appState.current = nextAppState;
-  }, [isAuthenticated, user?.id]);
+    // Set new auto-hide timer (5 seconds)
+    const timer = setTimeout(() => {
+      hideNotification();
+    }, 5000);
 
-  // Check and request permissions if needed
-  const checkAndRequestPermissions = async () => {
-    try {
-      const status = await notificationService.getNotificationStatus();
-      console.log('[AppNotificationProvider] Notification status:', status);
+    setAutoHideTimer(timer);
+  };
 
-      if (!status.enabled) {
-        if (!permissionAlertShown.current) {
-          permissionAlertShown.current = true;
-          return await notificationService.requestPermissions();
-        }
-      }
+  // Hide notification
+  const hideNotification = () => {
+    setVisible(false);
 
-      return status.enabled;
-    } catch (err) {
-      console.error('[AppNotificationProvider] Error checking permissions:', err);
-      return false;
+    // Clear auto-hide timer
+    if (autoHideTimer) {
+      clearTimeout(autoHideTimer);
+      setAutoHideTimer(null);
     }
   };
 
-  // Public method to check permissions
-  const checkPermissions = async () => {
-    return await checkAndRequestPermissions();
-  };
-
-  // Handle incoming notification
-  const handleNotificationReceived = (notification: Notifications.Notification) => {
-    console.log('[AppNotificationProvider] Notification received:', notification.request.identifier);
-    setLastNotification(notification);
-
-    // Show in-app notification if app is active
-    if (AppState.currentState === 'active') {
-      const { title, body, data } = notification.request.content;
-
-      // Show in-app notification for chat and ticket messages
-      if (data?.type === 'chat_message' || data?.type === 'ticket_message') {
-        showNotification(title, body, data.type, data);
-      }
-
-      // Increase badge count
-      setBadgeCountState(prev => prev + 1);
+  // Handle notification click
+  const handleNotificationPress = () => {
+    // Cancel auto-hide timer
+    if (autoHideTimer) {
+      clearTimeout(autoHideTimer);
+      setAutoHideTimer(null);
     }
-  };
 
-  // Handle notification tap
-  const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
-    console.log('[AppNotificationProvider] Notification response received:',
-      response.notification.request.identifier);
+    // Hide notification
+    hideNotification();
 
-    try {
-      const data = response.notification.request.content.data;
-      console.log('[AppNotificationProvider] Notification data:', data);
-
-      if (!data) return;
-
-      // Navigate based on notification type
-      if (data.type === 'chat_message' && data.chat_id) {
-        // Wait a moment to ensure chat service is ready
-        setTimeout(() => {
-          router.push(`/chat/${data.chat_id}`);
-        }, 300);
-      } else if (data.type === 'ticket_message' && data.ticket_id) {
+    // Navigate based on notification type
+    if (data) {
+      if (type === 'chat_message' && data.chat_id) {
+        router.push(`/chat/${data.chat_id}`);
+      } else if (type === 'verification') {
+        router.push('/verification');
+      } else if (type === 'ticket_message' && data.ticket_id) {
         router.push({
           pathname: '/profile/ticket-details',
           params: { ticketId: data.ticket_id }
         });
-      } else if (data.type === 'verification') {
-        router.push('/verification');
       }
-    } catch (err) {
-      console.error('[AppNotificationProvider] Error handling notification tap:', err);
     }
   };
 
-  // Show in-app notification
-  const showNotification = (title: string, message: string, type: string, data: any = {}) => {
-    // Generate unique ID
-    const id = Date.now();
-
-    setActiveNotification({
-      title,
-      message,
-      type,
-      data,
-      id
-    });
-
-    // Auto-hide after 5 seconds
-    setTimeout(() => {
-      hideNotification(id);
-    }, 5000);
-  };
-
-  // Hide notification
-  const hideNotification = (id?: number) => {
-    if (id && activeNotification?.id !== id) {
-      return; // Don't hide if IDs don't match
-    }
-    setActiveNotification(null);
-  };
-
-  // Set badge count
-  const setBadgeCount = async (count: number) => {
-    try {
-      await notificationService.setBadgeCount(count);
-      setBadgeCountState(count);
-    } catch (error) {
-      console.error('[AppNotificationProvider] Failed to set badge count:', error);
+  // Get icon based on notification type
+  const getNotificationIcon = () => {
+    switch (type) {
+      case 'chat_message':
+        return <Ionicons name="chatbubble" size={24} color="#fff" />;
+      case 'ticket_message':
+        return <Ionicons name="help-circle" size={24} color="#fff" />;
+      case 'verification':
+        return <Ionicons name="checkmark-circle" size={24} color="#fff" />;
+      default:
+        return <Ionicons name="notifications" size={24} color="#fff" />;
     }
   };
 
-  // Clear badge
-  const clearBadge = async () => {
-    try {
-      await notificationService.setBadgeCount(0);
-      setBadgeCountState(0);
-    } catch (error) {
-      console.error('[AppNotificationProvider] Failed to clear badge:', error);
-    }
-  };
-
-  // Send test notification
-  const sendTestNotification = async () => {
-    try {
-      return await notificationService.sendTestNotification();
-    } catch (error) {
-      console.error('[AppNotificationProvider] Failed to send test notification:', error);
-      return false;
+  // Get background color based on notification type
+  const getNotificationColor = () => {
+    switch (type) {
+      case 'chat_message':
+        return '#0077FF';
+      case 'ticket_message':
+        return '#33CC66';
+      case 'verification':
+        return '#FFA500';
+      default:
+        return '#770002';
     }
   };
 
   return (
-    <NotificationContext.Provider
-      value={{
-        showNotification,
-        hideNotification,
-        badgeCount,
-        setBadgeCount,
-        clearBadge,
-        lastNotification,
-        sendTestNotification,
-        checkPermissions
-      }}
-    >
+    <AppNotificationContext.Provider value={{ showNotification, hideNotification }}>
       {children}
 
-      {activeNotification && (
-        <InAppNotification
-          title={activeNotification.title}
-          message={activeNotification.message}
-          type={activeNotification.type}
-          data={activeNotification.data}
-          onDismiss={() => hideNotification(activeNotification.id)}
-        />
+      {/* In-app notification banner */}
+      {visible && (
+        <View
+          style={[
+            styles.notificationContainer,
+            { backgroundColor: getNotificationColor() }
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.notificationContent}
+            onPress={handleNotificationPress}
+            activeOpacity={0.8}
+          >
+            <View style={styles.iconContainer}>
+              {getNotificationIcon()}
+            </View>
+            <View style={styles.textContainer}>
+              <Text style={styles.title} numberOfLines={1}>{title}</Text>
+              <Text style={styles.message} numberOfLines={2}>{message}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={hideNotification}
+              hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+            >
+              <Ionicons name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
       )}
-    </NotificationContext.Provider>
+    </AppNotificationContext.Provider>
   );
 };
 
-// Hook for using notification context
-export const useAppNotifications = () => {
-  const context = useContext(NotificationContext);
+// Styles
+const styles = StyleSheet.create({
+  notificationContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#770002',
+    padding: 16,
+    zIndex: 1000,
+    width: Dimensions.get('window').width,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  notificationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconContainer: {
+    marginRight: 12,
+  },
+  textContainer: {
+    flex: 1,
+  },
+  title: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  message: {
+    color: '#fff',
+    fontSize: 14,
+    opacity: 0.9,
+  },
+  closeButton: {
+    padding: 4,
+  }
+});
 
-  if (context === undefined) {
+// Hook to use the notification context
+export const useAppNotifications = () => {
+  const context = useContext(AppNotificationContext);
+  if (!context) {
     throw new Error('useAppNotifications must be used within an AppNotificationProvider');
   }
-
   return context;
 };

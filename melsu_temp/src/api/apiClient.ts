@@ -1,76 +1,72 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-// Базовый URL вашего API-сервера
+// Base URL for your API server
 export const API_URL = 'http://192.168.0.4:5001/api';
 
-// Создаем экземпляр axios с базовыми настройками
+// Create axios instance with base settings
 const apiClient = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json'
   },
-  timeout: 15000, // 15 секунд таймаут
+  timeout: 15000, // 15 seconds timeout
 });
 
-// Функция для отладки токена
+// Function for debugging token
 const debugToken = async () => {
   try {
     const token = await SecureStore.getItemAsync('userToken');
     if (token) {
-      // Логируем первые 10 и последние 5 символов токена для отладки
-      console.log(`Текущий токен: ${token.substring(0, 10)}...${token.substring(token.length - 5)}`);
+      // Log first 10 and last 5 characters of token for debugging
+      console.log(`Current token: ${token.substring(0, 10)}...${token.substring(token.length - 5)}`);
 
-      // Проверяем структуру токена - должен быть JWT с тремя частями, разделенными точками
+      // Check token structure - should be JWT with three parts separated by dots
       const parts = token.split('.');
       if (parts.length !== 3) {
-        console.warn(`Токен имеет неправильную структуру JWT! Частей: ${parts.length}`);
+        console.warn(`Token has incorrect JWT structure! Parts: ${parts.length}`);
       } else {
-        console.log('Токен имеет правильную структуру JWT (header.payload.signature)');
+        console.log('Token has correct JWT structure (header.payload.signature)');
 
-        // Для дополнительной отладки можно декодировать заголовок и полезную нагрузку
+        // For additional debugging, decode header and payload
         try {
           const header = JSON.parse(atob(parts[0]));
           console.log('JWT Header:', header);
         } catch (e) {
-          console.warn('Не удалось декодировать заголовок JWT:', e.message);
+          console.warn('Failed to decode JWT header:', e.message);
         }
       }
     } else {
-      console.warn('Токен отсутствует в SecureStore');
+      console.warn('Token missing in SecureStore');
     }
   } catch (e) {
-    console.error('Ошибка при отладке токена:', e.message);
+    console.error('Error debugging token:', e.message);
   }
 };
 
-// Список запросов, которые не должны вызывать удаление токена при ошибке 401
+// List of requests that shouldn't trigger token deletion on 401 error
 const SAFE_ENDPOINTS = [
   '/auth/firebase-token',
   '/device/register'
 ];
 
-// Проверка, является ли запрос "безопасным" (не должен вызывать удаление токена)
+// Check if request is "safe" (shouldn't trigger token deletion)
 const isSafeEndpoint = (url) => {
   return SAFE_ENDPOINTS.some(endpoint => url.includes(endpoint));
 };
 
-// Интерцептор для добавления токена авторизации в запросы
+// Interceptor to add authorization token to requests
 apiClient.interceptors.request.use(
   async (config) => {
     const token = await SecureStore.getItemAsync('userToken');
     if (token && config.headers) {
-      // ВАЖНОЕ ИЗМЕНЕНИЕ: Проверяем формат заголовка
-      // Некоторые API требуют только token без слова "Bearer"
-      // config.headers['Authorization'] = `Bearer ${token}`;
-
-      // Меняем формат на просто токен без префикса "Bearer"
+      // IMPORTANT CHANGE: Format header
       config.headers['Authorization'] = `Bearer ${token}`;
 
-      console.log(`Добавление токена в запрос: ${config.method?.toUpperCase() || 'GET'} ${config.url}`);
+      console.log(`Adding token to request: ${config.method?.toUpperCase() || 'GET'} ${config.url}`);
 
-      // Отладка в первый раз для каждого запроса
+      // Debug token once for each request
       if (config.url && !config._tokenDebugged) {
         config._tokenDebugged = true;
         await debugToken();
@@ -83,13 +79,13 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Флаг для отслеживания, было ли предупреждение о проблеме с токеном
+// Flag to track if token warning was shown
 let tokenWarningShown = false;
 
-// Интерцептор для обработки ответов и ошибок
+// Interceptor to handle responses and errors
 apiClient.interceptors.response.use(
   (response) => {
-    // Сбрасываем флаг предупреждения при успешном запросе
+    // Reset warning flag on successful request
     tokenWarningShown = false;
     return response;
   },
@@ -97,48 +93,48 @@ apiClient.interceptors.response.use(
     const originalRequest = error.config;
     const url = originalRequest?.url || '';
 
-    console.log(`Ошибка ${error.response?.status || 'неизвестная'} при запросе ${originalRequest?.method?.toUpperCase() || 'GET'} ${url}`);
+    console.log(`Error ${error.response?.status || 'unknown'} in request ${originalRequest?.method?.toUpperCase() || 'GET'} ${url}`);
 
-    // Проверяем, является ли запрос "безопасным" для токена
+    // Check if request is "safe" for token
     const isSafe = isSafeEndpoint(url);
 
-    // Если ошибка 401 (Unauthorized) и запрос еще не повторялся,
-    // и это НЕ "безопасный" запрос
+    // If 401 (Unauthorized) error and request hasn't been retried yet,
+    // and it's NOT a "safe" request
     if (error.response?.status === 401 && !originalRequest._retry && !isSafe) {
       originalRequest._retry = true;
 
-      // Показываем предупреждение только один раз для лучшего UX
+      // Show warning only once for better UX
       if (!tokenWarningShown) {
-        console.log('⚠️ Получен 401 Unauthorized - проблема с токеном, проверяем...');
+        console.log('⚠️ Received 401 Unauthorized - token issue, checking...');
         tokenWarningShown = true;
 
-        // Отладка токена для понимания проблемы
+        // Debug token to understand the problem
         await debugToken();
       }
 
-      // Проверяем, пробовали ли мы уже альтернативный формат авторизации
+      // Check if we've already tried alternative auth format
       if (!originalRequest._triedAlternativeAuth) {
-        console.log('Пробуем альтернативный формат заголовка авторизации...');
+        console.log('Trying alternative authorization header format...');
         originalRequest._triedAlternativeAuth = true;
 
-        // Получаем текущий токен
+        // Get current token
         const token = await SecureStore.getItemAsync('userToken');
 
         if (token) {
-          // Пробуем альтернативный формат (только токен без "Bearer")
+          // Try alternative format (token only without "Bearer")
           originalRequest.headers['Authorization'] = token;
 
           try {
-            console.log('Повторяем запрос с альтернативным форматом заголовка...');
+            console.log('Retrying request with alternative header format...');
             const response = await axios(originalRequest);
-            console.log('✅ Запрос успешен с альтернативным форматом!');
+            console.log('✅ Request successful with alternative format!');
 
-            // Если успешно, изменяем формат для всех будущих запросов
+            // If successful, update format for all future requests
             apiClient.interceptors.request.use(
               async (config) => {
                 const token = await SecureStore.getItemAsync('userToken');
                 if (token && config.headers) {
-                  config.headers['Authorization'] = token; // Без "Bearer"
+                  config.headers['Authorization'] = token; // Without "Bearer"
                 }
                 return config;
               },
@@ -148,23 +144,23 @@ apiClient.interceptors.response.use(
 
             return response;
           } catch (retryError) {
-            console.log('❌ Альтернативный формат тоже не сработал:', retryError.message);
+            console.log('❌ Alternative format also failed:', retryError.message);
           }
         }
       }
 
-      console.log('Получен 401 Unauthorized, удаление токена авторизации');
+      console.log('Received 401 Unauthorized, deleting authorization token');
       await SecureStore.deleteItemAsync('userToken');
 
-      // Перенаправление на экран входа будет выполнено через AuthContext
+      // Redirection to login screen will be handled by AuthContext
     }
-    // Для "безопасных" запросов с ошибкой 401 не удаляем основной токен
+    // For "safe" requests with 401 error, don't delete main token
     else if (isSafe && error.response?.status === 401) {
-      console.log(`Ошибка авторизации для безопасного запроса (${url}), токен сохранен`);
+      console.log(`Authorization error for safe request (${url}), token preserved`);
     }
 
-    // Формируем читаемое сообщение об ошибке
-    let errorMessage = 'Произошла ошибка при запросе';
+    // Format readable error message
+    let errorMessage = 'An error occurred during the request';
 
     if (error.response?.data?.message) {
       errorMessage = error.response.data.message;
@@ -172,17 +168,17 @@ apiClient.interceptors.response.use(
       errorMessage = error.message;
     }
 
-    // Если нет соединения с сервером
+    // If no connection to server
     if (error.message === 'Network Error') {
-      errorMessage = 'Ошибка сети. Проверьте подключение к интернету';
+      errorMessage = 'Network error. Check your internet connection';
     }
 
-    // Если сервер не отвечает
+    // If server not responding
     if (error.code === 'ECONNABORTED') {
-      errorMessage = 'Сервер не отвечает. Попробуйте позже';
+      errorMessage = 'Server not responding. Try again later';
     }
 
-    // Создаем объект ошибки с читаемым сообщением
+    // Create error object with readable message
     const customError = new Error(errorMessage);
     return Promise.reject(customError);
   }

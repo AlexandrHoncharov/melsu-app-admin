@@ -2,7 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Linking, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { useAppNotifications } from './providers/AppNotificationProvider';
+// @ts-ignore
+import { useAppNotifications } from '../providers/AppNotificationProvider';
 
 interface AndroidPermissionHelperProps {
   onPermissionGranted?: () => void;

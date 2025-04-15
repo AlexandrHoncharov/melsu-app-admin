@@ -144,37 +144,51 @@ class VerificationLog(db.Model):
         return f'<VerificationLog {self.student_id} {self.action} {self.created_at}>'
 
 
-# Добавьте этот класс в models.py
-
 class DeviceToken(db.Model):
+    __tablename__ = 'device_token'
+
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     token = db.Column(db.String(255), nullable=False)
-    platform = db.Column(db.String(50))  # 'ios', 'android', 'web'
-    device_name = db.Column(db.String(255))
-    device_id = db.Column(db.String(255))  # уникальный ID устройства
-    is_expo_token = db.Column(db.Boolean, default=False)  # тип токена
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    platform = db.Column(db.String(20), nullable=False)  # 'ios', 'android', 'web'
+    device_name = db.Column(db.String(100))
+    device_id = db.Column(db.String(100))
+    app_version = db.Column(db.String(20))
+    is_expo_token = db.Column(db.Boolean, default=False)
+    is_active = db.Column(db.Boolean, default=True)
+    last_used = db.Column(db.DateTime, default=db.func.now())
+    created_at = db.Column(db.DateTime, default=db.func.now())
+    updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
+
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('device_tokens', lazy=True))
+
+    def __repr__(self):
+        return f'<DeviceToken {self.token[:10]}... for user {self.user_id}>'
 
 
 class PushNotificationLog(db.Model):
     __tablename__ = 'push_notification_log'
 
     id = db.Column(db.Integer, primary_key=True)
-    device_token_id = db.Column(db.Integer, db.ForeignKey('device_token.id'))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    notification_type = db.Column(db.String(50))  # тип уведомления (chat, ticket и т.д.)
+    device_token_id = db.Column(db.Integer, db.ForeignKey('device_token.id'), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    notification_type = db.Column(db.String(50))
     title = db.Column(db.String(255))
     body = db.Column(db.Text)
-    data = db.Column(db.JSON)  # дополнительные данные
-    status = db.Column(db.String(50))  # sent, delivered, failed, etc.
-    error = db.Column(db.Text)  # ошибка, если есть
-    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Changed from JSON to TEXT
+    data = db.Column(db.Text)  # Will store JSON as string
+    status = db.Column(db.String(50))
+    error = db.Column(db.Text)
+    sent_at = db.Column(db.DateTime, default=db.func.now())
+    updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
 
-    # Отношения
-    user = db.relationship('User', backref=db.backref('push_logs', lazy=True))
+    # Relationships
+    device_token = db.relationship('DeviceToken', backref=db.backref('notifications', lazy=True))
+    user = db.relationship('User', backref=db.backref('notifications', lazy=True))
+
+    def __repr__(self):
+        return f'<PushNotificationLog {self.id} - {self.notification_type}>'
 
 class Ticket(db.Model):
     """Модель для тикетов технической поддержки"""

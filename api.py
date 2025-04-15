@@ -2142,7 +2142,7 @@ def internal_error(error):
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Регистрация токена устройства для push-уведомлений с улучшенной обработкой ошибок"""
+    """Регистрация токена устройства для push-уведомлений с приоритетом FCM токенов"""
     try:
         data = request.json
         required_fields = ['token', 'platform']
@@ -2160,9 +2160,19 @@ def register_device(current_user):
         platform = data.get('platform')
         device_name = data.get('device_name', '')
         device_id = data.get('device_id', '')
-        app_version = data.get('app_version', '')
-        is_expo_token = data.get('is_expo_token', token.startswith('ExponentPushToken'))
-        replace_existing = data.get('replace_existing', True)
+        force_expo = data.get('force_expo', False)  # Новый параметр для принудительного использования Expo токена
+
+        # Определяем тип токена
+        is_expo_token = token.startswith('ExponentPushToken')
+
+        # Если это Expo токен и не запрошено принудительное использование, отклоняем регистрацию
+        if is_expo_token and not force_expo:
+            print(f"Rejecting Expo token registration from user {current_user.id}, please use FCM token")
+            return jsonify({
+                'message': 'Пожалуйста, используйте FCM токен вместо Expo токена. Для использования Expo токена, установите параметр force_expo=true',
+                'success': False,
+                'error': 'expo_token_rejected'
+            }), 400
 
         print(f"Registering device token for user {current_user.id}, device: {device_name}")
         print(f"Token type: {'Expo' if is_expo_token else 'FCM'}, Platform: {platform}")
@@ -2174,15 +2184,27 @@ def register_device(current_user):
         ).first()
 
         if existing_token:
-            # Обновляем существующий токен
+            # Безопасное обновление существующего токена - проверяем наличие атрибутов перед установкой
             existing_token.platform = platform
             existing_token.device_name = device_name
-            existing_token.device_id = device_id or existing_token.device_id
-            existing_token.app_version = app_version
-            existing_token.is_expo_token = is_expo_token
-            existing_token.is_active = True
-            existing_token.last_used = datetime.datetime.utcnow()
-            existing_token.updated_at = datetime.datetime.utcnow()
+
+            # Безопасная установка атрибутов, которые могут отсутствовать
+            if hasattr(existing_token, 'device_id') and device_id:
+                existing_token.device_id = device_id
+
+            if hasattr(existing_token, 'is_expo_token'):
+                existing_token.is_expo_token = is_expo_token
+
+            if hasattr(existing_token, 'is_active'):
+                # Для Expo токенов делаем неактивными по умолчанию, если не запрошено иное
+                existing_token.is_active = not is_expo_token or force_expo
+
+            if hasattr(existing_token, 'last_used'):
+                existing_token.last_used = datetime.datetime.utcnow()
+
+            if hasattr(existing_token, 'updated_at'):
+                existing_token.updated_at = datetime.datetime.utcnow()
+
             db.session.commit()
 
             print(f"Updated existing token for user {current_user.id}")
@@ -2192,20 +2214,22 @@ def register_device(current_user):
                 'action': 'updated'
             }), 200
 
-        # Шаг 2: Если указан device_id, обрабатываем старые токены для этого устройства
-        if device_id and replace_existing:
+        # Шаг 2: Деактивируем старые токены устройства (если есть device_id)
+        if device_id and hasattr(DeviceToken, 'is_active') and hasattr(DeviceToken, 'device_id'):
             try:
-                # Находим и отключаем (но не удаляем) токены для того же устройства
+                # Находим все токены для этого устройства
                 same_device_tokens = DeviceToken.query.filter_by(
                     user_id=current_user.id,
-                    device_id=device_id,
-                    is_active=True
+                    device_id=device_id
                 ).all()
 
+                # Деактивируем все существующие токены устройства
                 for old_token in same_device_tokens:
                     print(f"Deactivating old token for user {current_user.id}, device: {device_id}")
-                    old_token.is_active = False
-                    old_token.updated_at = datetime.datetime.utcnow()
+                    if hasattr(old_token, 'is_active'):
+                        old_token.is_active = False
+                    if hasattr(old_token, 'updated_at'):
+                        old_token.updated_at = datetime.datetime.utcnow()
 
                 if same_device_tokens:
                     db.session.commit()
@@ -2216,24 +2240,42 @@ def register_device(current_user):
 
         # Шаг 3: Создаем новую запись токена
         try:
-            new_token = DeviceToken(
-                user_id=current_user.id,
-                token=token,
-                platform=platform,
-                device_name=device_name,
-                device_id=device_id,
-                app_version=app_version,
-                is_expo_token=is_expo_token,
-                is_active=True,
-                last_used=datetime.datetime.utcnow()
-            )
+            # Формируем базовые параметры
+            new_token_args = {
+                'user_id': current_user.id,
+                'token': token,
+                'platform': platform,
+                'device_name': device_name
+            }
+
+            # Добавляем дополнительные параметры, если поля существуют в модели
+            token_model_columns = [c.key for c in DeviceToken.__table__.columns]
+
+            if 'device_id' in token_model_columns and device_id:
+                new_token_args['device_id'] = device_id
+
+            if 'is_expo_token' in token_model_columns:
+                new_token_args['is_expo_token'] = is_expo_token
+
+            if 'is_active' in token_model_columns:
+                # Expo токены по умолчанию неактивны, если не запрошено иное
+                new_token_args['is_active'] = not is_expo_token or force_expo
+
+            if 'last_used' in token_model_columns:
+                new_token_args['last_used'] = datetime.datetime.utcnow()
+
+            # Создаем новую запись
+            new_token = DeviceToken(**new_token_args)
             db.session.add(new_token)
             db.session.commit()
 
-            print(f"Successfully registered new token for user {current_user.id}")
+            print(
+                f"Successfully registered new token for user {current_user.id}, active: {not is_expo_token or force_expo}")
             return jsonify({
                 'message': 'Токен устройства успешно зарегистрирован',
                 'success': True,
+                'token_type': 'expo' if is_expo_token else 'fcm',
+                'is_active': not is_expo_token or force_expo,
                 'action': 'created'
             }), 201
         except Exception as e:

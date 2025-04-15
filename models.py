@@ -147,23 +147,20 @@ class VerificationLog(db.Model):
 # Добавьте этот класс в models.py
 
 class DeviceToken(db.Model):
-    """Токены устройств для push-уведомлений"""
-    __tablename__ = 'device_token'
-    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
-
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    user = db.relationship('User', backref='device_tokens')
-
-    token = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
-    device_name = db.Column(db.String(100, collation='utf8mb4_unicode_ci'))
-    platform = db.Column(db.String(20, collation='utf8mb4_unicode_ci'))  # ios / android
-
+    token = db.Column(db.String(500), nullable=False)
+    platform = db.Column(db.String(20), nullable=False)  # android, ios, web
+    device_name = db.Column(db.String(100))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Новые поля для улучшенной поддержки token
+    is_production = db.Column(db.Boolean, default=False)  # Добавить это поле
+    token_type = db.Column(db.String(20), default='unknown')  # expo, fcm, unknown
+
     def __repr__(self):
-        return f'<DeviceToken {self.token[:10]}... ({self.platform})>'
+        return f'<DeviceToken {self.id} for user {self.user_id}>'
 
 
 class Ticket(db.Model):

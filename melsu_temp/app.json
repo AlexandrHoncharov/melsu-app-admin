@@ -32,11 +32,13 @@
       "bundleIdentifier": "com.melsu.app"
     },
     "android": {
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
       "package": "com.melsu.app",
+      "useNextNotificationsApi": true,
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
@@ -76,7 +78,14 @@
       ],
       "expo-secure-store",
       "expo-image-picker",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#770002",
+          "sounds": ["./assets/sounds/notification.wav"]
+        }
+      ],
       "expo-device",
       "expo-media-library"
     ],

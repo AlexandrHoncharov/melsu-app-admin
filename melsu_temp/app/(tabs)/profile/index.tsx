@@ -270,7 +270,6 @@ export default function ProfileScreen() {
         iconColor: '#43A047',
         route: '/profile/edit'
       },
-      // Notifications item removed as requested
       {
         id: 'tickets',
         title: 'Техническая поддержка',
@@ -280,6 +279,16 @@ export default function ProfileScreen() {
         iconColor: '#673AB7',
         route: '/profile/tickets',
         badge: ticketsLoaded ? unreadTickets : undefined
+      },
+      // Добавляем новый пункт для тестирования уведомлений
+      {
+        id: 'notifications',
+        title: 'Тест уведомлений',
+        subtitle: 'Проверка работы push-уведомлений',
+        icon: 'notifications-outline',
+        iconBgColor: '#FFEBEE',
+        iconColor: '#E53935',
+        route: '/profile/notification-test'
       },
       {
         id: 'support',
@@ -636,7 +645,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#bb0000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: {width: 0, height: 4},
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 6,
@@ -685,7 +694,7 @@ const styles = StyleSheet.create({
     padding: 20,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.05,
     shadowRadius: 15,
     elevation: 5,
@@ -874,7 +883,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
     marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: {width: 0, height: 1},
     shadowOpacity: 0.05,
     shadowRadius: 5,
     elevation: 2,
@@ -927,7 +936,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginVertical: 12,
     shadowColor: '#bb0000',
-    shadowOffset: { width: 0, height: 3 },
+    shadowOffset: {width: 0, height: 3},
     shadowOpacity: 0.2,
     shadowRadius: 6,
     elevation: 4,

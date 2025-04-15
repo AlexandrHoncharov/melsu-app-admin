@@ -149,19 +149,32 @@ class VerificationLog(db.Model):
 class DeviceToken(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    token = db.Column(db.String(500), nullable=False)
-    platform = db.Column(db.String(20), nullable=False)  # android, ios, web
-    device_name = db.Column(db.String(100))
+    token = db.Column(db.String(255), nullable=False)
+    platform = db.Column(db.String(50))  # 'ios', 'android', 'web'
+    device_name = db.Column(db.String(255))
+    device_id = db.Column(db.String(255))  # уникальный ID устройства
+    is_expo_token = db.Column(db.Boolean, default=False)  # тип токена
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Новые поля для улучшенной поддержки token
-    is_production = db.Column(db.Boolean, default=False)  # Добавить это поле
-    token_type = db.Column(db.String(20), default='unknown')  # expo, fcm, unknown
 
-    def __repr__(self):
-        return f'<DeviceToken {self.id} for user {self.user_id}>'
+class PushNotificationLog(db.Model):
+    __tablename__ = 'push_notification_log'
 
+    id = db.Column(db.Integer, primary_key=True)
+    device_token_id = db.Column(db.Integer, db.ForeignKey('device_token.id'))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    notification_type = db.Column(db.String(50))  # тип уведомления (chat, ticket и т.д.)
+    title = db.Column(db.String(255))
+    body = db.Column(db.Text)
+    data = db.Column(db.JSON)  # дополнительные данные
+    status = db.Column(db.String(50))  # sent, delivered, failed, etc.
+    error = db.Column(db.Text)  # ошибка, если есть
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Отношения
+    user = db.relationship('User', backref=db.backref('push_logs', lazy=True))
 
 class Ticket(db.Model):
     """Модель для тикетов технической поддержки"""

@@ -9,23 +9,26 @@ import {
   ActivityIndicator,
   Platform,
   Alert,
-  SafeAreaView
+  SafeAreaView,
+  Linking
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
-import { usePushNotifications } from '../../../hooks/usePushNotifications';
+import { useNotifications } from '../../../hooks/useNotifications';
 
 export default function NotificationTestScreen() {
   const {
-    expoPushToken,
-    tokenRegistered,
-    registrationError,
+    isInitialized,
+    isRegistered,
+    error: registrationError,
     getNotificationStatus,
-    sendTestNotification
-  } = usePushNotifications();
+    sendTestNotification,
+    requestPermissions,
+    scheduleLocalNotification
+  } = useNotifications();
 
   const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -37,12 +40,12 @@ export default function NotificationTestScreen() {
     refreshStatus();
   }, []);
 
-  // Обновление статуса при изменении данных токена
+  // Обновление статуса при изменении данных
   useEffect(() => {
-    if (!loading) {
+    if (!loading && isInitialized) {
       refreshStatus();
     }
-  }, [expoPushToken, tokenRegistered, registrationError]);
+  }, [isRegistered, registrationError, isInitialized]);
 
   // Функция обновления статуса
   const refreshStatus = async () => {
@@ -72,27 +75,34 @@ export default function NotificationTestScreen() {
     }
   };
 
+  // Функция отправки локального уведомления (для тестирования без сервера)
+  const handleSendLocalTest = async () => {
+    try {
+      await scheduleLocalNotification(
+        'Локальное уведомление',
+        'Это тестовое локальное уведомление',
+        { type: 'test', local: true },
+        { seconds: 5 } // будет показано через 5 секунд
+      );
+      Alert.alert('Успешно', 'Локальное уведомление будет показано через 5 секунд');
+    } catch (e) {
+      console.error('Ошибка при отправке локального уведомления:', e);
+      Alert.alert('Ошибка', 'Не удалось отправить локальное уведомление');
+    }
+  };
+
   // Функция проверки разрешений для уведомлений
   const checkPermissions = async () => {
     try {
       setRefreshing(true);
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      const result = await requestPermissions();
 
       Alert.alert(
         'Статус разрешений',
-        `Текущий статус: ${existingStatus}\n\nВы хотите запросить разрешения сейчас?`,
-        [
-          { text: 'Отмена', style: 'cancel' },
-          {
-            text: 'Запросить',
-            onPress: async () => {
-              const { status } = await Notifications.requestPermissionsAsync();
-              Alert.alert('Результат', `Новый статус: ${status}`);
-              refreshStatus();
-            }
-          }
-        ]
+        `Результат запроса: ${result ? 'Разрешено' : 'Отклонено'}`
       );
+
+      refreshStatus();
     } catch (e) {
       console.error('Ошибка при проверке разрешений:', e);
       Alert.alert('Ошибка', 'Не удалось проверить разрешения');
@@ -110,7 +120,12 @@ export default function NotificationTestScreen() {
         // Для Android
         const pkg = Constants.expoConfig?.android?.package || '';
         if (pkg) {
-          await Notifications.AndroidNotificationSettings.openSettings(pkg);
+          try {
+            await Notifications.getPermissionsAsync();
+            Linking.openSettings();
+          } catch (err) {
+            Linking.openSettings();
+          }
         } else {
           Alert.alert('Ошибка', 'Невозможно определить package name для приложения');
         }
@@ -136,8 +151,8 @@ export default function NotificationTestScreen() {
           <Text style={styles.infoItem}>- Устройство не поддерживается</Text>
           <Text style={styles.infoItem}>- Ошибка при регистрации токена</Text>
 
-          {status?.error && (
-            <Text style={styles.errorText}>Ошибка: {status.error}</Text>
+          {registrationError && (
+            <Text style={styles.errorText}>Ошибка: {registrationError}</Text>
           )}
 
           <TouchableOpacity
@@ -157,9 +172,9 @@ export default function NotificationTestScreen() {
           <Text style={styles.infoLabel}>Тип токена:</Text>
           <Text style={[
             styles.infoValue,
-            {color: status.tokenType.includes('Production') ? '#43A047' : '#FF9800'}
+            {color: status.tokenType === 'fcm' ? '#43A047' : '#FF9800'}
           ]}>
-            {status.tokenType}
+            {status.tokenType === 'fcm' ? 'Production (FCM)' : 'Development (Expo)'}
           </Text>
         </View>
 
@@ -167,15 +182,15 @@ export default function NotificationTestScreen() {
           <Text style={styles.infoLabel}>Зарегистрирован на сервере:</Text>
           <View style={styles.statusBadge}>
             <Ionicons
-              name={status.tokenRegistered ? "checkmark-circle" : "close-circle"}
+              name={isRegistered ? "checkmark-circle" : "close-circle"}
               size={16}
-              color={status.tokenRegistered ? "#43A047" : "#E53935"}
+              color={isRegistered ? "#43A047" : "#E53935"}
             />
             <Text style={[
               styles.statusText,
-              {color: status.tokenRegistered ? "#43A047" : "#E53935"}
+              {color: isRegistered ? "#43A047" : "#E53935"}
             ]}>
-              {status.tokenRegistered ? "Да" : "Нет"}
+              {isRegistered ? "Да" : "Нет"}
             </Text>
           </View>
         </View>
@@ -197,6 +212,23 @@ export default function NotificationTestScreen() {
           </View>
         </View>
 
+        <View style={styles.infoSection}>
+          <Text style={styles.infoLabel}>Инициализация:</Text>
+          <View style={styles.statusBadge}>
+            <Ionicons
+              name={isInitialized ? "checkmark-circle" : "close-circle"}
+              size={16}
+              color={isInitialized ? "#43A047" : "#E53935"}
+            />
+            <Text style={[
+              styles.statusText,
+              {color: isInitialized ? "#43A047" : "#E53935"}
+            ]}>
+              {isInitialized ? "Завершена" : "Не завершена"}
+            </Text>
+          </View>
+        </View>
+
         <View style={styles.tokenContainer}>
           <Text style={styles.tokenLabel}>Токен (начало):</Text>
           <Text style={styles.tokenValue}>
@@ -204,8 +236,8 @@ export default function NotificationTestScreen() {
           </Text>
         </View>
 
-        {status.error && (
-          <Text style={styles.errorText}>Ошибка: {status.error}</Text>
+        {registrationError && (
+          <Text style={styles.errorText}>Ошибка: {registrationError}</Text>
         )}
       </View>
     );
@@ -333,6 +365,22 @@ export default function NotificationTestScreen() {
             )}
             <Text style={styles.testButtonText}>
               {sending ? 'Отправка...' : 'Отправить тестовое уведомление'}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Локальное уведомление (для тестирования без сервера) */}
+          <TouchableOpacity
+            style={[
+              styles.testButton,
+              styles.localButton,
+              !status?.enabled && styles.disabledButton
+            ]}
+            onPress={handleSendLocalTest}
+            disabled={!status?.enabled}
+          >
+            <Ionicons name="notifications-outline" size={20} color="#FFF" />
+            <Text style={styles.testButtonText}>
+              Тестовое локальное уведомление
             </Text>
           </TouchableOpacity>
         </View>
@@ -592,6 +640,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 12,
+  },
+  localButton: {
+    backgroundColor: '#2196F3',
+    marginTop: 8,
   },
   disabledButton: {
     backgroundColor: '#ddd',

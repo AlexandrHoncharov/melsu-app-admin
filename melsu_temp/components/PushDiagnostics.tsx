@@ -1,31 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
-import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useNotifications } from '../hooks/useNotifications';
 import * as Device from 'expo-device';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function PushDiagnostics() {
   const {
-    expoPushToken,
+    isRegistered,
+    status,
+    error: registrationError,
     sendTestNotification,
-    tokenRegistered,
-    registrationError,
-    getNotificationStatus
-  } = usePushNotifications();
+    getNotificationStatus,
+    requestPermissions
+  } = useNotifications();
 
-  const [status, setStatus] = useState(null);
+  const [localStatus, setLocalStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [sendingTest, setSendingTest] = useState(false);
 
   useEffect(() => {
     checkStatus();
-  }, [expoPushToken, tokenRegistered]);
+  }, [isRegistered]);
 
   const checkStatus = async () => {
     setLoading(true);
     try {
-      const status = await getNotificationStatus();
-      setStatus(status);
+      const notificationStatus = await getNotificationStatus();
+      setLocalStatus(notificationStatus);
     } catch (error) {
       console.error('Error checking notification status:', error);
     } finally {
@@ -45,10 +46,29 @@ export default function PushDiagnostics() {
     }
   };
 
+  const handleRequestPermissions = async () => {
+    try {
+      const result = await requestPermissions();
+      Alert.alert(
+        'Permission Request',
+        `Result: ${result ? 'Granted' : 'Denied'}`,
+        [{ text: 'OK' }]
+      );
+      await checkStatus();
+    } catch (error) {
+      console.error('Error requesting permissions:', error);
+      Alert.alert('Error', 'Failed to request permissions');
+    }
+  };
+
+  // Use either locally fetched status or the one from hook
+  const displayStatus = localStatus || status;
+  const token = displayStatus?.token;
+
   const copyTokenToClipboard = () => {
-    if (expoPushToken) {
-      // In a real app, you would use Clipboard.setString(expoPushToken)
-      Alert.alert('Token copied to clipboard', expoPushToken);
+    if (token) {
+      // In a real app, you would use Clipboard.setString(token)
+      Alert.alert('Token copied to clipboard', token);
     }
   };
 
@@ -99,38 +119,38 @@ export default function PushDiagnostics() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Статус уведомлений</Text>
 
-            {status && (
+            {displayStatus && (
               <>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Разрешения:</Text>
                   <View style={styles.statusContainer}>
-                    {status.enabled ? (
+                    {displayStatus.enabled ? (
                       <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
                     ) : (
                       <Ionicons name="close-circle" size={18} color="#F44336" />
                     )}
                     <Text style={[
                       styles.statusText,
-                      { color: status.enabled ? '#4CAF50' : '#F44336' }
+                      { color: displayStatus.enabled ? '#4CAF50' : '#F44336' }
                     ]}>
-                      {status.enabled ? 'Предоставлены' : 'Отклонены'}
+                      {displayStatus.enabled ? 'Предоставлены' : 'Отклонены'}
                     </Text>
                   </View>
                 </View>
 
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Expo Token:</Text>
+                  <Text style={styles.infoLabel}>Push Token:</Text>
                   <View style={styles.statusContainer}>
-                    {expoPushToken ? (
+                    {token ? (
                       <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
                     ) : (
                       <Ionicons name="close-circle" size={18} color="#F44336" />
                     )}
                     <Text style={[
                       styles.statusText,
-                      { color: expoPushToken ? '#4CAF50' : '#F44336' }
+                      { color: token ? '#4CAF50' : '#F44336' }
                     ]}>
-                      {expoPushToken ? 'Получен' : 'Отсутствует'}
+                      {token ? 'Получен' : 'Отсутствует'}
                     </Text>
                   </View>
                 </View>
@@ -138,16 +158,16 @@ export default function PushDiagnostics() {
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Регистрация на сервере:</Text>
                   <View style={styles.statusContainer}>
-                    {tokenRegistered ? (
+                    {isRegistered ? (
                       <Ionicons name="checkmark-circle" size={18} color="#4CAF50" />
                     ) : (
                       <Ionicons name="close-circle" size={18} color="#F44336" />
                     )}
                     <Text style={[
                       styles.statusText,
-                      { color: tokenRegistered ? '#4CAF50' : '#F44336' }
+                      { color: isRegistered ? '#4CAF50' : '#F44336' }
                     ]}>
-                      {tokenRegistered ? 'Зарегистрирован' : 'Не зарегистрирован'}
+                      {isRegistered ? 'Зарегистрирован' : 'Не зарегистрирован'}
                     </Text>
                   </View>
                 </View>
@@ -161,26 +181,34 @@ export default function PushDiagnostics() {
               </View>
             )}
 
-            {expoPushToken && (
+            {token && (
               <View style={styles.tokenContainer}>
                 <Text style={styles.tokenLabel}>Токен устройства:</Text>
                 <Text style={styles.tokenValue} numberOfLines={1} ellipsizeMode="middle">
-                  {expoPushToken}
+                  {token}
                 </Text>
                 <TouchableOpacity style={styles.copyButton} onPress={copyTokenToClipboard}>
                   <Ionicons name="copy-outline" size={16} color="#555" />
                 </TouchableOpacity>
               </View>
             )}
+
+            <TouchableOpacity
+              style={styles.permissionsButton}
+              onPress={handleRequestPermissions}
+            >
+              <Ionicons name="shield-checkmark-outline" size={18} color="#fff" />
+              <Text style={styles.permissionsButtonText}>Запросить разрешения</Text>
+            </TouchableOpacity>
           </View>
 
           <TouchableOpacity
             style={[
               styles.testButton,
-              (!expoPushToken || !tokenRegistered) && styles.disabledButton
+              (!token || !isRegistered) && styles.disabledButton
             ]}
             onPress={handleSendTest}
-            disabled={!expoPushToken || !tokenRegistered || sendingTest}
+            disabled={!token || !isRegistered || sendingTest}
           >
             {sendingTest ? (
               <ActivityIndicator size="small" color="#fff" />
@@ -318,6 +346,22 @@ const styles = StyleSheet.create({
   },
   copyButton: {
     padding: 6,
+  },
+  permissionsButton: {
+    flexDirection: 'row',
+    backgroundColor: '#1976D2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    marginTop: 16,
+  },
+  permissionsButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    marginLeft: 8,
+    fontSize: 14,
   },
   testButton: {
     flexDirection: 'row',

@@ -1,32 +1,32 @@
 // components/PushNotificationDebug.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Button, ScrollView, ActivityIndicator, Platform } from 'react-native';
-import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useNotifications } from '../hooks/useNotifications';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 
 export default function PushNotificationDebug() {
   const {
-    expoPushToken,
-    tokenRegistered,
-    registrationError,
+    isRegistered,
+    error: registrationError,
     getNotificationStatus,
-    sendTestNotification
-  } = usePushNotifications();
+    sendTestNotification,
+    status
+  } = useNotifications();
 
-  const [status, setStatus] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [localStatus, setLocalStatus] = useState<any>(null);
 
   useEffect(() => {
     refreshStatus();
-  }, [expoPushToken, tokenRegistered, registrationError]);
+  }, [isRegistered, registrationError]);
 
   const refreshStatus = async () => {
     setLoading(true);
     try {
       const notificationStatus = await getNotificationStatus();
-      setStatus(notificationStatus);
+      setLocalStatus(notificationStatus);
     } catch (e) {
       console.error('Error getting notification status:', e);
     } finally {
@@ -46,6 +46,9 @@ export default function PushNotificationDebug() {
     }
   };
 
+  // Use either locally fetched status or the one from hook
+  const displayStatus = localStatus || status;
+
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>Push Notification Debug</Text>
@@ -64,14 +67,14 @@ export default function PushNotificationDebug() {
           <ActivityIndicator size="small" color="#770002" />
         ) : (
           <>
-            <Text style={styles.info}>Permissions: {status?.enabled ? 'Granted' : 'Not Granted'}</Text>
-            <Text style={styles.info}>Token Type: {status?.tokenType || 'None'}</Text>
-            <Text style={styles.info}>Registered with Server: {status?.tokenRegistered ? 'Yes' : 'No'}</Text>
-            {status?.error && <Text style={styles.error}>Error: {status.error}</Text>}
-            {status?.token ? (
+            <Text style={styles.info}>Permissions: {displayStatus?.enabled ? 'Granted' : 'Not Granted'}</Text>
+            <Text style={styles.info}>Token Type: {displayStatus?.tokenType || 'None'}</Text>
+            <Text style={styles.info}>Registered with Server: {isRegistered ? 'Yes' : 'No'}</Text>
+            {registrationError && <Text style={styles.error}>Error: {registrationError}</Text>}
+            {displayStatus?.token ? (
               <View style={styles.tokenContainer}>
                 <Text style={styles.tokenLabel}>Token (first 20 chars):</Text>
-                <Text style={styles.token}>{status.token.substring(0, 20)}...</Text>
+                <Text style={styles.token}>{displayStatus.token.substring(0, 20)}...</Text>
               </View>
             ) : (
               <Text style={styles.error}>No token available</Text>
@@ -93,7 +96,7 @@ export default function PushNotificationDebug() {
         <Button
           title={sending ? "Sending..." : "Send Test Notification"}
           onPress={handleTestNotification}
-          disabled={sending || !status?.token || !status?.enabled}
+          disabled={sending || !displayStatus?.token || !displayStatus?.enabled}
           color="#2196F3"
         />
       </View>

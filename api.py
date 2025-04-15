@@ -25,7 +25,7 @@ import os
 import uuid
 from flask import request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
-from models import Ticket, TicketMessage, TicketAttachment
+from models import Ticket, TicketMessage, TicketAttachment, PushNotificationLog
 
 # Проверяем доступность Firebase Admin SDK
 try:
@@ -639,56 +639,61 @@ def get_users(current_user):
     return jsonify(result)
 
 
-# Update the unregister_device function in api.py
 @app.route('/api/device/unregister', methods=['POST'])
 @token_required
 def unregister_device(current_user):
     """Отмена регистрации токена устройства при выходе из аккаунта"""
-
     try:
         data = request.json
 
-        # Если токен предоставлен, пытаемся удалить конкретный токен
+        # Если токен предоставлен, пытаемся отключить конкретный токен
         if 'token' in data and data['token'] and data['token'] != 'force_all_tokens_removal':
             device_token = data['token']
 
             # Ищем запись с этим токеном для текущего пользователя
             token_record = DeviceToken.query.filter_by(
                 user_id=current_user.id,
-                token=device_token
+                token=device_token,
+                is_active=True
             ).first()
 
-            # Если токен найден, удаляем его
+            # Если токен найден, отключаем его (но не удаляем)
             if token_record:
-                db.session.delete(token_record)
+                token_record.is_active = False
+                token_record.updated_at = datetime.datetime.utcnow()
                 db.session.commit()
 
                 return jsonify({
-                    'message': 'Токен устройства успешно удален',
+                    'message': 'Токен устройства успешно деактивирован',
                     'success': True,
-                    'deleted_count': 1
+                    'deactivated_count': 1
                 }), 200
 
         # Если токен не предоставлен или запрошено удаление всех токенов,
-        # удаляем ВСЕ токены пользователя
-        # Находим все токены пользователя
-        user_tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
-        token_count = len(user_tokens)
+        # отключаем ВСЕ токены пользователя
+        # Находим все активные токены пользователя
+        active_tokens = DeviceToken.query.filter_by(
+            user_id=current_user.id,
+            is_active=True
+        ).all()
+        token_count = len(active_tokens)
 
-        # Удаляем все найденные токены
-        for token in user_tokens:
-            db.session.delete(token)
+        # Отключаем все найденные токены
+        for token in active_tokens:
+            token.is_active = False
+            token.updated_at = datetime.datetime.utcnow()
 
         db.session.commit()
 
         return jsonify({
-            'message': f'Удалено {token_count} токенов устройств пользователя',
+            'message': f'Деактивировано {token_count} токенов устройств пользователя',
             'success': True,
-            'deleted_count': token_count
+            'deactivated_count': token_count
         }), 200
 
     except Exception as e:
         print(f"Error unregistering device token: {str(e)}")
+        db.session.rollback()
 
         # Даже при ошибке возвращаем успех, чтобы не блокировать процесс выхода
         return jsonify({
@@ -696,11 +701,6 @@ def unregister_device(current_user):
             'error': str(e),
             'success': True
         }), 200
-
-
-# Исправление для api.py - маршрут /api/users/<int:user_id>
-
-# Исправление для api.py - функция get_user
 
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 @token_required
@@ -925,14 +925,18 @@ def send_chat_notification(current_user):
         message_preview = data['message_preview']
         sender_name = data['sender_name']
 
-        # Get recipient's device tokens
-        device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
+        # Get recipient's active device tokens
+        device_tokens = DeviceToken.query.filter_by(
+            user_id=recipient_id,
+            is_active=True
+        ).all()
 
         if not device_tokens:
             return jsonify({
-                'message': 'No device tokens found for recipient',
-                'success': False
-            }), 404
+                'message': 'No active device tokens found for recipient',
+                'success': False,
+                'status': 'no_tokens'
+            }), 200  # Return 200 even though no tokens found, to avoid error handling
 
         # Send notification to all recipient's devices
         notification_title = f'Новое сообщение от {sender_name}'
@@ -942,16 +946,21 @@ def send_chat_notification(current_user):
         success_count = 0
 
         for token_obj in device_tokens:
+            # Подготавливаем данные для уведомления
+            notification_data = {
+                'type': 'chat_message',
+                'chat_id': chat_id,
+                'sender_name': sender_name,
+                'timestamp': datetime.datetime.utcnow().isoformat(),
+                'channel_id': 'chat'  # Используем специальный канал для чатов
+            }
+
+            # Отправляем уведомление, передавая объект токена
             result = send_push_message(
-                token_obj.token,
+                token_obj,  # Объект токена вместо строки
                 notification_title,
                 notification_body,
-                {
-                    'type': 'chat_message',
-                    'chat_id': chat_id,
-                    'sender_name': sender_name,
-                    'timestamp': datetime.datetime.now().isoformat()
-                }
+                notification_data
             )
 
             if result.get("success", False):
@@ -972,6 +981,53 @@ def send_chat_notification(current_user):
     except Exception as e:
         print(f"Error sending chat notification: {str(e)}")
         return jsonify({'message': f'Error: {str(e)}', 'success': False}), 500
+
+
+def cleanup_device_tokens():
+    """
+    Периодическая задача для очистки устаревших токенов устройств
+    Запускается, например, раз в день через Celery или cron
+    """
+    try:
+        # Получаем время 30 дней назад
+        thirty_days_ago = datetime.datetime.utcnow() - datetime.timedelta(days=30)
+
+        # Находим устаревшие деактивированные токены
+        old_tokens = DeviceToken.query.filter(
+            DeviceToken.is_active == False,
+            DeviceToken.updated_at < thirty_days_ago
+        ).all()
+
+        count = len(old_tokens)
+        if count > 0:
+            # Удаляем найденные токены
+            for token in old_tokens:
+                db.session.delete(token)
+
+            db.session.commit()
+            print(f"Removed {count} old device tokens")
+
+        # Также деактивируем токены, которые не использовались 60+ дней
+        sixty_days_ago = datetime.datetime.utcnow() - datetime.timedelta(days=60)
+        inactive_tokens = DeviceToken.query.filter(
+            DeviceToken.is_active == True,
+            DeviceToken.last_used < sixty_days_ago
+        ).all()
+
+        inactive_count = len(inactive_tokens)
+        if inactive_count > 0:
+            for token in inactive_tokens:
+                token.is_active = False
+                token.updated_at = datetime.datetime.utcnow()
+
+            db.session.commit()
+            print(f"Deactivated {inactive_count} unused device tokens")
+
+        return {"success": True, "removed": count, "deactivated": inactive_count}
+    except Exception as e:
+        print(f"Error cleaning up device tokens: {str(e)}")
+        db.session.rollback()
+        return {"success": False, "error": str(e)}
 
 
 # Helper function to check if username exists
@@ -1524,6 +1580,8 @@ def add_ticket_message(current_user, ticket_id):
         db.session.rollback()
         print(f"Error adding message: {str(e)}")
         return jsonify({"message": f"Error: {str(e)}"}), 500
+
+
 
 
 # Загрузка прикрепленного файла
@@ -2084,8 +2142,7 @@ def internal_error(error):
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Регистрация токена устройства для push-уведомлений"""
-
+    """Регистрация токена устройства для push-уведомлений с улучшенной обработкой ошибок"""
     try:
         data = request.json
         required_fields = ['token', 'platform']
@@ -2102,15 +2159,13 @@ def register_device(current_user):
         token = data.get('token')
         platform = data.get('platform')
         device_name = data.get('device_name', '')
+        device_id = data.get('device_id', '')
+        app_version = data.get('app_version', '')
+        is_expo_token = data.get('is_expo_token', token.startswith('ExponentPushToken'))
+        replace_existing = data.get('replace_existing', True)
 
-        # Определяем тип токена для отладки
-        is_expo_token = token.startswith('ExponentPushToken')
-        token_prefix = token[:15] if isinstance(token, str) else 'invalid-token'
-
-        print(f"Регистрация токена устройства для пользователя {current_user.id}, устройство: {device_name}")
-        print(f"Тип токена: {'Expo' if is_expo_token else 'FCM/Другой'}")
-        print(f"Префикс токена: {token_prefix}...")
-        print(f"Платформа: {platform}")
+        print(f"Registering device token for user {current_user.id}, device: {device_name}")
+        print(f"Token type: {'Expo' if is_expo_token else 'FCM'}, Platform: {platform}")
 
         # Шаг 1: Проверяем, существует ли уже такой токен
         existing_token = DeviceToken.query.filter_by(
@@ -2122,64 +2177,60 @@ def register_device(current_user):
             # Обновляем существующий токен
             existing_token.platform = platform
             existing_token.device_name = device_name
+            existing_token.device_id = device_id or existing_token.device_id
+            existing_token.app_version = app_version
+            existing_token.is_expo_token = is_expo_token
+            existing_token.is_active = True
+            existing_token.last_used = datetime.datetime.utcnow()
             existing_token.updated_at = datetime.datetime.utcnow()
             db.session.commit()
 
-            print(f"Обновлен существующий токен для пользователя {current_user.id}")
+            print(f"Updated existing token for user {current_user.id}")
             return jsonify({
                 'message': 'Токен устройства успешно обновлен',
                 'success': True,
                 'action': 'updated'
             }), 200
 
-        # Шаг 2: Если задано имя устройства, удаляем старые токены для этого устройства
-        if device_name:
+        # Шаг 2: Если указан device_id, обрабатываем старые токены для этого устройства
+        if device_id and replace_existing:
             try:
-                # Находим и удаляем токены для того же устройства
+                # Находим и отключаем (но не удаляем) токены для того же устройства
                 same_device_tokens = DeviceToken.query.filter_by(
                     user_id=current_user.id,
-                    device_name=device_name
+                    device_id=device_id,
+                    is_active=True
                 ).all()
 
                 for old_token in same_device_tokens:
-                    print(f"Удаляем старый токен для пользователя {current_user.id}, устройство: {device_name}")
-                    db.session.delete(old_token)
+                    print(f"Deactivating old token for user {current_user.id}, device: {device_id}")
+                    old_token.is_active = False
+                    old_token.updated_at = datetime.datetime.utcnow()
 
                 if same_device_tokens:
                     db.session.commit()
-                    print(f"Удалено {len(same_device_tokens)} старых токенов для устройства {device_name}")
+                    print(f"Deactivated {len(same_device_tokens)} old tokens for device {device_id}")
             except Exception as e:
-                print(f"Ошибка при удалении старых токенов: {str(e)}")
-                # Продолжаем выполнение даже при ошибке
+                print(f"Error handling old tokens: {str(e)}")
                 db.session.rollback()
 
-        # Шаг 3: Ограничиваем количество токенов для пользователя
-        try:
-            tokens_count = DeviceToken.query.filter_by(user_id=current_user.id).count()
-            if tokens_count >= 10:  # Максимум 10 устройств на пользователя
-                # Удаляем самые старые токены
-                oldest_tokens = DeviceToken.query.filter_by(user_id=current_user.id).order_by(
-                    DeviceToken.created_at).limit(tokens_count - 9).all()
-                for old_token in oldest_tokens:
-                    db.session.delete(old_token)
-                print(f"Удалено {len(oldest_tokens)} устаревших токенов для освобождения места")
-                db.session.commit()
-        except Exception as e:
-            print(f"Ошибка при очистке старых токенов: {str(e)}")
-            db.session.rollback()
-
-        # Шаг 4: Создаем новую запись токена
+        # Шаг 3: Создаем новую запись токена
         try:
             new_token = DeviceToken(
                 user_id=current_user.id,
                 token=token,
                 platform=platform,
-                device_name=device_name
+                device_name=device_name,
+                device_id=device_id,
+                app_version=app_version,
+                is_expo_token=is_expo_token,
+                is_active=True,
+                last_used=datetime.datetime.utcnow()
             )
             db.session.add(new_token)
             db.session.commit()
 
-            print(f"Успешно зарегистрирован новый токен для пользователя {current_user.id}")
+            print(f"Successfully registered new token for user {current_user.id}")
             return jsonify({
                 'message': 'Токен устройства успешно зарегистрирован',
                 'success': True,
@@ -2187,29 +2238,15 @@ def register_device(current_user):
             }), 201
         except Exception as e:
             db.session.rollback()
-            print(f"Ошибка создания записи токена: {str(e)}")
-
-            # Даже при ошибке проверяем, был ли токен все же создан
-            check_token = DeviceToken.query.filter_by(
-                user_id=current_user.id,
-                token=token
-            ).first()
-
-            if check_token:
-                return jsonify({
-                    'message': 'Токен уже существует несмотря на ошибку создания',
-                    'success': True,
-                    'action': 'exists'
-                }), 200
-            else:
-                return jsonify({
-                    'message': f'Ошибка при регистрации токена: {str(e)}',
-                    'success': False,
-                    'error': str(e)
-                }), 500
+            print(f"Error creating token record: {str(e)}")
+            return jsonify({
+                'message': f'Ошибка при регистрации токена: {str(e)}',
+                'success': False,
+                'error': str(e)
+            }), 500
 
     except Exception as e:
-        print(f"Непредвиденная ошибка в register_device: {str(e)}")
+        print(f"Unexpected error in register_device: {str(e)}")
         return jsonify({
             'message': f'Произошла непредвиденная ошибка: {str(e)}',
             'success': False,
@@ -2219,229 +2256,285 @@ def register_device(current_user):
 
 def send_push_message(token, title, message, extra=None):
     """
-    Отправляет push-уведомление ТОЛЬКО через Firebase Cloud Messaging,
-    независимо от типа токена (Expo или FCM).
+    Отправляет push-уведомление через FCM или Expo Push Service
+    в зависимости от типа токена и логирует результат.
+
+    Args:
+        token (str): FCM или Expo Push токен или объект DeviceToken
+        title (str): Заголовок уведомления
+        message (str): Текст уведомления
+        extra (dict, optional): Дополнительные данные для уведомления
+
+    Returns:
+        dict: Результат отправки с информацией об успехе/ошибке
     """
+    # Начало времени отправки для отслеживания
+    start_time = datetime.datetime.utcnow()
+    log_entry = None
+    device_token_record = None
+    user_id = None
+    notification_type = extra.get('type', 'unknown') if extra else 'unknown'
+
     try:
-        # Проверяем, что extra не None
-        if extra is None:
-            extra = {}
-
-        print(f"Отправка уведомления на токен: {token[:15]}...")
-        print(f"Заголовок: {title}")
-        print(f"Текст: {message}")
-        print(f"Дополнительные данные: {extra}")
-
-        # Всегда используем Firebase для всех типов токенов
-        try:
-            import firebase_admin
-            from firebase_admin import messaging
-            firebase_available = True
-            print(f"Firebase Admin SDK доступен")
-        except ImportError:
-            firebase_available = False
-            print("Firebase Admin SDK недоступен. Push-уведомления не будут работать.")
-            return {"success": False, "error": "Firebase Admin SDK не установлен"}
-
-        if firebase_available:
-            # Инициализируем Firebase если еще не сделано
-            if not firebase_admin._apps:
-                try:
-                    from firebase_admin import credentials
-                    import os
-
-                    # Путь к сервисному аккаунту
-                    firebase_cred_path = os.path.join(os.path.dirname(__file__), 'serviceAccountKey.json')
-
-                    if os.path.exists(firebase_cred_path):
-                        cred = credentials.Certificate(firebase_cred_path)
-                        firebase_admin.initialize_app(cred)
-                        print("Firebase Admin SDK инициализирован успешно с сервисным аккаунтом")
-                    else:
-                        # Резервный путь
-                        cred = credentials.Certificate('firebase.json')
-                        firebase_admin.initialize_app(cred)
-                        print("Firebase Admin SDK инициализирован успешно с firebase.json")
-                except Exception as e:
-                    print(f"Ошибка инициализации Firebase Admin SDK: {e}")
-                    return {"success": False, "error": f"Ошибка инициализации Firebase: {e}"}
-
-            # Преобразуем все значения в data в строки (требование FCM)
-            data_payload = {}
-            for key, value in extra.items():
-                data_payload[str(key)] = str(value) if value is not None else ""
-
-            # ВАЖНО: Для ExponentPushToken нужно использовать токен целиком
-            # FCM обработает его соответствующим образом
-
-            # Создаем базовое уведомление
-            notification = messaging.Notification(
-                title=title,
-                body=message
-            )
-
-            # Создаем конфигурацию для Android с максимальным приоритетом
-            android_config = messaging.AndroidConfig(
-                priority="high",  # Высокий приоритет
-                notification=messaging.AndroidNotification(
-                    title=title,
-                    body=message,
-                    sound="default",
-                    priority="high",
-                    channel_id="default",  # ID канала уведомлений
-                    default_sound=True,
-                    default_vibrate_timings=True,
-                    default_light_settings=True,
-                    icon="ic_notification"  # Стандартная иконка
-                ),
-                data=data_payload  # Добавляем данные для Android
-            )
-
-            # Создаем конфигурацию для iOS
-            apns_config = messaging.APNSConfig(
-                headers={"apns-priority": "10"},  # Высокий приоритет
-                payload=messaging.APNSPayload(
-                    aps=messaging.Aps(
-                        alert=messaging.ApsAlert(
-                            title=title,
-                            body=message
-                        ),
-                        sound="default",
-                        badge=1,
-                        content_available=True
-                    )
-                )
-            )
-
-            # Формируем полное сообщение с конфигурациями для всех платформ
-            fcm_message = messaging.Message(
-                notification=notification,
-                data=data_payload,
-                token=token,
-                android=android_config,
-                apns=apns_config
-            )
-
-            # Отправляем сообщение с обработкой ошибок
-            try:
-                response = messaging.send(fcm_message)
-                print(f"Успешно отправлено FCM уведомление: {response}")
-                return {"success": True, "receipt": response}
-            except Exception as fcm_error:
-                print(f"Ошибка отправки FCM сообщения: {fcm_error}")
-
-                # Если получили ошибку "Invalid registration token",
-                # это может быть из-за ExponentPushToken
-                if "InvalidRegistration" in str(fcm_error) or "registration" in str(fcm_error).lower():
-                    print("Ошибка с токеном. Токен не может быть использован Firebase напрямую.")
-
-                    # Здесь мы можем попробовать преобразовать Expo токен в FCM,
-                    # но это требует дополнительной настройки.
-                    # Вместо этого сразу пробуем упрощенный вариант отправки
-
-                    try:
-                        print("Пробуем отправить упрощенное FCM сообщение...")
-                        # Минимально возможное сообщение FCM
-                        simple_message = messaging.Message(
-                            notification=messaging.Notification(
-                                title=title,
-                                body=message
-                            ),
-                            token=token
-                        )
-                        simple_response = messaging.send(simple_message)
-                        print(f"Успешно отправлено упрощенное FCM уведомление: {simple_response}")
-                        return {"success": True, "receipt": simple_response, "type": "simplified"}
-                    except Exception as simple_error:
-                        print(f"Ошибка отправки упрощенного FCM сообщения: {simple_error}")
-
-                        # Если все попытки с Firebase не удались, и у нас ExponentPushToken,
-                        # сообщаем об этом в логах, но продолжаем работу
-                        if token.startswith('ExponentPushToken'):
-                            print("ExponentPushToken не может быть использован напрямую с Firebase.")
-                            return {
-                                "success": False,
-                                "error": "ExponentPushToken не поддерживается Firebase. Необходим FCM токен.",
-                                "solution": "Создайте новую сборку приложения с правильной настройкой FCM."
-                            }
-
-                # Для других ошибок возвращаем стандартное сообщение об ошибке
-                return {"success": False, "error": str(fcm_error)}
-        else:
-            error_msg = "Firebase Admin SDK недоступен"
-            print(error_msg)
+        # Проверяем, что Firebase SDK доступен
+        if not FIREBASE_AVAILABLE:
+            error_msg = "Firebase Admin SDK not available"
+            print(f"Error: {error_msg}")
             return {"success": False, "error": error_msg}
 
+        # Проверяем, передали ли нам объект DeviceToken или строку
+        if isinstance(token, DeviceToken):
+            device_token_record = token
+            token_str = token.token
+            is_expo_token = token.is_expo_token
+            user_id = token.user_id
+        else:
+            # Это строка, пробуем найти в базе
+            token_str = token
+            is_expo_token = token.startswith('ExponentPushToken')
+
+            # Пытаемся найти запись в базе
+            device_token_record = DeviceToken.query.filter_by(token=token_str).first()
+            if device_token_record:
+                user_id = device_token_record.user_id
+
+        # Определяем канал для Android
+        android_channel_id = extra.get('channel_id', 'default')
+        if notification_type == 'chat_message':
+            android_channel_id = 'chat'
+        elif notification_type == 'ticket_message':
+            android_channel_id = 'tickets'
+
+        # Создаем запись в логе
+        log_entry = PushNotificationLog(
+            device_token_id=device_token_record.id if device_token_record else None,
+            user_id=user_id,
+            notification_type=notification_type,
+            title=title,
+            body=message,
+            data=extra,
+            status='pending',
+            sent_at=start_time
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+
+        print(f"Sending notification to {token_str[:10]}... (Type: {'Expo' if is_expo_token else 'FCM'})")
+
+        # В зависимости от типа токена используем разные методы отправки
+        if is_expo_token:
+            # Используем Expo Push Service для токенов Expo
+            try:
+                import requests
+                import json
+
+                expo_push_url = "https://exp.host/--/api/v2/push/send"
+
+                # Подготовка данных для отправки
+                push_message = {
+                    "to": token_str,
+                    "title": title,
+                    "body": message,
+                    "data": extra or {},
+                    "sound": "default",
+                    "priority": "high",
+                    "channelId": android_channel_id
+                }
+
+                # Выполнение запроса
+                headers = {
+                    "Accept": "application/json",
+                    "Accept-encoding": "gzip, deflate",
+                    "Content-Type": "application/json",
+                }
+
+                response = requests.post(
+                    expo_push_url,
+                    data=json.dumps(push_message),
+                    headers=headers
+                )
+
+                # Проверка ответа
+                if response.status_code != 200:
+                    error_msg = f"Expo push failed with status {response.status_code}: {response.text}"
+                    print(error_msg)
+
+                    # Обновляем запись в логе
+                    if log_entry:
+                        log_entry.status = 'failed'
+                        log_entry.error = error_msg
+                        log_entry.updated_at = datetime.datetime.utcnow()
+                        db.session.commit()
+
+                    return {"success": False, "error": error_msg}
+
+                print(f"Successfully sent Expo push notification")
+
+                # Обновляем запись в логе
+                if log_entry:
+                    log_entry.status = 'sent'
+                    log_entry.updated_at = datetime.datetime.utcnow()
+                    db.session.commit()
+
+                # Обновляем запись токена
+                if device_token_record:
+                    device_token_record.last_used = datetime.datetime.utcnow()
+                    db.session.commit()
+
+                return {"success": True, "receipt": response.json()}
+            except Exception as expo_error:
+                error_msg = f"Expo push error: {str(expo_error)}"
+                print(error_msg)
+
+                # Обновляем запись в логе
+                if log_entry:
+                    log_entry.status = 'failed'
+                    log_entry.error = error_msg
+                    log_entry.updated_at = datetime.datetime.utcnow()
+                    db.session.commit()
+
+                return {"success": False, "error": error_msg}
+        else:
+            # Используем Firebase Cloud Messaging для FCM токенов
+            try:
+                # Преобразуем все значения в data в строки (требование FCM)
+                data_payload = {}
+                for key, value in (extra or {}).items():
+                    data_payload[str(key)] = str(value) if value is not None else ""
+
+                # Создаем сообщение
+                notification = messaging.Notification(
+                    title=title,
+                    body=message
+                )
+
+                android_config = messaging.AndroidConfig(
+                    priority="high",
+                    notification=messaging.AndroidNotification(
+                        sound="default",
+                        priority="high",
+                        channel_id=android_channel_id
+                    )
+                )
+
+                fcm_message = messaging.Message(
+                    notification=notification,
+                    data=data_payload,
+                    token=token_str,
+                    android=android_config
+                )
+
+                # Отправляем сообщение
+                response = messaging.send(fcm_message)
+                print(f"Successfully sent FCM notification: {response}")
+
+                # Обновляем запись в логе
+                if log_entry:
+                    log_entry.status = 'sent'
+                    log_entry.updated_at = datetime.datetime.utcnow()
+                    db.session.commit()
+
+                # Обновляем запись токена
+                if device_token_record:
+                    device_token_record.last_used = datetime.datetime.utcnow()
+                    db.session.commit()
+
+                return {"success": True, "receipt": response}
+            except Exception as fcm_error:
+                error_msg = f"FCM message failed: {str(fcm_error)}"
+                print(error_msg)
+
+                # Обновляем запись в логе
+                if log_entry:
+                    log_entry.status = 'failed'
+                    log_entry.error = error_msg
+                    log_entry.updated_at = datetime.datetime.utcnow()
+                    db.session.commit()
+
+                # Если ошибка связана с невалидным токеном, отмечаем его как неактивный
+                if isinstance(fcm_error, messaging.UnregisteredError) and device_token_record:
+                    print(f"Token {token_str[:10]}... is no longer valid. Deactivating.")
+                    device_token_record.is_active = False
+                    device_token_record.updated_at = datetime.datetime.utcnow()
+                    db.session.commit()
+
+                return {"success": False, "error": error_msg}
     except Exception as exc:
-        error_msg = f"Ошибка отправки push-уведомления: {exc}"
+        error_msg = f"Push message failed: {str(exc)}"
         print(error_msg)
+
+        # Обновляем запись в логе
+        if log_entry:
+            log_entry.status = 'failed'
+            log_entry.error = error_msg
+            log_entry.updated_at = datetime.datetime.utcnow()
+            db.session.commit()
+
         return {"success": False, "error": error_msg}
 
 
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
-    """Тестовая отправка push-уведомления с использованием Firebase Cloud Messaging"""
+    """Тестовая отправка push-уведомления с подробным выводом результатов"""
+    try:
+        # Получаем все активные токены пользователя
+        tokens = DeviceToken.query.filter_by(
+            user_id=current_user.id,
+            is_active=True
+        ).all()
 
-    # Получаем все токены пользователя
-    tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
+        if not tokens:
+            return jsonify({
+                'message': 'Нет активных зарегистрированных устройств',
+                'success': False
+            }), 404
 
-    if not tokens:
-        return jsonify({
-            'message': 'Нет зарегистрированных устройств',
-            'success': False
-        }), 404
+        # Отправляем тестовое уведомление на каждое устройство
+        results = []
+        success_count = 0
 
-    # Фильтруем, оставляя только FCM токены (не Expo)
-    fcm_tokens = [t for t in tokens if not t.token.startswith('ExponentPushToken')]
-
-    if not fcm_tokens and tokens:
-        # Если есть только Expo токены, сообщаем об этом
-        return jsonify({
-            'message': 'Имеются только Expo токены, которые не поддерживаются. Пожалуйста, переустановите приложение для получения FCM токена.',
-            'success': False,
-            'tokens_found': len(tokens),
-            'fcm_tokens': 0,
-            'need_reinstall': True
-        }), 400
-
-    # Отправляем тестовое уведомление на каждое устройство с FCM токеном
-    results = []
-    success_count = 0
-
-    for token_obj in fcm_tokens:
-        result = send_push_message(
-            token_obj.token,
-            'Тестовое уведомление',
-            'Это тестовое push-уведомление от приложения Университет',
-            {
+        for token_obj in tokens:
+            # Добавляем тип уведомления и информацию о канале
+            extra_data = {
                 'type': 'test',
-                'timestamp': datetime.datetime.now().isoformat()
+                'channel_id': 'default',
+                'test_time': datetime.datetime.utcnow().isoformat()
             }
-        )
 
-        if result.get("success", False):
-            success_count += 1
+            result = send_push_message(
+                token_obj,  # Передаем объект токена, а не строку
+                'Тестовое уведомление',
+                'Это тестовое push-уведомление от приложения Университет',
+                extra_data
+            )
 
-        # Сохраняем результат для каждого устройства
-        results.append({
-            "device_name": token_obj.device_name,
-            "platform": token_obj.platform,
-            "token_preview": token_obj.token[:10] + "...",
-            "success": result.get("success", False),
-            "details": result.get("receipt") if result.get("success", False) else result.get("error")
-        })
+            if result.get("success", False):
+                success_count += 1
 
-    # Если есть необработанные Expo токены, упоминаем их в ответе
-    expo_tokens_count = len(tokens) - len(fcm_tokens)
+            # Сохраняем результат для каждого устройства
+            results.append({
+                "device_name": token_obj.device_name,
+                "platform": token_obj.platform,
+                "token_preview": token_obj.token[:10] + "...",
+                "token_type": "Expo" if token_obj.is_expo_token else "FCM",
+                "success": result.get("success", False),
+                "details": result.get("receipt") if result.get("success", False) else result.get("error")
+            })
 
-    return jsonify({
-        'message': f'Уведомления отправлены на {success_count} из {len(fcm_tokens)} устройств с FCM токенами.',
-        'success': success_count > 0,
-        'fcm_tokens': len(fcm_tokens),
-        'expo_tokens_skipped': expo_tokens_count,
-        'results': results
-    }), 200
+        return jsonify({
+            'message': f'Уведомления отправлены на {success_count} из {len(tokens)} устройств',
+            'success': success_count > 0,
+            'results': results
+        }), 200
+
+    except Exception as e:
+        print(f"Error in test notification: {str(e)}")
+        return jsonify({
+            'message': f'Ошибка при отправке тестового уведомления: {str(e)}',
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 if __name__ == '__main__':

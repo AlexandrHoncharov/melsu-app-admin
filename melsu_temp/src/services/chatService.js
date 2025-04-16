@@ -740,6 +740,75 @@ class ChatService {
         }
     }
 
+    /**
+ * Удаление чата для текущего пользователя
+ * @param {string} chatId ID чата для удаления
+ * @returns {Promise<boolean>} Результат операции
+ */
+async deleteChat(chatId) {
+  try {
+    // Проверяем наличие пользователя и корректной инициализации
+    if (!this.initialized || !this.currentUser) {
+      const initResult = await this.initialize();
+      if (!initResult) {
+        throw new Error('Не удалось инициализировать сервис чатов');
+      }
+    }
+
+    if (!chatId) {
+      throw new Error('ID чата не указан');
+    }
+
+    // ВСЕГДА используем строковый ID
+    const myUserId = this.getCurrentUserId();
+
+    console.log(`Удаление чата ${chatId} для пользователя ${myUserId}`);
+
+    // Проверяем, существует ли чат
+    const chatRef = ref(database, `chats/${chatId}`);
+    const chatSnapshot = await get(chatRef);
+
+    if (!chatSnapshot.exists()) {
+      throw new Error(`Чат с ID ${chatId} не найден`);
+    }
+
+    const chatData = chatSnapshot.val();
+
+    // Проверяем, является ли пользователь участником чата
+    if (!chatData.participants || !chatData.participants[myUserId]) {
+      throw new Error('У вас нет доступа к этому чату');
+    }
+
+    // Удаляем чат из списка чатов пользователя (установка null удаляет запись)
+    await set(ref(database, `userChats/${myUserId}/${chatId}`), null);
+
+    // Обновляем список участников чата, удаляя текущего пользователя
+    const participantUpdates = {};
+    participantUpdates[myUserId] = null; // null означает удаление ключа
+
+    await update(ref(database, `chats/${chatId}/participants`), participantUpdates);
+
+    // Добавляем системное сообщение о выходе для групповых чатов
+    if (chatData.type === 'group') {
+      const messageRef = push(ref(database, `messages/${chatId}`));
+      const userName = this.currentUser.fullName || this.currentUser.username || 'Пользователь';
+
+      await set(messageRef, {
+        id: messageRef.key,
+        text: `${userName} покинул(а) чат`,
+        isSystem: true,
+        timestamp: serverTimestamp()
+      });
+    }
+
+    console.log(`Чат ${chatId} успешно удален из списка пользователя ${myUserId}`);
+    return true;
+  } catch (error) {
+    console.error(`Ошибка при удалении чата ${chatId}:`, error);
+    throw error;
+  }
+}
+
     // Отправка сообщения в чат
     async sendMessage(chatId, text) {
         // Инициализация, если не инициализированы

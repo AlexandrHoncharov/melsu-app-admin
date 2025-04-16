@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   SafeAreaView,
   ScrollView,
   Animated,
@@ -27,39 +26,50 @@ export default function EventsScreen() {
 
   // Запускаем анимации при загрузке компонента
   useEffect(() => {
-    // Анимация для иконки мяча
-    Animated.sequence([
-      Animated.timing(iconOpacity, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.timing(bounceValue, {
-        toValue: 1,
-        duration: 800,
-        useNativeDriver: true,
-      })
-    ]).start();
+    // Анимация для иконки мяча - только появление
+    Animated.timing(iconOpacity, {
+      toValue: 1,
+      duration: 600,
+      useNativeDriver: true,
+    }).start();
 
-    // Анимация для движения мяча
+    // Бесшовная циклическая анимация для bounceValue (вращение и масштабирование)
     Animated.loop(
       Animated.sequence([
-        Animated.timing(ballPosition, {
-          toValue: 30,
-          duration: 1500,
-          easing: Easing.inOut(Easing.quad),
+        Animated.timing(bounceValue, {
+          toValue: 1,
+          duration: 1200,
+          easing: Easing.ease,
           useNativeDriver: true,
         }),
-        Animated.timing(ballPosition, {
-          toValue: -30,
-          duration: 1500,
-          easing: Easing.inOut(Easing.quad),
+        Animated.timing(bounceValue, {
+          toValue: 0,
+          duration: 1200,
+          easing: Easing.ease,
           useNativeDriver: true,
         })
       ])
     ).start();
 
-    // Анимация для текста
+    // Бесшовная циклическая анимация для движения мяча
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(ballPosition, {
+          toValue: 30,
+          duration: 1500,
+          easing: Easing.ease, // Более плавный переход
+          useNativeDriver: true,
+        }),
+        Animated.timing(ballPosition, {
+          toValue: -30,
+          duration: 1500,
+          easing: Easing.ease, // Более плавный переход
+          useNativeDriver: true,
+        })
+      ])
+    ).start();
+
+    // Анимация для текста - только появление
     Animated.timing(textOpacity, {
       toValue: 1,
       duration: 1000,
@@ -127,39 +137,13 @@ export default function EventsScreen() {
           <Animated.View style={[styles.textContainer, { opacity: textOpacity }]}>
             <Text style={styles.title}>Мероприятия</Text>
             <Text style={styles.message}>
-              Раздел мероприятий находится в разработке.
-              Здесь будет доступна информация о предстоящих и прошедших
-              мероприятиях университета, возможность регистрации
-              и получения уведомлений.
+              Разработчики во всю трудятся над созданием этого раздела!
+              Совсем скоро здесь появится информация о самых интересных
+              спортивных и культурных мероприятиях университета.
+              Следите за обновлениями и будьте в курсе всех событий!
             </Text>
           </Animated.View>
         </View>
-
-        <Animated.View style={[styles.statsContainer, { opacity: textOpacity }]}>
-          <View style={styles.statItem}>
-            <View style={[styles.statCircle, { backgroundColor: '#E1F5FE' }]}>
-              <Ionicons name="calendar" size={24} color="#0277BD" />
-            </View>
-            <Text style={styles.statTitle}>Скоро</Text>
-            <Text style={styles.statValue}>0</Text>
-          </View>
-
-          <View style={styles.statItem}>
-            <View style={[styles.statCircle, { backgroundColor: '#FFFDE7' }]}>
-              <Ionicons name="star" size={24} color="#FFB300" />
-            </View>
-            <Text style={styles.statTitle}>Рекомендуемые</Text>
-            <Text style={styles.statValue}>0</Text>
-          </View>
-
-          <View style={styles.statItem}>
-            <View style={[styles.statCircle, { backgroundColor: '#E8F5E9' }]}>
-              <Ionicons name="checkmark-circle" size={24} color="#43A047" />
-            </View>
-            <Text style={styles.statTitle}>Прошедшие</Text>
-            <Text style={styles.statValue}>0</Text>
-          </View>
-        </Animated.View>
 
         <Animated.View style={{ opacity: textOpacity, width: '100%' }}>
           {user?.role === 'student' && (
@@ -171,11 +155,6 @@ export default function EventsScreen() {
               </Text>
             </View>
           )}
-
-          <TouchableOpacity style={styles.notifyButton}>
-            <Ionicons name="notifications-outline" size={20} color="#FFF" style={styles.buttonIcon} />
-            <Text style={styles.buttonText}>Уведомить о запуске</Text>
-          </TouchableOpacity>
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
@@ -238,39 +217,6 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     maxWidth: '90%',
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginBottom: 40,
-  },
-  statItem: {
-    alignItems: 'center',
-    width: width / 3.5,
-  },
-  statCircle: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  statTitle: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 5,
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
   infoBox: {
     backgroundColor: '#E1F5FE',
     borderRadius: 12,
@@ -290,27 +236,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginLeft: 12,
     flex: 1,
-  },
-  notifyButton: {
-    backgroundColor: '#770002',
-    borderRadius: 24,
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 3,
-    shadowColor: '#770002',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
-  },
-  buttonIcon: {
-    marginRight: 8,
-  },
-  buttonText: {
-    color: '#FFF',
-    fontWeight: 'bold',
-    fontSize: 16,
   }
 });

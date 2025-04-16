@@ -64,7 +64,7 @@ export default function TabLayout() {
 
       {/* News tab */}
       <Tabs.Screen
-        name="news_list"
+        name="news-list"
         options={{
           title: 'Новости',
           tabBarIcon: ({ color, size, focused }) => (

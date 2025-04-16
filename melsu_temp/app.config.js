@@ -14,7 +14,8 @@ module.exports = {
      "extra": {
       "eas": {
         "projectId": "d9591f01-e110-4918-8b09-c422bd23baaf"
-      }
+      },
+      "oneSignalAppId": "6ef82a9b-b49d-4800-8080-4f493b62768a"
     },
 
     "splash": {
@@ -45,7 +46,13 @@ module.exports = {
     },
     "plugins": [
       "expo-router",
-        "expo-notifications"
+      [
+        "onesignal-expo-plugin",
+        {
+          "mode": "development",
+          "devTeam": "91TTNK3DMG"
+        }
+      ]
     ],
 
     "experiments": {

@@ -3,6 +3,7 @@ import { Tabs, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { useUnreadMessages } from '../../hooks/useUnreadMessages';
+import { AppNotificationProvider } from '../../components/providers/AppNotificationProvider';
 import { StyleSheet, View, Text } from 'react-native';
 
 export default function TabLayout() {

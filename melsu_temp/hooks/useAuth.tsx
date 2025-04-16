@@ -247,43 +247,89 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+// This is just the relevant login method from hooks/useAuth.tsx that needs updating
+// The rest of the file would remain the same
+
 const login = async (username: string, password: string) => {
   setIsLoading(true);
   try {
     console.log('Starting login process...');
 
-    // Перед входом в новый аккаунт сбрасываем сервис чатов
-    console.log('Resetting chat service before login');
+    // Before logging into a new account, reset notification services
+    console.log('Resetting notification services before login');
 
-    // Полный сброс chatService
-    if (typeof chatService.reset === 'function') {
-      chatService.reset();
-    } else {
-      chatService.cleanup(); // Используем cleanup, если reset не доступен
-      chatService.initialized = false;
-      chatService.currentUser = null;
+    // Reset OneSignal service safely with error handling
+    try {
+      // Import OneSignal service
+      const oneSignalService = (await import('../src/services/OneSignalService')).default;
+
+      if (oneSignalService) {
+        await oneSignalService.reset().catch(e => {
+          console.warn('Non-critical error resetting OneSignal:', e);
+          // Continue login process even if reset fails
+        });
+      }
+    } catch (oneSignalError) {
+      console.warn('Error importing or resetting OneSignal (continuing login):', oneSignalError);
+      // Continue with login even if OneSignal reset fails
     }
 
+    // Reset chat service
+    try {
+      if (typeof chatService.reset === 'function') {
+        chatService.reset().catch(e => {
+          console.warn('Non-critical error resetting chat service:', e);
+          // Continue login process even if reset fails
+        });
+      } else {
+        chatService.cleanup();
+        chatService.initialized = false;
+        chatService.currentUser = null;
+      }
+    } catch (chatError) {
+      console.warn('Error resetting chat service (continuing login):', chatError);
+      // Continue with login even if chat service reset fails
+    }
+
+    // Proceed with login API call
     const { token, user } = await authApi.login({ username, password });
     console.log('Login successful, storing tokens...');
 
-    // Сохраняем токен
+    // Save token
     await SecureStore.setItemAsync('userToken', token);
 
-    // Сохраняем данные пользователя
+    // Save user data
     await AsyncStorage.setItem('userData', JSON.stringify(user));
     setUser(user);
     setIsAuthenticated(true);
 
-    // Ожидаем малую паузу для инициализации состояния
+    // Initialize OneSignal with user ID - do this safely
+    try {
+      const oneSignalService = (await import('../src/services/OneSignalService')).default;
+
+      if (oneSignalService) {
+        await oneSignalService.initialize().catch(e => {
+          console.warn('Non-critical error initializing OneSignal:', e);
+        });
+
+        await oneSignalService.registerForPushNotifications(user.id.toString()).catch(e => {
+          console.warn('Non-critical error registering for push notifications:', e);
+        });
+      }
+    } catch (oneSignalError) {
+      console.warn('Error with OneSignal operations (continuing):', oneSignalError);
+      // Continue with login even if OneSignal operations fail
+    }
+
+    // Wait for small pause for state initialization
     await new Promise(resolve => setTimeout(resolve, 300));
 
     console.log('Login complete, redirecting to main app');
 
-    // Перенаправление в зависимости от роли и статуса верификации
+    // Redirect based on role and verification status
     router.replace('/(tabs)');
 
-    // Явно возвращаем данные для возможности использования в компонентах
+    // Explicitly return data for potential use in components
     return { user, token };
   } catch (error) {
     console.error('Error during login:', error);
@@ -292,6 +338,8 @@ const login = async (username: string, password: string) => {
     setIsLoading(false);
   }
 };
+
+// Similar improvements would be needed for the logout function
 
   // Update the register function
 const register = async (userData: RegisterData) => {
@@ -332,6 +380,9 @@ const register = async (userData: RegisterData) => {
   }
 };
 
+// This is just the relevant logout method from hooks/useAuth.tsx that needs updating
+// The rest of the file would remain the same
+
 const logout = async () => {
   setIsLoading(true);
   try {
@@ -339,17 +390,49 @@ const logout = async () => {
 
     // CRITICAL: First unregister device tokens before any other logout actions
     console.log('Unregistering device tokens before logout...');
+
+    // Try to reset OneSignal service safely
+    try {
+      // Import OneSignal service
+      const oneSignalService = (await import('../src/services/OneSignalService')).default;
+
+      if (oneSignalService) {
+        try {
+          // Reset OneSignal - this will unregister device tokens and clean up
+          await oneSignalService.reset();
+          console.log('OneSignal reset completed');
+        } catch (resetError) {
+          console.warn('Non-critical error during OneSignal reset:', resetError);
+          // Continue with logout even if this fails
+        }
+      } else {
+        console.warn('OneSignal service not available - continuing logout');
+      }
+    } catch (oneSignalImportError) {
+      console.warn('Error importing OneSignal service:', oneSignalImportError);
+      // Continue with logout even if this fails
+    }
+
+    // Clean up chat service
     if (chatService) {
       try {
         // First, force unregistration of ALL device tokens
-        const tokenUnregistered = await chatService.unregisterDeviceToken();
-        console.log(`Device token unregistration ${tokenUnregistered ? 'successful' : 'failed'}`);
+        try {
+          const tokenUnregistered = await chatService.unregisterDeviceToken();
+          console.log(`Device token unregistration ${tokenUnregistered ? 'successful' : 'failed'}`);
+        } catch (tokenError) {
+          console.warn('Non-critical error unregistering device token:', tokenError);
+        }
 
         // Then, reset the entire chat service state
-        await chatService.reset();
-        console.log('Chat service reset completed');
+        try {
+          await chatService.reset();
+          console.log('Chat service reset completed');
+        } catch (resetError) {
+          console.warn('Non-critical error resetting chat service:', resetError);
+        }
       } catch (chatError) {
-        console.error('Error during chat service cleanup:', chatError);
+        console.warn('Error during chat service cleanup (continuing):', chatError);
         // Continue with logout even if this fails
       }
     }
@@ -369,12 +452,20 @@ const logout = async () => {
       await AsyncStorage.removeItem('userData');
       console.log('Auth tokens removed');
 
-      // Full AsyncStorage cleanup
-      const keys = await AsyncStorage.getAllKeys();
-      await AsyncStorage.multiRemove(keys);
-      console.log('All AsyncStorage data cleared');
+      // Targeted AsyncStorage cleanup instead of clearing everything
+      const keysToRemove = [
+        'userData',
+        'devicePushToken',
+        'onesignal_player_id',
+        'onesignal_subscription_status',
+        'onesignal_device_id',
+        'onesignal_registration_status'
+      ];
+
+      await AsyncStorage.multiRemove(keysToRemove);
+      console.log('Auth-related AsyncStorage data cleared');
     } catch (storageError) {
-      console.error('Error clearing storage:', storageError);
+      console.warn('Error clearing storage (continuing):', storageError);
       // Continue with logout even if storage cleanup fails
     }
 
@@ -387,17 +478,11 @@ const logout = async () => {
   } catch (error) {
     console.error('Unexpected error during logout:', error);
 
-    // Emergency cleanup
+    // Emergency cleanup - do this no matter what
     try {
-      // One more attempt to reset chat service
-      if (chatService) await chatService.reset();
-
       // Force token removal
       await SecureStore.deleteItemAsync('userToken');
-
-      // Emergency AsyncStorage cleanup
-      const keys = await AsyncStorage.getAllKeys();
-      await AsyncStorage.multiRemove(keys);
+      await AsyncStorage.removeItem('userData');
     } catch (finalError) {
       console.error('Critical error during emergency cleanup:', finalError);
     }

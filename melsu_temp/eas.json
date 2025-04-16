@@ -17,20 +17,28 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
+        "gradleCommand": ":app:assembleRelease",
+        "image": "latest"
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://app.melsu.ru/api"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
+      "autoIncrement": true,
       "android": {
         "buildType": "apk",
-        "withoutCredentials": false
+        "withoutCredentials": false,
+        "image": "latest"
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://app.melsu.ru/api"
-      }
+      },
+      "channel": "production"
     }
+  },
+  "submit": {
+    "production": {}
   }
 }

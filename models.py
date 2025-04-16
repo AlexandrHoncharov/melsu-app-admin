@@ -144,27 +144,52 @@ class VerificationLog(db.Model):
         return f'<VerificationLog {self.student_id} {self.action} {self.created_at}>'
 
 
-# Добавьте этот класс в models.py
-
 class DeviceToken(db.Model):
-    """Токены устройств для push-уведомлений"""
     __tablename__ = 'device_token'
-    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    user = db.relationship('User', backref='device_tokens')
+    token = db.Column(db.String(255), nullable=False)
+    platform = db.Column(db.String(20), nullable=False)  # 'ios', 'android', 'web'
+    device_name = db.Column(db.String(100))
+    device_id = db.Column(db.String(100))
+    app_version = db.Column(db.String(20))
+    is_expo_token = db.Column(db.Boolean, default=True)
+    is_onesignal = db.Column(db.Boolean, default=True)  # New field for OneSignal
+    is_active = db.Column(db.Boolean, default=True)
+    last_used = db.Column(db.DateTime, default=db.func.now())
+    created_at = db.Column(db.DateTime, default=db.func.now())
+    updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
 
-    token = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
-    device_name = db.Column(db.String(100, collation='utf8mb4_unicode_ci'))
-    platform = db.Column(db.String(20, collation='utf8mb4_unicode_ci'))  # ios / android
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Relationship with User
+    user = db.relationship('User', backref=db.backref('device_tokens', lazy=True))
 
     def __repr__(self):
-        return f'<DeviceToken {self.token[:10]}... ({self.platform})>'
+        return f'<DeviceToken {self.token[:10]}... for user {self.user_id}>'
 
+
+class PushNotificationLog(db.Model):
+    __tablename__ = 'push_notification_log'
+
+    id = db.Column(db.Integer, primary_key=True)
+    device_token_id = db.Column(db.Integer, db.ForeignKey('device_token.id'), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    notification_type = db.Column(db.String(50))
+    title = db.Column(db.String(255))
+    body = db.Column(db.Text)
+    # Changed from JSON to TEXT
+    data = db.Column(db.Text)  # Will store JSON as string
+    status = db.Column(db.String(50))
+    error = db.Column(db.Text)
+    sent_at = db.Column(db.DateTime, default=db.func.now())
+    updated_at = db.Column(db.DateTime, default=db.func.now(), onupdate=db.func.now())
+
+    # Relationships
+    device_token = db.relationship('DeviceToken', backref=db.backref('notifications', lazy=True))
+    user = db.relationship('User', backref=db.backref('notifications', lazy=True))
+
+    def __repr__(self):
+        return f'<PushNotificationLog {self.id} - {self.notification_type}>'
 
 class Ticket(db.Model):
     """Модель для тикетов технической поддержки"""

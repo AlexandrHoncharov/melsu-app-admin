@@ -17,12 +17,12 @@ import { useLocalSearchParams, Stack } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import chatService from '../../src/services/chatService';
-import { useNotifications } from '../../hooks/useNotifications';
+import { useAppNotifications } from '../../components/providers/AppNotificationProvider';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
   const chatId = Array.isArray(id) ? id[0] : id;
-  const { showNotification } = useNotifications();
+  const { showNotification } = useAppNotifications();
   const [messages, setMessages] = useState([]);
   const [chatTitle, setChatTitle] = useState('Чат');
   const [messageText, setMessageText] = useState('');
@@ -47,15 +47,15 @@ export default function ChatScreen() {
   }, [user]);
 
   const testInAppNotification = () => {
-  if (!user) return;
+    if (!user) return;
 
-  showNotification(
-    'Тестовое уведомление',
-    'Это тестовое уведомление для проверки работы чата',
-    'chat_message',
-    { chat_id: chatId }
-  );
-};
+    showNotification(
+      'Тестовое уведомление',
+      'Это тестовое уведомление для проверки работы чата',
+      'chat_message',
+      { chat_id: chatId }
+    );
+  };
 
   // Загрузка данных чата
   const loadChatData = async (isRefresh = false) => {

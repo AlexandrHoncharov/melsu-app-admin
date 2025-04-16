@@ -14,7 +14,7 @@ import firebase_admin
 from firebase_admin import credentials, auth, messaging
 from flask import request
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag, NavigableString
 import json
 import re
 from flask import Response
@@ -263,9 +263,407 @@ def get_news():
         return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
 
 
+# Функции для очистки и форматирования текста
+import re
+import html
+
+
+def clean_text(text):
+    """
+    Очищает текст от невидимых символов и лишних пробелов
+    """
+    if not text:
+        return ""
+
+    # Удаление невидимых символов Unicode
+    text = re.sub(r'[\u200B-\u200D\uFEFF]', '', text)
+
+    # Декодирование HTML-сущностей (&nbsp; и т.д.)
+    text = html.unescape(text)
+
+    # Удаление символов нулевой ширины
+    text = text.replace('\u200b', '')
+
+    # Удаление лишних пробелов в начале и конце
+    return text.strip()
+
+
+def format_content_text(content_text):
+    """
+    Форматирует текст содержимого для правильного отображения в приложении
+    """
+    if not content_text:
+        return ""
+
+    # Очистка от невидимых символов
+    text = clean_text(content_text)
+
+    # Исправление отступов абзацев
+    text = re.sub(r'(?m)^\s+', '', text)
+
+    # Форматирование абзацев
+    paragraphs = text.split('\n\n')
+    formatted_paragraphs = [p.strip() for p in paragraphs if p.strip()]
+
+    # Соединяем абзацы с двойным переносом для лучшего отображения
+    return '\n\n'.join(formatted_paragraphs)
+
+
+def extract_formatted_text_from_html(html_content):
+    """
+    Извлекает текст из HTML-контента с сохранением базового форматирования (жирный, списки и т.д.)
+    """
+    if not html_content:
+        return ""
+
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Преобразуем HTML в формат, подходящий для мобильного отображения
+    result_text = ""
+    current_list_index = 0
+
+    # Обработка содержимого
+    for element in soup.find_all(['p', 'strong', 'b', 'ol', 'ul', 'li', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']):
+        tag_name = element.name
+
+        # Пропускаем элементы внутри списков, так как мы обрабатываем их отдельно
+        if element.parent.name in ['ol', 'ul'] and tag_name != 'li':
+            continue
+
+        # Обработка абзацев
+        if tag_name == 'p':
+            paragraph_text = element.get_text().strip()
+            if paragraph_text:
+                result_text += paragraph_text + "\n\n"
+
+        # Обработка заголовков
+        elif tag_name.startswith('h'):
+            result_text += element.get_text().strip() + "\n\n"
+
+        # Обработка упорядоченных (нумерованных) списков
+        elif tag_name == 'ol':
+            current_list_index = 0  # Сбрасываем индекс
+            # Обработаем каждый элемент списка
+            for li in element.find_all('li', recursive=False):
+                current_list_index += 1
+                li_text = li.get_text().strip()
+                result_text += f"{current_list_index}. {li_text}\n"
+            result_text += "\n"  # Добавляем дополнительный перенос строки после списка
+
+        # Обработка неупорядоченных списков
+        elif tag_name == 'ul':
+            for li in element.find_all('li', recursive=False):
+                li_text = li.get_text().strip()
+                result_text += f"• {li_text}\n"
+            result_text += "\n"
+
+        # Обработка элементов списка (если они не вложены в ol/ul)
+        elif tag_name == 'li' and element.parent.name not in ['ol', 'ul']:
+            li_text = element.get_text().strip()
+            result_text += f"• {li_text}\n"
+
+        # Обработка базовых блоков
+        elif tag_name == 'div':
+            div_text = element.get_text().strip()
+            if div_text:
+                result_text += div_text + "\n\n"
+
+    # Удаляем лишние переносы строк
+    result_text = re.sub(r'\n{3,}', '\n\n', result_text)
+
+    # Удаление лишних пробелов и невидимых символов
+    return clean_text(result_text)
+
+
+def process_html_for_mobile_display(html_content):
+    """
+    Обрабатывает HTML-контент для правильного отображения на мобильных устройствах,
+    сохраняя форматирование текста (жирный, списки и т.д.)
+    """
+    if not html_content:
+        return ""
+
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # 1. Обрабатываем изображения
+    for img in soup.find_all('img'):
+        # Добавляем стили для мобильных устройств
+        img['style'] = 'max-width: 100%; height: auto; display: block; margin: 10px auto;'
+
+    # 2. Обрабатываем абзацы
+    for p in soup.find_all('p'):
+        p['style'] = 'margin-bottom: 16px; line-height: 1.5;'
+
+    # 3. Обрабатываем заголовки
+    for i in range(1, 7):
+        for heading in soup.find_all(f'h{i}'):
+            heading['style'] = f'font-size: {24 - (i - 1) * 2}px; font-weight: bold; margin: 20px 0 10px 0;'
+
+    # 4. Обрабатываем списки
+    for ol in soup.find_all('ol'):
+        ol['style'] = 'margin-bottom: 16px; padding-left: 24px;'
+
+    for ul in soup.find_all('ul'):
+        ul['style'] = 'margin-bottom: 16px; padding-left: 24px; list-style-type: disc;'
+
+    for li in soup.find_all('li'):
+        li['style'] = 'margin-bottom: 8px;'
+
+    # 5. Выделенный текст
+    for strong in soup.find_all(['strong', 'b']):
+        strong['style'] = 'font-weight: bold;'
+
+    # 6. Таблицы
+    for table in soup.find_all('table'):
+        table['style'] = 'width: 100%; margin-bottom: 16px; border-collapse: collapse;'
+
+        for td in table.find_all('td'):
+            td['style'] = 'padding: 8px; border: 1px solid #ddd;'
+
+    # Возвращаем обработанный HTML
+    return str(soup)
+
+
+def process_text_with_formatting(html_text):
+    """Обрабатывает HTML-текст, сохраняя форматирование (жирный, курсив и т.д.)"""
+    if not html_text:
+        return ""
+
+    # Убеждаемся, что работаем со строкой
+    if not isinstance(html_text, str):
+        html_text = str(html_text)
+
+    # Удаляем маркеры изображений
+    html_text = re.sub(r'<span class="image-marker"[^>]*>.*?</span>', '', html_text)
+
+    # Заменяем теги <strong> и <b> на маркеры для жирного текста
+    html_text = re.sub(r'<(strong|b)>(.*?)</(strong|b)>', r'**\2**', html_text, flags=re.DOTALL)
+
+    # Заменяем теги <em> и <i> на маркеры для курсивного текста
+    html_text = re.sub(r'<(em|i)>(.*?)</(em|i)>', r'_\2_', html_text, flags=re.DOTALL)
+
+    # Удаляем все оставшиеся HTML теги
+    html_text = re.sub(r'<[^>]+>', '', html_text)
+
+    # Декодируем HTML-сущности
+    html_text = html.unescape(html_text)
+
+    # Удаляем лишние пробелы
+    html_text = re.sub(r'\s+', ' ', html_text).strip()
+
+    return html_text
+
+
+def parse_news_detail_for_mobile(html_content):
+    """
+    Парсит HTML-содержимое новости и преобразует его в структуру для мобильного приложения
+    с сохранением расположения изображений и форматирования текста
+
+    Возвращает список объектов с типами:
+    - "text": обычный текст (поддерживает жирное выделение)
+    - "image": изображение с URL
+    - "list": нумерованный или маркированный список
+    - "table": таблица
+    """
+    if not html_content:
+        return []
+
+    try:
+        soup = BeautifulSoup(html_content, 'html.parser')
+
+        # Результирующий массив с различными типами контента
+        content_blocks = []
+
+        # Находим все изображения, чтобы потом можно было отслеживать их позиции
+        all_images = soup.find_all('img')
+        image_positions = {}
+
+        for img in all_images:
+            if img.get('src'):
+                # Используем прогрессивный идентификатор для изображений
+                img_id = f"img_{len(image_positions)}"
+                image_positions[img_id] = {
+                    'src': img.get('src'),
+                    'processed': False
+                }
+                # Заменяем тег img на маркер в тексте
+                marker = soup.new_tag('span')
+                marker['class'] = 'image-marker'
+                marker['data-image-id'] = img_id
+                img.replace_with(marker)
+
+        # Обработка абзацев и других текстовых элементов
+        for element in soup.find_all(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'table']):
+            tag_name = element.name
+
+            # Обработка абзацев
+            if tag_name == 'p':
+                # Ищем маркеры изображений внутри абзаца
+                element_text = str(element)
+                markers = element.find_all('span', class_='image-marker')
+
+                # Если есть маркеры изображений, разбиваем текст на части
+                if markers:
+                    # Добавляем текст до первого маркера
+                    text_before = process_text_with_formatting(str(element))
+                    if text_before.strip():
+                        content_blocks.append({
+                            "type": "text",
+                            "content": text_before
+                        })
+
+                    # Добавляем изображения
+                    for marker in markers:
+                        img_id = marker.get('data-image-id')
+                        if img_id and img_id in image_positions and not image_positions[img_id]['processed']:
+                            content_blocks.append({
+                                "type": "image",
+                                "src": image_positions[img_id]['src']
+                            })
+                            image_positions[img_id]['processed'] = True
+                else:
+                    # Парсим абзац с сохранением жирного выделения (без изображений)
+                    formatted_text = process_text_with_formatting(str(element))
+                    if formatted_text.strip():
+                        content_blocks.append({
+                            "type": "text",
+                            "content": formatted_text
+                        })
+
+            # Обработка заголовков
+            elif tag_name.startswith('h'):
+                level = int(tag_name[1])
+                content_blocks.append({
+                    "type": "header",
+                    "level": level,
+                    "content": process_text_with_formatting(element.get_text())
+                })
+
+            # Обработка списков
+            elif tag_name == 'ul' or tag_name == 'ol':
+                list_items = []
+                for li in element.find_all('li', recursive=False):
+                    list_items.append(process_text_with_formatting(li.get_text()))
+
+                content_blocks.append({
+                    "type": "list",
+                    "list_type": "ordered" if tag_name == 'ol' else "unordered",
+                    "items": list_items
+                })
+
+            # Обработка таблиц
+            elif tag_name == 'table':
+                # Ищем изображения в таблице
+                table_images = element.find_all('span', class_='image-marker')
+                for marker in table_images:
+                    img_id = marker.get('data-image-id')
+                    if img_id and img_id in image_positions and not image_positions[img_id]['processed']:
+                        content_blocks.append({
+                            "type": "image",
+                            "src": image_positions[img_id]['src']
+                        })
+                        image_positions[img_id]['processed'] = True
+
+                # Упрощенно извлекаем текст таблицы
+                table_text = element.get_text().strip()
+                if table_text:
+                    content_blocks.append({
+                        "type": "text",
+                        "content": "Таблица: " + table_text
+                    })
+
+        # Добавляем все необработанные изображения в конец
+        for img_id, img_info in image_positions.items():
+            if not img_info['processed']:
+                content_blocks.append({
+                    "type": "image",
+                    "src": img_info['src']
+                })
+                img_info['processed'] = True
+
+        # Объединяем последовательные текстовые блоки
+        merged_blocks = []
+        current_text = ""
+
+        for block in content_blocks:
+            if block["type"] == "text":
+                if current_text:
+                    current_text += "\n\n" + block["content"]
+                else:
+                    current_text = block["content"]
+            else:
+                if current_text:
+                    merged_blocks.append({
+                        "type": "text",
+                        "content": current_text
+                    })
+                    current_text = ""
+                merged_blocks.append(block)
+
+        # Добавляем последний текстовый блок, если он есть
+        if current_text:
+            merged_blocks.append({
+                "type": "text",
+                "content": current_text
+            })
+
+        return merged_blocks
+
+    except Exception as e:
+        print(f"Error parsing HTML content: {str(e)}")
+        # В случае ошибки парсинга возвращаем один текстовый блок с исходным текстом
+        return [{
+            "type": "text",
+            "content": BeautifulSoup(html_content, 'html.parser').get_text()
+        }]
+
+
+def update_api_response_with_content_blocks(api_response, host_url):
+    """
+    Обновляет ответ API, добавляя в него разобранные блоки контента
+    с правильными URL для изображений.
+    """
+    if not api_response or not api_response.get('content_html'):
+        return api_response
+
+    try:
+        # Разбираем HTML-контент
+        content_blocks = parse_news_detail_for_mobile(api_response['content_html'])
+
+        # Обрабатываем URL изображений через прокси
+        for block in content_blocks:
+            if block['type'] == 'image' and block.get('src'):
+                src = block['src']
+
+                # Формируем URL для прокси
+                if src.startswith('http'):
+                    original_url = src
+                else:
+                    original_url = f"https://melsu.ru/{src.lstrip('/')}"
+
+                # Кодируем URL для передачи через прокси
+                from urllib.parse import quote
+                encoded_url = quote(original_url)
+                proxy_url = f"{host_url}/api/image-proxy?url={encoded_url}"
+
+                # Заменяем на прокси-URL
+                block['src'] = proxy_url
+
+        # Добавляем блоки в ответ API
+        api_response['content_blocks'] = content_blocks
+
+        return api_response
+    except Exception as e:
+        print(f"Error creating content blocks: {str(e)}")
+        # В случае ошибки возвращаем исходный ответ без изменений
+        return api_response
+
+
+# Добавьте эту улучшенную версию функции get_news_detail в api.py
+
 @app.route('/api/news/<int:news_id>', methods=['GET'])
 def get_news_detail(news_id):
-    """Get detailed news article by ID with image proxy"""
+    """Get detailed news article by ID with image proxy and improved content structure"""
     try:
         print(f"Fetching news detail for ID: {news_id}")
 
@@ -283,78 +681,68 @@ def get_news_detail(news_id):
         # Parse HTML
         soup = BeautifulSoup(response.text, 'html.parser')
 
-        # Extract title
+        # Extract title and clean it
         title_tag = soup.select_one('h1.text-4xl') or soup.select_one('h1')
-        title = title_tag.text.strip() if title_tag else None
+        title = clean_text(title_tag.text.strip()) if title_tag else None
 
         # Extract date
         date_tag = soup.select_one('.bi-calendar2-week')
-        date = date_tag.parent.text.strip() if date_tag and date_tag.parent else None
+        date = clean_text(date_tag.parent.text.strip()) if date_tag and date_tag.parent else None
 
         # Extract content
         content_div = soup.select_one('.content-news')
+        content_html = None
+        content_text = None
 
-        # Модифицируем контент, чтобы все изображения использовали прокси
-        if content_div:
-            for img in content_div.select('img'):
-                if img.get('src'):
-                    original_src = img['src']
-
-                    # Формируем URL для прокси
-                    if original_src.startswith('http'):
-                        original_url = original_src
-                    else:
-                        original_url = f"https://melsu.ru/{original_src.lstrip('/')}"
-
-                    # Кодируем URL для передачи через прокси
-                    from urllib.parse import quote
-                    encoded_url = quote(original_url)
-                    proxy_url = f"{host_url}/api/image-proxy?url={encoded_url}"
-
-                    # Заменяем src на прокси-URL
-                    img['src'] = proxy_url
-
-        content_html = str(content_div) if content_div else None
-
-        # Extract plain text content
-        content_text = content_div.get_text(separator='\n').strip() if content_div else None
-
-        # Extract images and use proxy
-        images = []
-        # Основное изображение (может быть в шапке статьи)
-        header_img = soup.select_one('.img-news-box img') or soup.select_one('.header-image img')
-
-        if header_img and header_img.get('src'):
-            src = header_img['src']
-            # Формируем URL для прокси
-            if src.startswith('http'):
-                original_url = src
-            else:
-                original_url = f"https://melsu.ru/{src.lstrip('/')}"
-
-            # Кодируем URL для передачи через прокси
-            from urllib.parse import quote
-            encoded_url = quote(original_url)
-            proxy_url = f"{host_url}/api/image-proxy?url={encoded_url}"
-            images.append(proxy_url)
-
-        # Дополнительные изображения в контенте
-        if content_div:
-            for img in content_div.select('img'):
-                src = img.get('src')
-                if src and src not in images:  # Избегаем дубликатов
-                    images.append(src)  # Уже заменен на прокси выше
+        # Подготовим данные для ответа
+        result = {
+            "id": str(news_id),
+            "title": title,
+            "date": date,
+            "category": None,
+            "content_html": None,
+            "content_text": None,
+            "images": [],
+            "success": True
+        }
 
         # Get category from breadcrumbs or meta tag
-        category = None
         category_tag = soup.select_one('.meta-category')
         if category_tag:
-            category = category_tag.text.strip()
+            result["category"] = clean_text(category_tag.text.strip())
         else:
             # Попробуем найти в хлебных крошках
             breadcrumbs = soup.select('.breadcrumbs .crumb-home')
             if len(breadcrumbs) > 1:
-                category = breadcrumbs[1].text.strip()
+                result["category"] = clean_text(breadcrumbs[1].text.strip())
+
+        # Обрабатываем содержимое новости
+        if content_div:
+            # Сохраняем HTML-контент
+            result["content_html"] = str(content_div)
+
+            # Извлекаем текст с сохранением форматирования
+            result["content_text"] = extract_formatted_text_from_html(str(content_div))
+
+            # Находим главное изображение (может быть в шапке статьи)
+            header_img = soup.select_one('.img-news-box img') or soup.select_one('.header-image img')
+            if header_img and header_img.get('src'):
+                src = header_img['src']
+                # Формируем URL для прокси
+                if src.startswith('http'):
+                    original_url = src
+                else:
+                    original_url = f"https://melsu.ru/{src.lstrip('/')}"
+
+                # Кодируем URL для передачи через прокси
+                from urllib.parse import quote
+                encoded_url = quote(original_url)
+                proxy_url = f"{host_url}/api/image-proxy?url={encoded_url}"
+                result["images"].append(proxy_url)
+
+            # Обрабатываем контент с использованием нового парсера, который
+            # создает структурированные блоки контента с изображениями по месту их расположения
+            result = update_api_response_with_content_blocks(result, host_url)
 
         # Check for previous and next articles
         prev_article = None
@@ -379,14 +767,14 @@ def get_news_detail(news_id):
             # Определяем по тексту ссылки, это предыдущая или следующая новость
             if 'предыдущ' in link_text or 'пред' in link_text or '←' in link_text:
                 title_span = link.select_one('span')
-                prev_title = title_span.text.strip() if title_span else "Предыдущая новость"
+                prev_title = clean_text(title_span.text.strip()) if title_span else "Предыдущая новость"
                 prev_article = {
                     "id": news_id_from_link,
                     "title": prev_title
                 }
             elif 'следующ' in link_text or 'след' in link_text or '→' in link_text:
                 title_span = link.select_one('span')
-                next_title = title_span.text.strip() if title_span else "Следующая новость"
+                next_title = clean_text(title_span.text.strip()) if title_span else "Следующая новость"
                 next_article = {
                     "id": news_id_from_link,
                     "title": next_title
@@ -413,23 +801,19 @@ def get_news_detail(news_id):
                     "title": "Следующая новость"
                 }
 
-        print(f"Successfully fetched news detail for ID {news_id}")
-        if images:
-            print(f"Found {len(images)} images with proxy URLs")
-            print(f"First image: {images[0]}")
+        # Добавляем данные о предыдущей и следующей статье
+        result["prev_article"] = prev_article
+        result["next_article"] = next_article
 
-        return jsonify({
-            "id": str(news_id),
-            "title": title,
-            "date": date,
-            "category": category,
-            "content_html": content_html,
-            "content_text": content_text,
-            "images": images,
-            "prev_article": prev_article,
-            "next_article": next_article,
-            "success": True
-        }), 200
+        print(f"Successfully fetched news detail for ID {news_id}")
+        if result["images"]:
+            print(f"Found {len(result['images'])} main images")
+
+        if "content_blocks" in result:
+            image_blocks = [block for block in result["content_blocks"] if block.get("type") == "image"]
+            print(f"Found {len(image_blocks)} content blocks with images")
+
+        return jsonify(result), 200
 
     except Exception as e:
         print(f"Error getting news detail: {str(e)}")

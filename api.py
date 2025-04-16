@@ -1971,6 +1971,220 @@ def send_push_message(token, title, message, data=None):
         return {"success": False, "error": str(e)}
 
 
+@app.route('/api/device/send-notification', methods=['POST'])
+@token_required
+def send_push_notification(current_user):
+    """Отправка push-уведомления конкретному пользователю"""
+    try:
+        data = request.json
+
+        # Проверяем обязательные поля
+        if not data or not data.get('recipient_id'):
+            return jsonify({
+                'message': 'Не указан получатель уведомления',
+                'success': False
+            }), 400
+
+        recipient_id = data.get('recipient_id')
+        title = data.get('title', 'Новое сообщение')
+        body = data.get('body', 'У вас новое сообщение')
+        notification_data = data.get('data', {})
+
+        # Добавляем данные отправителя
+        notification_data['sender_id'] = current_user.id
+
+        # Проверяем, что это не самоотправка
+        if str(recipient_id) == str(current_user.id):
+            return jsonify({
+                'message': 'Нельзя отправить уведомление самому себе',
+                'success': False,
+                'status': 'self_notification'
+            }), 400
+
+        # Получаем токены устройств получателя
+        device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
+
+        if not device_tokens:
+            return jsonify({
+                'message': 'У получателя нет зарегистрированных устройств',
+                'success': False,
+                'status': 'no_tokens'
+            }), 200  # Возвращаем 200, а не ошибку, так как это ожидаемая ситуация
+
+        # Отправляем уведомления на все устройства
+        successful_deliveries = 0
+        delivery_receipts = []
+
+        for device in device_tokens:
+            try:
+                # Определяем, использовать ли Firebase или Expo
+                if device.token_type == 'expo' or device.token.startswith('ExponentPushToken['):
+                    # Отправка через Expo Push API
+                    try:
+                        expo_response = requests.post(
+                            'https://exp.host/--/api/v2/push/send',
+                            json={
+                                'to': device.token,
+                                'title': title,
+                                'body': body,
+                                'data': notification_data,
+                                'sound': 'default'
+                            },
+                            headers={
+                                'Accept': 'application/json',
+                                'Accept-encoding': 'gzip, deflate',
+                                'Content-Type': 'application/json',
+                            }
+                        )
+
+                        if expo_response.status_code == 200:
+                            result = expo_response.json()
+                            if result.get('data') and result['data'][0].get('status') == 'ok':
+                                successful_deliveries += 1
+                                delivery_receipts.append({
+                                    'platform': 'expo',
+                                    'token': device.token[:10] + '...',  # Скрываем большую часть токена
+                                    'success': True
+                                })
+                            else:
+                                delivery_receipts.append({
+                                    'platform': 'expo',
+                                    'token': device.token[:10] + '...',
+                                    'success': False,
+                                    'error': result.get('data', [{}])[0].get('message', 'Unknown error')
+                                })
+                        else:
+                            delivery_receipts.append({
+                                'platform': 'expo',
+                                'token': device.token[:10] + '...',
+                                'success': False,
+                                'error': f"Error {expo_response.status_code}: {expo_response.text}"
+                            })
+                    except Exception as expo_error:
+                        print(f"Ошибка при отправке через Expo: {str(expo_error)}")
+                        delivery_receipts.append({
+                            'platform': 'expo',
+                            'token': device.token[:10] + '...',
+                            'success': False,
+                            'error': str(expo_error)
+                        })
+                else:
+                    # Отправка через Firebase Cloud Messaging
+                    if not FIREBASE_AVAILABLE:
+                        delivery_receipts.append({
+                            'platform': 'fcm',
+                            'token': device.token[:10] + '...',
+                            'success': False,
+                            'error': 'Firebase недоступен'
+                        })
+                        continue
+
+                    try:
+                        # Определяем тип платформы для настройки уведомления
+                        is_android = device.platform.lower() == 'android'
+                        is_ios = device.platform.lower() == 'ios'
+
+                        # Создаем объект уведомления
+                        notification = messaging.Notification(
+                            title=title,
+                            body=body
+                        )
+
+                        # Настройки для Android
+                        android_config = None
+                        if is_android:
+                            # Получаем канал уведомлений из типа (если указан в data)
+                            channel_id = 'default'
+                            if notification_data and notification_data.get('type'):
+                                notification_type = notification_data.get('type')
+                                if notification_type == 'chat':
+                                    channel_id = 'chat'
+                                elif notification_type == 'schedule':
+                                    channel_id = 'schedule'
+                                elif notification_type == 'ticket':
+                                    channel_id = 'tickets'
+                                elif notification_type == 'news':
+                                    channel_id = 'news'
+
+                            android_config = messaging.AndroidConfig(
+                                priority='high',
+                                notification=messaging.AndroidNotification(
+                                    icon='notification_icon',
+                                    color='#770002',
+                                    channel_id=channel_id
+                                )
+                            )
+
+                        # Настройки для iOS
+                        apns_config = None
+                        if is_ios:
+                            apns_config = messaging.APNSConfig(
+                                payload=messaging.APNSPayload(
+                                    aps=messaging.Aps(
+                                        content_available=True,
+                                        sound='default'
+                                    )
+                                )
+                            )
+
+                        # Создаем объект Message
+                        message_obj = messaging.Message(
+                            token=device.token,
+                            notification=notification,
+                            data={str(k): str(v) for k, v in notification_data.items()},
+                            # FCM требует строковые значения
+                            android=android_config,
+                            apns=apns_config
+                        )
+
+                        # Отправляем сообщение
+                        response = messaging.send(message_obj)
+                        successful_deliveries += 1
+                        delivery_receipts.append({
+                            'platform': 'fcm',
+                            'token': device.token[:10] + '...',
+                            'success': True,
+                            'message_id': response
+                        })
+                    except Exception as fcm_error:
+                        print(f"Ошибка при отправке через FCM: {str(fcm_error)}")
+                        delivery_receipts.append({
+                            'platform': 'fcm',
+                            'token': device.token[:10] + '...',
+                            'success': False,
+                            'error': str(fcm_error)
+                        })
+            except Exception as device_error:
+                print(f"Ошибка при обработке устройства: {str(device_error)}")
+                delivery_receipts.append({
+                    'platform': 'unknown',
+                    'token': device.token[:10] + '...' if device.token else 'none',
+                    'success': False,
+                    'error': str(device_error)
+                })
+
+        # Возвращаем результат
+        if successful_deliveries > 0:
+            return jsonify({
+                'message': f'Уведомление отправлено на {successful_deliveries} из {len(device_tokens)} устройств',
+                'success': True,
+                'receipts': delivery_receipts
+            }), 200
+        else:
+            return jsonify({
+                'message': 'Не удалось отправить уведомление ни на одно устройство',
+                'success': False,
+                'receipts': delivery_receipts
+            }), 200  # Возвращаем 200, чтобы клиент не пытался повторить запрос
+
+    except Exception as e:
+        print(f"Общая ошибка при отправке уведомления: {str(e)}")
+        return jsonify({
+            'message': f'Ошибка: {str(e)}',
+            'success': False
+        }), 500
+
+
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):

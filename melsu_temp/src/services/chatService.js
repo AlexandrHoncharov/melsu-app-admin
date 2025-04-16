@@ -850,53 +850,64 @@ class ChatService {
         }
     }
 
-    // Отправка уведомления пользователю
-    async sendNotificationToUser(recipientId, chatId, messagePreview, senderName) {
-        try {
-            // Проверяем, что аргументы переданы корректно
-            if (!recipientId || !chatId || !messagePreview) {
-                console.log(`Skipping notification: Invalid arguments for user ${recipientId}`);
-                return {success: false, skipped: true, reason: 'invalid_arguments'};
-            }
+    // Обновление метода sendNotificationToUser в chatService.js
+// Замените существующий метод этим кодом
 
-            // Проверяем, не отправляем ли мы сообщение самому себе
-            const myUserId = this.getCurrentUserId();
-            if (recipientId === myUserId) {
-                console.log(`Skipping notification: Cannot send to self (${recipientId})`);
-                return {success: false, skipped: true, reason: 'self_notification'};
-            }
+async sendNotificationToUser(recipientId, chatId, messagePreview, senderName) {
+    try {
+        // Проверяем, что аргументы переданы корректно
+        if (!recipientId || !chatId || !messagePreview) {
+            console.log(`Skipping notification: Invalid arguments for user ${recipientId}`);
+            return { success: false, skipped: true, reason: 'invalid_arguments' };
+        }
 
-            // Отправляем запрос на сервер
-            const response = await apiClient.post('/chat/send-notification', {
-                recipient_id: recipientId,
+        // Проверяем, не отправляем ли мы сообщение самому себе
+        const myUserId = this.getCurrentUserId();
+        if (recipientId === myUserId) {
+            console.log(`Skipping notification: Cannot send to self (${recipientId})`);
+            return { success: false, skipped: true, reason: 'self_notification' };
+        }
+
+        console.log(`Sending push notification to user ${recipientId} about new message in chat ${chatId}`);
+
+        // Используем эндпоинт отправки устройственных уведомлений вместо /chat/send-notification
+        const response = await apiClient.post('/device/send-notification', {
+            recipient_id: recipientId,
+            title: senderName,
+            body: messagePreview,
+            data: {
+                type: 'chat',
                 chat_id: chatId,
                 message_preview: messagePreview,
                 sender_name: senderName
-            });
-
-            // Если ответ успешный, но получатель не найден или у него нет токенов
-            if (response.data?.status === 'no_tokens') {
-                console.log(`User ${recipientId} has no registered devices for notifications`);
-                return {success: false, skipped: true, reason: 'no_tokens'};
             }
+        });
 
-            // Успешная отправка
-            return {success: true, receipt: response.data};
-        } catch (error) {
-            // Проверка на специфическую ошибку "No device tokens"
-            if (error.message && (
-                error.message.includes('No device tokens') ||
-                error.message.includes('not found for recipient')
-            )) {
-                console.log(`User ${recipientId} has no registered devices for notifications`);
-                return {success: false, skipped: true, reason: 'no_tokens'};
-            }
+        console.log(`Push notification response:`, response.data);
 
-            // Для остальных ошибок - логирование, но без бросания исключения
-            console.log(`Failed to send notification to user ${recipientId}: ${error.message}`);
-            return {success: false, error: error.message};
+        // Если ответ успешный, но получатель не найден или у него нет токенов
+        if (response.data?.status === 'no_tokens' || response.data?.message?.includes('No device tokens')) {
+            console.log(`User ${recipientId} has no registered devices for notifications`);
+            return { success: false, skipped: true, reason: 'no_tokens' };
         }
+
+        // Успешная отправка
+        return { success: true, receipt: response.data };
+    } catch (error) {
+        // Проверка на специфическую ошибку "No device tokens"
+        if (error.message && (
+            error.message.includes('No device tokens') ||
+            error.message.includes('not found for recipient')
+        )) {
+            console.log(`User ${recipientId} has no registered devices for notifications`);
+            return { success: false, skipped: true, reason: 'no_tokens' };
+        }
+
+        // Для остальных ошибок - логирование, но без бросания исключения
+        console.log(`Failed to send notification to user ${recipientId}: ${error.message}`);
+        return { success: false, error: error.message };
     }
+}
 
     // Получение списка чатов пользователя
     async getUserChats() {

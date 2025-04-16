@@ -11,15 +11,17 @@ import {
   StyleSheet,
   SafeAreaView,
   RefreshControl,
-  Alert
+  Alert,
+  ToastAndroid
 } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import chatService from '../../src/services/chatService';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
+  const router = useRouter();
   const chatId = Array.isArray(id) ? id[0] : id;
   const [messages, setMessages] = useState([]);
   const [chatTitle, setChatTitle] = useState('Чат');
@@ -29,6 +31,7 @@ export default function ChatScreen() {
   const [sending, setSending] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [lastSent, setLastSent] = useState(null);
+  const [otherUserInfo, setOtherUserInfo] = useState(null);
 
   const { user } = useAuth();
   const flatListRef = useRef(null);
@@ -70,10 +73,17 @@ export default function ChatScreen() {
       const userChats = await chatService.getUserChats();
       const thisChat = userChats.find(chat => chat.id === chatId);
 
-      // Устанавливаем заголовок чата
+      // Устанавливаем заголовок чата и сохраняем информацию о собеседнике
       if (thisChat) {
         if (thisChat.type === 'personal') {
           setChatTitle(thisChat.withUserName || 'Личный чат');
+
+          // Сохраняем информацию о собеседнике для уведомлений
+          setOtherUserInfo({
+            id: thisChat.withUser,
+            name: thisChat.withUserName,
+            role: thisChat.withUserRole
+          });
         } else if (thisChat.type === 'group') {
           setChatTitle(thisChat.name || 'Групповой чат');
         }
@@ -137,8 +147,24 @@ export default function ChatScreen() {
   useEffect(() => {
     loadChatData();
 
+    // Настраиваем слушатель сообщений для обновления в реальном времени
+    const setupMessageListener = async () => {
+      try {
+        await chatService.initialize();
+        await chatService.setupChatMessageListener(chatId, () => {
+          // Перезагружаем сообщения при изменениях
+          loadChatData(true);
+        });
+      } catch (error) {
+        console.error('Ошибка при настройке слушателя сообщений:', error);
+      }
+    };
+
+    setupMessageListener();
+
     // Отписка от слушателей при уходе с экрана
     return () => {
+      chatService.removeChatMessageListener(chatId);
       chatService.cleanup();
     };
   }, [chatId]);
@@ -147,6 +173,14 @@ export default function ChatScreen() {
   const handleRefresh = () => {
     setRefreshing(true);
     loadChatData(true);
+  };
+
+  // Показать уведомление о статусе отправки
+  const showNotification = (message) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    }
+    // Для iOS можно использовать Alert или другую библиотеку
   };
 
   // Отправка сообщения
@@ -199,8 +233,11 @@ export default function ChatScreen() {
       }, 100);
 
       // Отправляем сообщение в Firebase
-      await chatService.sendMessage(chatId, messageToSend);
-      console.log(`📱 Message sent successfully`);
+      const messageId = await chatService.sendMessage(chatId, messageToSend);
+      console.log(`📱 Message sent successfully with ID: ${messageId}`);
+
+      // Показываем уведомление об успешной отправке
+      showNotification('Сообщение отправлено');
 
       // Перезагружаем сообщения после отправки для синхронизации с сервером
       setTimeout(() => {
@@ -257,6 +294,7 @@ export default function ChatScreen() {
 
         <Text style={styles.messageTime}>
           {formatMessageTime(item.timestamp)}
+          {item.isTempMessage && " ✓"}
         </Text>
       </View>
     );
@@ -273,6 +311,11 @@ export default function ChatScreen() {
     }
   }, [messages, isInitialLoad, lastSent]);
 
+  // Обработчик кнопки назад
+  const handleBackPress = () => {
+    router.back();
+  };
+
   // Состояние загрузки
   if (loading) {
     return (
@@ -287,7 +330,12 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.container}>
       <Stack.Screen options={{
         title: chatTitle,
-        headerTintColor: '#770002'
+        headerTintColor: '#770002',
+        headerLeft: () => (
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#770002" />
+          </TouchableOpacity>
+        )
       }} />
 
       <KeyboardAvoidingView
@@ -445,5 +493,8 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#999',
     textAlign: 'center',
+  },
+  backButton: {
+    padding: 8,
   }
 });

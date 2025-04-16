@@ -9,7 +9,7 @@ import random
 import string
 from functools import wraps
 from db import db
-from models import User, Teacher, Schedule, VerificationLog, Schedule, ScheduleTeacher
+from models import User, Teacher, Schedule, VerificationLog, Schedule, ScheduleTeacher, DeviceToken
 import firebase_admin
 from firebase_admin import credentials, auth, messaging
 from flask import request
@@ -634,6 +634,7 @@ def get_users(current_user):
             result.append(user_data)
 
     return jsonify(result)
+
 
 # REMOVED: Device token registration endpoints
 
@@ -1922,42 +1923,47 @@ def internal_error(error):
 
 
 def send_push_message(token, title, message, data=None):
-    """Отправка push-уведомления через Firebase Cloud Messaging"""
-
+    """Send push notification using Firebase Cloud Messaging"""
     if not FIREBASE_AVAILABLE:
         print("Firebase Admin SDK не доступен. Уведомление не отправлено.")
         return {"success": False, "message": "Firebase недоступен"}
 
     try:
-        # Подготавливаем сообщение
-        message_data = {
-            'token': token,
-            'notification': {
-                'title': title,
-                'body': message
-            },
-            'android': {
-                'priority': 'high',
-                'notification': {
-                    'icon': 'notification_icon',
-                    'color': '#770002'
-                }
-            },
-            'apns': {
-                'payload': {
-                    'aps': {
-                        'contentAvailable': True
-                    }
-                }
-            }
-        }
+        # Создаем объект уведомления
+        notification = messaging.Notification(
+            title=title,
+            body=message
+        )
 
-        # Добавляем дополнительные данные, если они предоставлены
-        if data:
-            message_data['data'] = data
+        # Настройки для Android
+        android_config = messaging.AndroidConfig(
+            priority='high',
+            notification=messaging.AndroidNotification(
+                icon='notification_icon',
+                color='#770002'
+            )
+        )
+
+        # Настройки для iOS
+        apns_config = messaging.APNSConfig(
+            payload=messaging.APNSPayload(
+                aps=messaging.Aps(
+                    content_available=True
+                )
+            )
+        )
+
+        # Создаем объект Message правильно
+        message_obj = messaging.Message(
+            token=token,
+            notification=notification,
+            android=android_config,
+            apns=apns_config,
+            data=data or {}
+        )
 
         # Отправляем сообщение
-        response = messaging.send(message_data)
+        response = messaging.send(message_obj)
         print(f"Уведомление успешно отправлено: {response}")
         return {"success": True, "message_id": response}
     except Exception as e:
@@ -1965,7 +1971,6 @@ def send_push_message(token, title, message, data=None):
         return {"success": False, "error": str(e)}
 
 
-# STUB device token endpoint - returns success but doesn't do anything
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
@@ -1979,10 +1984,32 @@ def register_device(current_user):
         token = data.get('token')
         device = data.get('device', 'Неизвестное устройство')
         platform = data.get('platform', 'unknown')
+        token_type = data.get('tokenType', 'unknown')
 
-        # Сохранение токена в базе данных
-        # Здесь вы можете использовать вашу модель DeviceToken или другую структуру
-        # для хранения токенов устройств
+        # Проверяем, существует ли уже запись с таким токеном
+        existing_token = DeviceToken.query.filter_by(token=token).first()
+
+        if existing_token:
+            # Обновляем существующую запись
+            existing_token.user_id = current_user.id
+            existing_token.device_name = device
+            existing_token.platform = platform
+            existing_token.token_type = token_type
+            existing_token.last_used_at = datetime.datetime.utcnow()
+        else:
+            # Создаем новую запись
+            new_token = DeviceToken(
+                user_id=current_user.id,
+                token=token,
+                device_name=device,
+                platform=platform,
+                token_type=token_type,
+                created_at=datetime.datetime.utcnow(),
+                last_used_at=datetime.datetime.utcnow()
+            )
+            db.session.add(new_token)
+
+        db.session.commit()
 
         return jsonify({
             'message': 'Токен устройства зарегистрирован',
@@ -1991,6 +2018,7 @@ def register_device(current_user):
         }), 200
 
     except Exception as e:
+        db.session.rollback()
         print(f"Ошибка при регистрации токена устройства: {str(e)}")
         return jsonify({
             'message': f'Ошибка: {str(e)}',
@@ -2028,7 +2056,6 @@ def unregister_device(current_user):
         }), 500
 
 
-# STUB endpoint for test notifications
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
@@ -2036,6 +2063,7 @@ def test_notification(current_user):
     try:
         data = request.json
         token = data.get('token')
+        token_type = data.get('tokenType', 'unknown')
 
         if not token:
             return jsonify({
@@ -2043,46 +2071,114 @@ def test_notification(current_user):
                 'success': False
             }), 400
 
-        # Отправка тестового уведомления
-        result = send_push_message(
-            token=token,
-            title=f"Тестовое уведомление",
-            message="Это тестовое push-уведомление от сервера",
-            data={
-                'type': 'test',
-                'timestamp': datetime.datetime.now().isoformat()
-            }
-        )
+        # Проверяем тип токена и выбираем способ отправки
+        if token_type == 'expo' or token.startswith('ExponentPushToken['):
+            # Отправка через Expo Push API
+            try:
+                response = requests.post(
+                    'https://exp.host/--/api/v2/push/send',
+                    json={
+                        'to': token,
+                        'title': 'Тестовое уведомление',
+                        'body': 'Это тестовое push-уведомление отправлено через Expo Push API',
+                        'data': {
+                            'type': 'test',
+                            'timestamp': datetime.datetime.now().isoformat()
+                        }
+                    },
+                    headers={
+                        'Accept': 'application/json',
+                        'Accept-encoding': 'gzip, deflate',
+                        'Content-Type': 'application/json',
+                    }
+                )
 
-        if result.get('success'):
-            return jsonify({
-                'message': 'Тестовое уведомление отправлено',
-                'success': True,
-                'message_id': result.get('message_id')
-            }), 200
+                if response.status_code == 200:
+                    result = response.json()
+                    return jsonify({
+                        'message': 'Тестовое уведомление отправлено через Expo Push API',
+                        'success': True,
+                        'response': result
+                    }), 200
+                else:
+                    return jsonify({
+                        'message': f'Ошибка при отправке через Expo Push API: {response.text}',
+                        'success': False
+                    }), 500
+            except Exception as expo_error:
+                print(f"Ошибка при отправке через Expo Push API: {str(expo_error)}")
+                return jsonify({
+                    'message': f'Ошибка при отправке через Expo: {str(expo_error)}',
+                    'success': False
+                }), 500
         else:
-            return jsonify({
-                'message': f"Ошибка при отправке: {result.get('error')}",
-                'success': False
-            }), 500
+            # Отправка через Firebase Cloud Messaging
+            try:
+                # Создаем объект уведомления
+                notification = messaging.Notification(
+                    title='Тестовое уведомление',
+                    body='Это тестовое push-уведомление отправлено через Firebase'
+                )
+
+                # Настройки для Android
+                android_config = messaging.AndroidConfig(
+                    priority='high',
+                    notification=messaging.AndroidNotification(
+                        icon='notification_icon',
+                        color='#770002',
+                        channel_id='default'
+                    )
+                )
+
+                # Настройки для iOS
+                apns_config = messaging.APNSConfig(
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            content_available=True,
+                            sound='default'
+                        )
+                    )
+                )
+
+                # Данные уведомления
+                data = {
+                    'type': 'test',
+                    'timestamp': datetime.datetime.now().isoformat(),
+                    'user_id': str(current_user.id)
+                }
+
+                # Создаем объект Message правильно
+                message_obj = messaging.Message(
+                    token=token,
+                    notification=notification,
+                    android=android_config,
+                    apns=apns_config,
+                    data=data
+                )
+
+                # Отправляем сообщение
+                response = messaging.send(message_obj)
+                print(f"Уведомление успешно отправлено через FCM: {response}")
+
+                return jsonify({
+                    'message': 'Тестовое уведомление отправлено через Firebase',
+                    'success': True,
+                    'message_id': response
+                }), 200
+
+            except Exception as fcm_error:
+                print(f"Ошибка при отправке через FCM: {str(fcm_error)}")
+                return jsonify({
+                    'message': f'Ошибка при отправке через Firebase: {str(fcm_error)}',
+                    'success': False
+                }), 500
 
     except Exception as e:
-        print(f"Ошибка при отправке тестового уведомления: {str(e)}")
+        print(f"Общая ошибка при отправке тестового уведомления: {str(e)}")
         return jsonify({
             'message': f'Ошибка: {str(e)}',
             'success': False
         }), 500
-
-
-# STUB endpoint for chat notifications
-@app.route('/api/chat/send-notification', methods=['POST'])
-@token_required
-def send_chat_notification(current_user):
-    """Stub endpoint for chat notifications - does nothing"""
-    return jsonify({
-        'message': 'Уведомления отключены в этой версии',
-        'success': True,
-    }), 200
 
 
 if __name__ == '__main__':

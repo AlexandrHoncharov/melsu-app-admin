@@ -1,14 +1,13 @@
 // hooks/useNotifications.tsx
-import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { useAuth } from './useAuth';
 import notificationsApi from '../src/api/notificationsApi';
 import { registerBackgroundNotificationHandler } from '../src/utils/backgroundNotificationHandler';
 
-// Настройка обработчика уведомлений для переднего плана
+// Настройка обработчика уведомлений
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -19,6 +18,7 @@ Notifications.setNotificationHandler({
 
 type NotificationContextType = {
   pushToken: string | null;
+  tokenType: 'fcm' | 'expo' | 'unknown';
   notification: Notifications.Notification | null;
   requestPermissions: () => Promise<boolean>;
   registerForPushNotifications: () => Promise<string | null>;
@@ -32,6 +32,7 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 
 export function NotificationProvider({ children }) {
   const [pushToken, setPushToken] = useState<string | null>(null);
+  const [tokenType, setTokenType] = useState<'fcm' | 'expo' | 'unknown'>('unknown');
   const [notification, setNotification] = useState<Notifications.Notification | null>(null);
   const [notificationPermissionsGranted, setNotificationPermissionsGranted] = useState<boolean | null>(null);
   const [isRegistered, setIsRegistered] = useState<boolean>(false);
@@ -66,7 +67,7 @@ export function NotificationProvider({ children }) {
     }
   };
 
-  // Получение токена для push-уведомлений
+  // Получение токена для push-уведомлений (для Development Build)
   const registerForPushNotifications = async () => {
     if (!Device.isDevice) {
       console.log('Push-уведомления недоступны на эмуляторе');
@@ -80,37 +81,73 @@ export function NotificationProvider({ children }) {
         return null;
       }
 
-      // Настраиваем канал уведомлений для Android
+      // Настраиваем каналы уведомлений для Android
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
-          name: 'default',
+          name: 'Основные уведомления',
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#FF231F7C',
+          lightColor: '#770002',
+          sound: 'default'
+        });
+
+        // Другие каналы уведомлений
+        await Notifications.setNotificationChannelAsync('chat', {
+          name: 'Сообщения',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 100, 100, 100],
+          lightColor: '#0066FF',
+          sound: 'default'
+        });
+
+        await Notifications.setNotificationChannelAsync('tickets', {
+          name: 'Тикеты',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 75, 75, 75],
+          lightColor: '#FF9800',
+          sound: 'default'
         });
       }
 
-      // Получаем токен
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-      if (!projectId) {
-        console.error('EAS Project ID не найден в Constants.expoConfig.extra.eas.projectId');
-        return null;
+      let token;
+      let type: 'fcm' | 'expo' | 'unknown' = 'unknown';
+
+      try {
+        // В Development Build получаем нативный FCM токен
+        const tokenData = await Notifications.getDevicePushTokenAsync();
+        token = tokenData.data;
+        type = 'fcm';
+        console.log('Получен FCM токен:', token);
+      } catch (error) {
+        console.log('Не удалось получить FCM токен, пробуем Expo токен...');
+
+        try {
+          // Запасной вариант - Expo Push Token
+          const projectId = ''; // Здесь ваш projectId из app.json
+          const tokenData = await Notifications.getExpoPushTokenAsync({
+            projectId: projectId || undefined,
+          });
+          token = tokenData.data;
+          type = 'expo';
+          console.log('Получен Expo Push токен:', token);
+        } catch (fallbackError) {
+          console.error('Не удалось получить никакой токен:', fallbackError);
+          return null;
+        }
       }
 
-      const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId,
-      });
-
-      const token = tokenData.data;
-      console.log('Push token:', token);
+      // Сохраняем токен и его тип
       setPushToken(token);
+      setTokenType(type);
 
       // Регистрируем токен на сервере, если пользователь авторизован
       if (isAuthenticated && token) {
         try {
           const response = await notificationsApi.registerDeviceToken(token, {
-            deviceName: Device.deviceName || 'Устройство'
+            deviceName: Device.deviceName || 'Устройство',
+            tokenType: type
           });
+
           if (response.success) {
             setIsRegistered(true);
             console.log('Токен успешно зарегистрирован на сервере');
@@ -130,11 +167,17 @@ export function NotificationProvider({ children }) {
   // Отправка локального уведомления
   const sendLocalNotification = async (title: string, body: string, data?: any) => {
     try {
+      const channelId = data?.type ?
+        (data.type === 'chat' ? 'chat' :
+         data.type === 'ticket' ? 'tickets' : 'default') :
+        'default';
+
       const notificationId = await Notifications.scheduleNotificationAsync({
         content: {
           title,
           body,
-          data,
+          data: data || {},
+          ...(Platform.OS === 'android' ? { channelId } : {})
         },
         trigger: { seconds: 1 },
       });
@@ -148,19 +191,22 @@ export function NotificationProvider({ children }) {
   // Отправка тестового push-уведомления
   const sendTestPushNotification = async () => {
     try {
-      // Отправляем локальное уведомление
+      // Сначала отправляем локальное уведомление для демонстрации
       await sendLocalNotification(
         "Тестовое локальное уведомление",
         "Это локальное уведомление отправлено из приложения",
-        { type: 'local_test' }
+        { type: 'test' }
       );
 
-      // Если есть токен, пробуем отправить через сервер
+      // Если есть токен, отправляем push через сервер
       if (pushToken) {
         try {
-          await notificationsApi.sendTestNotification(pushToken);
+          const response = await notificationsApi.sendTestNotification(pushToken, tokenType);
+          console.log('Ответ сервера:', response);
+          return response;
         } catch (error) {
-          console.error('Ошибка при отправке тестового уведомления через сервер:', error);
+          console.error('Ошибка при отправке push-уведомления:', error);
+          throw error;
         }
       }
     } catch (error) {
@@ -182,7 +228,8 @@ export function NotificationProvider({ children }) {
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
       console.log('Ответ на уведомление получен:', response);
-      // Здесь можно добавить логику обработки нажатий на уведомления
+      // Здесь логика для обработки нажатий на уведомления
+      // Например навигация к соответствующему экрану
     });
 
     // Получаем токен, если устройство физическое
@@ -191,7 +238,7 @@ export function NotificationProvider({ children }) {
 
       // Регистрируем фоновый обработчик уведомлений
       registerBackgroundNotificationHandler().catch(error => {
-        console.error('Ошибка при регистрации фонового обработчика уведомлений:', error);
+        console.error('Ошибка при регистрации фонового обработчика:', error);
       });
     }
 
@@ -213,7 +260,8 @@ export function NotificationProvider({ children }) {
       if (isAuthenticated && pushToken) {
         try {
           const response = await notificationsApi.registerDeviceToken(pushToken, {
-            deviceName: Device.deviceName
+            deviceName: Device.deviceName || 'Устройство',
+            tokenType: tokenType
           });
           setIsRegistered(response.success);
         } catch (error) {
@@ -239,6 +287,7 @@ export function NotificationProvider({ children }) {
     <NotificationContext.Provider
       value={{
         pushToken,
+        tokenType,
         notification,
         requestPermissions,
         registerForPushNotifications,

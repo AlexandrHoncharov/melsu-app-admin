@@ -291,10 +291,13 @@ export default function ProfileScreen() {
         route: '/profile/support'
       },
         {
-  icon: 'notifications',
-  title: 'Тестирование уведомлений',
-  onPress: () => router.push('/profile/notification-test'),
-  showChevron: true,
+  id: 'notification-test',
+        title: 'Справка',
+        subtitle: 'Получите помощь по использованию',
+        icon: 'notification-test',
+        iconBgColor: '#FFF3E0',
+        iconColor: '#F57C00',
+        route: '/profile/notification-test'
 },
       {
         id: 'about',

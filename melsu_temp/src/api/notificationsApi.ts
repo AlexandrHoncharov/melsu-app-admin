@@ -7,12 +7,13 @@ export interface DeviceTokenRequest {
   token: string;
   device: string;
   platform: string;
+  tokenType?: 'fcm' | 'expo' | 'unknown';
 }
 
 export interface NotificationResponse {
   success: boolean;
   message: string;
-  action?: string; // Для некоторых ответов может возвращаться тип действия
+  action?: string;
 }
 
 // API для работы с уведомлениями
@@ -25,23 +26,27 @@ const notificationsApi = {
    */
   registerDeviceToken: async (
     token: string,
-    deviceInfo?: { deviceName?: string }
+    deviceInfo?: {
+      deviceName?: string;
+      tokenType?: 'fcm' | 'expo' | 'unknown';
+    }
   ): Promise<NotificationResponse> => {
     try {
       const response = await apiClient.post('/device/register', {
         token,
         device: deviceInfo?.deviceName || 'Неизвестное устройство',
-        platform: Platform.OS
+        platform: Platform.OS,
+        tokenType: deviceInfo?.tokenType || 'unknown'
       });
       return response.data;
     } catch (error) {
-      console.error('Ошибка при регистрации токена устройства:', error);
+      console.error('Ошибка при регистрации токена:', error);
       throw error;
     }
   },
 
   /**
-   * Отмена регистрации токена устройства (при выходе из аккаунта)
+   * Отмена регистрации токена устройства
    * @param token Токен устройства для удаления
    * @returns Результат отмены регистрации
    */
@@ -50,75 +55,31 @@ const notificationsApi = {
       const response = await apiClient.post('/device/unregister', { token });
       return response.data;
     } catch (error) {
-      console.error('Ошибка при отмене регистрации токена устройства:', error);
+      console.error('Ошибка при отмене регистрации токена:', error);
       throw error;
     }
   },
 
   /**
    * Отправка тестового push-уведомления
-   * @param token Токен устройства (опционально)
+   * @param token Токен устройства
+   * @param tokenType Тип токена (fcm или expo)
    * @returns Результат отправки
    */
-  sendTestNotification: async (token?: string): Promise<NotificationResponse> => {
+  sendTestNotification: async (
+    token: string,
+    tokenType: 'fcm' | 'expo' | 'unknown' = 'unknown'
+  ): Promise<NotificationResponse> => {
     try {
-      const response = await apiClient.post('/device/test-notification', token ? { token } : {});
+      const response = await apiClient.post('/device/test-notification', {
+        token,
+        tokenType
+      });
       return response.data;
     } catch (error) {
       console.error('Ошибка при отправке тестового уведомления:', error);
       throw error;
     }
-  },
-
-  /**
-   * Получение настроек уведомлений пользователя
-   * @returns Настройки уведомлений
-   */
-  getNotificationSettings: async () => {
-    try {
-      const response = await apiClient.get('/notifications/settings');
-      return response.data;
-    } catch (error) {
-      console.error('Ошибка при получении настроек уведомлений:', error);
-      throw error;
-    }
-  },
-
-  /**
-   * Обновление настроек уведомлений пользователя
-   * @param settings Новые настройки уведомлений
-   * @returns Обновленные настройки
-   */
-  updateNotificationSettings: async (settings: any) => {
-    try {
-      const response = await apiClient.put('/notifications/settings', settings);
-      return response.data;
-    } catch (error) {
-      console.error('Ошибка при обновлении настроек уведомлений:', error);
-      throw error;
-    }
-  },
-
-  /**
-   * Отправка локального тестового уведомления
-   * Это клиентская функция, не использует API
-   * @param title Заголовок уведомления
-   * @param body Текст уведомления
-   * @param data Дополнительные данные
-   * @returns Promise с результатом отправки
-   */
-  sendLocalNotification: async (
-    title: string,
-    body: string,
-    data?: any
-  ) => {
-    // Эта функция должна использовать Notifications.scheduleNotificationAsync из expo-notifications
-    // Она реализована в хуке useNotifications
-    console.log('Вызов sendLocalNotification должен быть обработан через useNotifications');
-    return {
-      success: false,
-      message: 'Эта функция должна вызываться через useNotifications'
-    };
   }
 };
 

@@ -147,23 +147,18 @@ class VerificationLog(db.Model):
 # Добавьте этот класс в models.py
 
 class DeviceToken(db.Model):
-    """Токены устройств для push-уведомлений"""
-    __tablename__ = 'device_token'
-    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+    """Модель для хранения токенов устройств пользователей"""
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    user = db.relationship('User', backref='device_tokens')
-
-    token = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
-    device_name = db.Column(db.String(100, collation='utf8mb4_unicode_ci'))
-    platform = db.Column(db.String(20, collation='utf8mb4_unicode_ci'))  # ios / android
-
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    token = db.Column(db.String(255), nullable=False, unique=True)
+    device_name = db.Column(db.String(100))
+    platform = db.Column(db.String(20))  # 'ios', 'android', 'web'
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    last_used_at = db.Column(db.DateTime)
 
     def __repr__(self):
-        return f'<DeviceToken {self.token[:10]}... ({self.platform})>'
+        return f'<DeviceToken {self.token[:10]}...>'
 
 
 class Ticket(db.Model):

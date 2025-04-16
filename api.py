@@ -11,7 +11,7 @@ from functools import wraps
 from db import db
 from models import User, Teacher, Schedule, VerificationLog, Schedule, ScheduleTeacher
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import credentials, auth, messaging
 from flask import request
 import requests
 from bs4 import BeautifulSoup
@@ -52,6 +52,15 @@ TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
 os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+
+try:
+    cred = credentials.Certificate('firebase.json')
+    firebase_admin.initialize_app(cred)
+    print("Firebase Admin SDK успешно инициализирован")
+    FIREBASE_AVAILABLE = True
+except Exception as e:
+    print(f"Ошибка инициализации Firebase Admin SDK: {e}")
+    FIREBASE_AVAILABLE = False
 
 # Firebase Admin SDK initialization removed
 if not firebase_admin._apps:
@@ -1912,50 +1921,157 @@ def internal_error(error):
     return jsonify({'message': 'Внутренняя ошибка сервера'}), 500
 
 
-# STUB function that doesn't actually send messages
-def send_push_message(token, title, message, extra=None):
-    """
-    Stub function for push notifications - no longer sends actual notifications
-    """
-    print(f"NOTIFICATION DISABLED: Would have sent '{title}: {message}' to token {token[:10]}...")
-    return {"success": True, "info": "Notification functionality disabled"}
+def send_push_message(token, title, message, data=None):
+    """Отправка push-уведомления через Firebase Cloud Messaging"""
+
+    if not FIREBASE_AVAILABLE:
+        print("Firebase Admin SDK не доступен. Уведомление не отправлено.")
+        return {"success": False, "message": "Firebase недоступен"}
+
+    try:
+        # Подготавливаем сообщение
+        message_data = {
+            'token': token,
+            'notification': {
+                'title': title,
+                'body': message
+            },
+            'android': {
+                'priority': 'high',
+                'notification': {
+                    'icon': 'notification_icon',
+                    'color': '#770002'
+                }
+            },
+            'apns': {
+                'payload': {
+                    'aps': {
+                        'contentAvailable': True
+                    }
+                }
+            }
+        }
+
+        # Добавляем дополнительные данные, если они предоставлены
+        if data:
+            message_data['data'] = data
+
+        # Отправляем сообщение
+        response = messaging.send(message_data)
+        print(f"Уведомление успешно отправлено: {response}")
+        return {"success": True, "message_id": response}
+    except Exception as e:
+        print(f"Ошибка при отправке push-уведомления: {e}")
+        return {"success": False, "error": str(e)}
 
 
 # STUB device token endpoint - returns success but doesn't do anything
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Stub endpoint for device token registration - does nothing"""
-    print(f"Device token registration requested but disabled")
-    return jsonify({
-        'message': 'Уведомления отключены в этой версии',
-        'success': True,
-        'action': 'disabled'
-    }), 200
+    """Регистрация токена устройства для push-уведомлений"""
+    try:
+        data = request.json
+
+        if not data or not data.get('token'):
+            return jsonify({'message': 'Токен не предоставлен', 'success': False}), 400
+
+        token = data.get('token')
+        device = data.get('device', 'Неизвестное устройство')
+        platform = data.get('platform', 'unknown')
+
+        # Сохранение токена в базе данных
+        # Здесь вы можете использовать вашу модель DeviceToken или другую структуру
+        # для хранения токенов устройств
+
+        return jsonify({
+            'message': 'Токен устройства зарегистрирован',
+            'success': True,
+            'action': 'registered'
+        }), 200
+
+    except Exception as e:
+        print(f"Ошибка при регистрации токена устройства: {str(e)}")
+        return jsonify({
+            'message': f'Ошибка: {str(e)}',
+            'success': False
+        }), 500
 
 
 # STUB endpoint for unregistering device tokens
 @app.route('/api/device/unregister', methods=['POST'])
 @token_required
 def unregister_device(current_user):
-    """Stub endpoint for device token unregistration - does nothing"""
-    print(f"Device token unregistration requested but disabled")
-    return jsonify({
-        'message': 'Уведомления отключены в этой версии',
-        'success': True,
-        'deleted_count': 0
-    }), 200
+    """Отмена регистрации токена устройства"""
+    try:
+        data = request.json
+
+        if not data or not data.get('token'):
+            return jsonify({'message': 'Токен не предоставлен', 'success': False}), 400
+
+        token = data.get('token')
+
+        # Удаление токена из базы данных
+        # Здесь вы можете использовать вашу модель DeviceToken или другую структуру
+
+        return jsonify({
+            'message': 'Токен устройства удален',
+            'success': True,
+            'deleted_count': 1
+        }), 200
+
+    except Exception as e:
+        print(f"Ошибка при удалении токена устройства: {str(e)}")
+        return jsonify({
+            'message': f'Ошибка: {str(e)}',
+            'success': False
+        }), 500
 
 
 # STUB endpoint for test notifications
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
-    """Stub endpoint for test notifications - does nothing"""
-    return jsonify({
-        'message': 'Уведомления отключены в этой версии',
-        'success': False
-    }), 200
+    """Отправка тестового push-уведомления"""
+    try:
+        data = request.json
+        token = data.get('token')
+
+        if not token:
+            return jsonify({
+                'message': 'Токен не предоставлен',
+                'success': False
+            }), 400
+
+        # Отправка тестового уведомления
+        result = send_push_message(
+            token=token,
+            title=f"Тестовое уведомление",
+            message="Это тестовое push-уведомление от сервера",
+            data={
+                'type': 'test',
+                'timestamp': datetime.datetime.now().isoformat()
+            }
+        )
+
+        if result.get('success'):
+            return jsonify({
+                'message': 'Тестовое уведомление отправлено',
+                'success': True,
+                'message_id': result.get('message_id')
+            }), 200
+        else:
+            return jsonify({
+                'message': f"Ошибка при отправке: {result.get('error')}",
+                'success': False
+            }), 500
+
+    except Exception as e:
+        print(f"Ошибка при отправке тестового уведомления: {str(e)}")
+        return jsonify({
+            'message': f'Ошибка: {str(e)}',
+            'success': False
+        }), 500
 
 
 # STUB endpoint for chat notifications

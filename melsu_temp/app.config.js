@@ -43,8 +43,16 @@ module.exports = {
       ]
     },
     "plugins": [
-      "expo-router"
-    ],
+  "expo-router",
+  [
+    "expo-notifications",
+    {
+      "icon": "./assets/images/notification-icon.png",
+      "color": "#770002",
+      "sounds": ["./assets/sounds/notification.wav"]
+    }
+  ]
+],
 
     "experiments": {
       "typedRoutes": true

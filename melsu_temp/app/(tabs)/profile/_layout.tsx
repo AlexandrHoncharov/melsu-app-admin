@@ -15,28 +15,34 @@ export default function ProfileLayout() {
           title: 'Профиль'
         }}
       />
-        <Stack.Screen
+      <Stack.Screen
         name="tickets"
         options={{
           headerShown: false,
           title: 'Тикеты'
         }}
       />
-        <Stack.Screen
+      <Stack.Screen
         name="create-ticket"
         options={{
           headerShown: false,
           title: 'Создать тикет'
         }}
       />
-        <Stack.Screen
+      <Stack.Screen
         name="ticket-details"
         options={{
           headerShown: false,
           title: 'Подробности тикета'
         }}
       />
-
+      <Stack.Screen
+        name="notification-test"
+        options={{
+          headerShown: false,
+          title: 'Тестирование уведомлений'
+        }}
+      />
       <Stack.Screen
         name="change-password"
         options={{

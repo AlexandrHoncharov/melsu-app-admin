@@ -2,16 +2,8 @@ import React from 'react';
 import { Stack } from 'expo-router';
 import { AuthProvider } from '../hooks/useAuth';
 import { StatusBar } from 'expo-status-bar';
-import { usePushNotifications } from '../hooks/usePushNotifications';
 import { NotificationProvider } from '../hooks/useNotifications';
 import { UnreadMessagesProvider } from '../hooks/useUnreadMessages';
-
-// Component for initializing push notifications
-const PushNotificationsInitializer = () => {
-  // Just call the hook to set up all necessary listeners
-  usePushNotifications();
-  return null;
-};
 
 export default function RootLayout() {
   return (
@@ -19,8 +11,6 @@ export default function RootLayout() {
       <NotificationProvider>
         <UnreadMessagesProvider>
           <StatusBar style="dark" />
-          {/* Push notifications initializer */}
-          <PushNotificationsInitializer />
 
           <Stack>
             <Stack.Screen
@@ -59,14 +49,13 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
-  name="newsitem/[id]"
-  options={{
-    title: 'Новость',
-      headerShown: false,
-    headerTintColor: '#770002',
-  }}
-/>
-
+              name="newsitem/[id]"
+              options={{
+                title: 'Новость',
+                headerShown: false,
+                headerTintColor: '#770002',
+              }}
+            />
             <Stack.Screen
               name="new-chat"
               options={{

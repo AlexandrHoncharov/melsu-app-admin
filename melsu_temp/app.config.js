@@ -30,7 +30,6 @@ module.exports = {
       "bundleIdentifier": "com.melsu.app"
     },
     "android": {
-      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -40,12 +39,11 @@ module.exports = {
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
-        "VIBRATE",
-        "RECEIVE_BOOT_COMPLETED"]
+        "VIBRATE"
+      ]
     },
     "plugins": [
-      "expo-router",
-        "expo-notifications"
+      "expo-router"
     ],
 
     "experiments": {

@@ -9,9 +9,9 @@ import random
 import string
 from functools import wraps
 from db import db
-from models import User, Teacher, Schedule, VerificationLog, DeviceToken, ScheduleTeacher
+from models import User, Teacher, Schedule, VerificationLog, Schedule, ScheduleTeacher
 import firebase_admin
-from firebase_admin import credentials, auth, messaging
+from firebase_admin import credentials, auth
 from flask import request
 import requests
 from bs4 import BeautifulSoup
@@ -27,16 +27,11 @@ from flask import request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 from models import Ticket, TicketMessage, TicketAttachment
 
-# Проверяем доступность Firebase Admin SDK
-try:
-    FIREBASE_AVAILABLE = True
-    print("Firebase Admin SDK доступен для отправки FCM уведомлений")
-except ImportError:
-    print("Firebase Admin SDK недоступен. FCM уведомления не будут работать.")
-    FIREBASE_AVAILABLE = False
+# Firebase initialization removed
+FIREBASE_AVAILABLE = False
+print("Firebase Admin SDK disabled. FCM notifications have been disabled.")
 
 # Папка для хранения прикрепленных файлов
-
 app = Flask(__name__)
 CORS(app)
 
@@ -58,22 +53,15 @@ os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-# Инициализация Firebase Admin SDK
-firebase_cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
+# Firebase Admin SDK initialization removed
 if not firebase_admin._apps:
     try:
-        # Сначала пробуем инициализировать с сервисным аккаунтом
-        if FIREBASE_AVAILABLE and os.path.exists(firebase_cred_path):
-            cred = credentials.Certificate(firebase_cred_path)
-            firebase_admin.initialize_app(cred)
-            print("Firebase Admin SDK инициализирован успешно с сервисным аккаунтом")
-        else:
-            # Иначе используем обычный файл конфигурации
-            cred = credentials.Certificate('firebase.json')
-            firebase_admin.initialize_app(cred)
-            print("Firebase Admin SDK инициализирован успешно с обычным файлом конфигурации")
+        # Initialize with minimal permissions for auth only (no messaging)
+        cred = credentials.Certificate('firebase.json')
+        firebase_admin.initialize_app(cred)
+        print("Firebase Admin SDK initialized for authentication only")
     except Exception as e:
-        print(f"Ошибка инициализации Firebase Admin SDK: {e}")
+        print(f"Error initializing Firebase Admin SDK: {e}")
 
 
 def token_required(f):
@@ -638,65 +626,7 @@ def get_users(current_user):
 
     return jsonify(result)
 
-
-# Update the unregister_device function in api.py
-@app.route('/api/device/unregister', methods=['POST'])
-@token_required
-def unregister_device(current_user):
-    """Отмена регистрации токена устройства при выходе из аккаунта"""
-
-    try:
-        data = request.json
-
-        # Если токен предоставлен, пытаемся удалить конкретный токен
-        if 'token' in data and data['token'] and data['token'] != 'force_all_tokens_removal':
-            device_token = data['token']
-
-            # Ищем запись с этим токеном для текущего пользователя
-            token_record = DeviceToken.query.filter_by(
-                user_id=current_user.id,
-                token=device_token
-            ).first()
-
-            # Если токен найден, удаляем его
-            if token_record:
-                db.session.delete(token_record)
-                db.session.commit()
-
-                return jsonify({
-                    'message': 'Токен устройства успешно удален',
-                    'success': True,
-                    'deleted_count': 1
-                }), 200
-
-        # Если токен не предоставлен или запрошено удаление всех токенов,
-        # удаляем ВСЕ токены пользователя
-        # Находим все токены пользователя
-        user_tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
-        token_count = len(user_tokens)
-
-        # Удаляем все найденные токены
-        for token in user_tokens:
-            db.session.delete(token)
-
-        db.session.commit()
-
-        return jsonify({
-            'message': f'Удалено {token_count} токенов устройств пользователя',
-            'success': True,
-            'deleted_count': token_count
-        }), 200
-
-    except Exception as e:
-        print(f"Error unregistering device token: {str(e)}")
-
-        # Даже при ошибке возвращаем успех, чтобы не блокировать процесс выхода
-        return jsonify({
-            'message': f'Произошла ошибка, но процесс выхода может быть продолжен',
-            'error': str(e),
-            'success': True
-        }), 200
-
+# REMOVED: Device token registration endpoints
 
 # Исправление для api.py - маршрут /api/users/<int:user_id>
 
@@ -907,72 +837,7 @@ def change_password_api(current_user):
         }), 500
 
 
-@app.route('/api/chat/send-notification', methods=['POST'])
-@token_required
-def send_chat_notification(current_user):
-    """Send a push notification about a new chat message"""
-    try:
-        data = request.json
-        required_fields = ['recipient_id', 'chat_id', 'message_preview', 'sender_name']
-
-        # Verify all required fields are present
-        for field in required_fields:
-            if field not in data:
-                return jsonify({'message': f'Field {field} is required'}), 400
-
-        recipient_id = data['recipient_id']
-        chat_id = data['chat_id']
-        message_preview = data['message_preview']
-        sender_name = data['sender_name']
-
-        # Get recipient's device tokens
-        device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
-
-        if not device_tokens:
-            return jsonify({
-                'message': 'No device tokens found for recipient',
-                'success': False
-            }), 404
-
-        # Send notification to all recipient's devices
-        notification_title = f'Новое сообщение от {sender_name}'
-        notification_body = message_preview
-
-        results = []
-        success_count = 0
-
-        for token_obj in device_tokens:
-            result = send_push_message(
-                token_obj.token,
-                notification_title,
-                notification_body,
-                {
-                    'type': 'chat_message',
-                    'chat_id': chat_id,
-                    'sender_name': sender_name,
-                    'timestamp': datetime.datetime.now().isoformat()
-                }
-            )
-
-            if result.get("success", False):
-                success_count += 1
-
-            results.append({
-                "device": token_obj.device_name,
-                "platform": token_obj.platform,
-                "success": result.get("success", False)
-            })
-
-        return jsonify({
-            'message': f'Notifications sent to {success_count} of {len(device_tokens)} devices',
-            'success': success_count > 0,
-            'results': results
-        })
-
-    except Exception as e:
-        print(f"Error sending chat notification: {str(e)}")
-        return jsonify({'message': f'Error: {str(e)}', 'success': False}), 500
-
+# REMOVED: Notification endpoints
 
 # Helper function to check if username exists
 def username_exists(username):
@@ -1318,7 +1183,7 @@ def get_user_tickets(current_user):
         query = Ticket.query.filter_by(user_id=current_user.id)
 
         # Применяем фильтры, если они указаны
-        if status:
+        if status and status != 'all':
             query = query.filter_by(status=status)
         if category:
             query = query.filter_by(category=category)
@@ -1377,8 +1242,6 @@ def create_ticket(current_user):
 
         db.session.add(message)
         db.session.commit()
-
-        # Отправляем уведомление администраторам (можно реализовать позже)
 
         return jsonify({
             "message": "Ticket created successfully",
@@ -1482,38 +1345,6 @@ def add_ticket_message(current_user, ticket_id):
         ticket.updated_at = datetime.datetime.utcnow()
 
         db.session.commit()
-
-        # Отправляем уведомление (если сообщение от админа - пользователю, иначе - админам)
-        try:
-            recipient_id = ticket.user_id if is_from_admin else None  # Для админов нужна другая логика
-
-            if recipient_id:
-                # Получаем получателя
-                recipient = User.query.get(recipient_id)
-                if recipient:
-                    # Получаем токены устройств
-                    device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
-
-                    if device_tokens:
-                        # Формируем данные уведомления
-                        notification_title = "Новый ответ в обращении"
-                        notification_body = f"Получен ответ на ваше обращение: {ticket.title}"
-
-                        # Отправляем уведомление на каждое устройство
-                        for token_obj in device_tokens:
-                            send_push_message(
-                                token_obj.token,
-                                notification_title,
-                                notification_body,
-                                {
-                                    'type': 'ticket_message',
-                                    'ticket_id': ticket.id,
-                                    'timestamp': datetime.datetime.utcnow().isoformat()
-                                }
-                            )
-        except Exception as notify_error:
-            # Логируем ошибку, но не прерываем основной процесс
-            print(f"Error sending notification: {str(notify_error)}")
 
         return jsonify({
             "message": "Message added successfully",
@@ -2081,279 +1912,60 @@ def internal_error(error):
     return jsonify({'message': 'Внутренняя ошибка сервера'}), 500
 
 
+# STUB function that doesn't actually send messages
 def send_push_message(token, title, message, extra=None):
     """
-    Отправляет push-уведомление через FCM или Expo Push Service
-    в зависимости от типа токена.
-
-    Args:
-        token (str): FCM или Expo Push токен
-        title (str): Заголовок уведомления
-        message (str): Текст уведомления
-        extra (dict, optional): Дополнительные данные для уведомления
-
-    Returns:
-        dict: Результат отправки с информацией об успехе/ошибке
+    Stub function for push notifications - no longer sends actual notifications
     """
-    try:
-        # Проверяем, что extra не None
-        if extra is None:
-            extra = {}
-
-        # Определяем тип токена (Expo или FCM)
-        is_expo_token = token.startswith('ExponentPushToken')
-
-        # Логируем информацию о типе токена
-        print(f"Sending notification to {token[:10]}... (Type: {'Expo' if is_expo_token else 'FCM'})")
-
-        if is_expo_token:
-            # Используем Expo Push Service для токенов Expo
-            import requests
-            import json
-
-            expo_push_url = "https://exp.host/--/api/v2/push/send"
-
-            # Подготовка данных для отправки
-            push_message = {
-                "to": token,
-                "title": title,
-                "body": message,
-                "data": extra or {},
-                "sound": "default",
-                "priority": "high"
-            }
-
-            # Выполнение запроса
-            headers = {
-                "Accept": "application/json",
-                "Accept-encoding": "gzip, deflate",
-                "Content-Type": "application/json",
-            }
-
-            response = requests.post(
-                expo_push_url,
-                data=json.dumps(push_message),
-                headers=headers
-            )
-
-            # Проверка ответа
-            if response.status_code != 200:
-                error_msg = f"Expo push failed with status {response.status_code}: {response.text}"
-                print(error_msg)
-                return {"success": False, "error": error_msg}
-
-            print(f"Successfully sent Expo push notification")
-            return {"success": True, "receipt": response.json()}
-
-        elif FIREBASE_AVAILABLE:
-            # Используем Firebase Cloud Messaging для FCM токенов
-            print(f"Sending FCM notification via Firebase Admin SDK")
-
-            # Преобразуем все значения в data в строки (требование FCM)
-            data_payload = {}
-            for key, value in extra.items():
-                data_payload[str(key)] = str(value)
-
-            # Создаем сообщение
-            notification = messaging.Notification(
-                title=title,
-                body=message
-            )
-
-            android_config = messaging.AndroidConfig(
-                priority="high",
-                notification=messaging.AndroidNotification(
-                    sound="default",
-                    priority="high",
-                    channel_id="default"  # Должно соответствовать ID канала в приложении
-                )
-            )
-
-            fcm_message = messaging.Message(
-                notification=notification,
-                data=data_payload,
-                token=token,
-                android=android_config
-            )
-
-            # Отправляем сообщение
-            try:
-                response = messaging.send(fcm_message)
-                print(f"Successfully sent FCM notification: {response}")
-                return {"success": True, "receipt": response}
-            except Exception as fcm_error:
-                error_msg = f"FCM message failed: {fcm_error}"
-                print(error_msg)
-                return {"success": False, "error": error_msg}
-
-        else:
-            error_msg = "FCM token received but Firebase Admin SDK is not available"
-            print(error_msg)
-            return {"success": False, "error": error_msg}
-
-    except Exception as exc:
-        error_msg = f"Push message failed: {exc}"
-        print(error_msg)
-        return {"success": False, "error": error_msg}
+    print(f"NOTIFICATION DISABLED: Would have sent '{title}: {message}' to token {token[:10]}...")
+    return {"success": True, "info": "Notification functionality disabled"}
 
 
-# Упрощенная и более надежная версия endpoint'а для регистрации токенов
-# Заменяет существующий метод в api.py
-
+# STUB device token endpoint - returns success but doesn't do anything
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Регистрация токена устройства для push-уведомлений с улучшенной обработкой ошибок"""
+    """Stub endpoint for device token registration - does nothing"""
+    print(f"Device token registration requested but disabled")
+    return jsonify({
+        'message': 'Уведомления отключены в этой версии',
+        'success': True,
+        'action': 'disabled'
+    }), 200
 
-    try:
-        data = request.json
-        required_fields = ['token', 'platform']
 
-        # Проверяем обязательные поля
-        for field in required_fields:
-            if field not in data:
-                return jsonify({
-                    'message': f'Поле {field} обязательно',
-                    'success': False
-                }), 400
+# STUB endpoint for unregistering device tokens
+@app.route('/api/device/unregister', methods=['POST'])
+@token_required
+def unregister_device(current_user):
+    """Stub endpoint for device token unregistration - does nothing"""
+    print(f"Device token unregistration requested but disabled")
+    return jsonify({
+        'message': 'Уведомления отключены в этой версии',
+        'success': True,
+        'deleted_count': 0
+    }), 200
 
-        # Получаем данные из запроса
-        token = data.get('token')
-        platform = data.get('platform')
-        device_name = data.get('device_name', '')
 
-        print(f"Registering device token for user {current_user.id}, device: {device_name}")
-
-        # Шаг 1: Проверяем, существует ли уже такой токен
-        existing_token = DeviceToken.query.filter_by(
-            user_id=current_user.id,
-            token=token
-        ).first()
-
-        if existing_token:
-            # Обновляем существующий токен
-            existing_token.platform = platform
-            existing_token.device_name = device_name
-            existing_token.updated_at = datetime.datetime.utcnow()
-            db.session.commit()
-
-            print(f"Updated existing token for user {current_user.id}")
-            return jsonify({
-                'message': 'Токен устройства успешно обновлен',
-                'success': True,
-                'action': 'updated'
-            }), 200
-
-        # Шаг 2: Если заданно имя устройства, удаляем старые токены для этого устройства
-        if device_name:
-            try:
-                # Находим и удаляем токены для того же устройства
-                same_device_tokens = DeviceToken.query.filter_by(
-                    user_id=current_user.id,
-                    device_name=device_name
-                ).all()
-
-                for old_token in same_device_tokens:
-                    print(f"Removing old token for user {current_user.id}, device: {device_name}")
-                    db.session.delete(old_token)
-
-                if same_device_tokens:
-                    db.session.commit()
-                    print(f"Removed {len(same_device_tokens)} old tokens for device {device_name}")
-            except Exception as e:
-                print(f"Error removing old tokens: {str(e)}")
-                # Продолжаем выполнение даже при ошибке
-                db.session.rollback()
-        try:
-            new_token = DeviceToken(
-                user_id=current_user.id,
-                token=token,
-                platform=platform,
-                device_name=device_name
-            )
-            db.session.add(new_token)
-            db.session.commit()
-
-            print(f"Successfully registered new token for user {current_user.id}")
-            return jsonify({
-                'message': 'Токен устройства успешно зарегистрирован',
-                'success': True,
-                'action': 'created'
-            }), 201
-        except Exception as e:
-            db.session.rollback()
-            print(f"Error creating token record: {str(e)}")
-
-            # Даже при ошибке проверяем, был ли токен все же создан
-            check_token = DeviceToken.query.filter_by(
-                user_id=current_user.id,
-                token=token
-            ).first()
-
-            if check_token:
-                return jsonify({
-                    'message': 'Токен уже существует несмотря на ошибку создания',
-                    'success': True,
-                    'action': 'exists'
-                }), 200
-            else:
-                return jsonify({
-                    'message': f'Ошибка при регистрации токена: {str(e)}',
-                    'success': False,
-                    'error': str(e)
-                }), 500
-
-    except Exception as e:
-        print(f"Unexpected error in register_device: {str(e)}")
-        return jsonify({
-            'message': f'Произошла непредвиденная ошибка: {str(e)}',
-            'success': False,
-            'error': str(e)
-        }), 500
-
+# STUB endpoint for test notifications
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
-    """Тестовая отправка push-уведомления с подробным выводом результатов"""
-
-    # Получаем все токены пользователя
-    tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
-
-    if not tokens:
-        return jsonify({
-            'message': 'Нет зарегистрированных устройств',
-            'success': False
-        }), 404
-
-    # Отправляем тестовое уведомление на каждое устройство
-    results = []
-    success_count = 0
-
-    for token_obj in tokens:
-        result = send_push_message(
-            token_obj.token,
-            'Тестовое уведомление',
-            'Это тестовое push-уведомление от приложения Университет',
-            {'type': 'test'}
-        )
-
-        if result["success"]:
-            success_count += 1
-
-        # Сохраняем результат для каждого устройства
-        results.append({
-            "device_name": token_obj.device_name,
-            "platform": token_obj.platform,
-            "token_preview": token_obj.token[:10] + "...",
-            "success": result["success"],
-            "token_type": "FCM" if not token_obj.token.startswith('ExponentPushToken') else "Expo",
-            "details": result.get("receipt") if result["success"] else result.get("error")
-        })
-
+    """Stub endpoint for test notifications - does nothing"""
     return jsonify({
-        'message': f'Уведомления отправлены на {success_count} из {len(tokens)} устройств',
-        'success': success_count > 0,
-        'results': results
+        'message': 'Уведомления отключены в этой версии',
+        'success': False
+    }), 200
+
+
+# STUB endpoint for chat notifications
+@app.route('/api/chat/send-notification', methods=['POST'])
+@token_required
+def send_chat_notification(current_user):
+    """Stub endpoint for chat notifications - does nothing"""
+    return jsonify({
+        'message': 'Уведомления отключены в этой версии',
+        'success': True,
     }), 200
 
 

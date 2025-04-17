@@ -1,0 +1,372 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+    <!-- Заголовок страницы -->
+    <div class="flex justify-between items-center mb-6">
+        <div class="flex items-center space-x-3">
+            <div class="bg-primary text-white p-3 rounded-lg shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800">Детали уведомления #{{ notification.id }}</h1>
+                <p class="text-sm text-gray-500">Отправлено: {{ notification.created_at.strftime('%d.%m.%Y %H:%M') }}</p>
+            </div>
+        </div>
+        <a href="{{ url_for('notification_history') }}" class="flex items-center text-gray-600 hover:text-primary transition-colors bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+            </svg>
+            К истории уведомлений
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <!-- Содержимое уведомления -->
+        <div class="md:col-span-2 space-y-6">
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                <div class="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800">Содержимое уведомления</h2>
+                </div>
+                <div class="p-6">
+                    <!-- Предпросмотр уведомления -->
+                    <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 max-w-md mb-6">
+                        <div class="flex items-center mb-2">
+                            <div class="bg-primary rounded-full w-10 h-10 flex items-center justify-center text-white mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="font-bold text-gray-900">{{ notification.title }}</p>
+                                <p class="text-xs text-gray-500">Сейчас • Университетское приложение</p>
+                            </div>
+                        </div>
+                        <p class="text-gray-800">{{ notification.message }}</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <h3 class="text-sm font-medium text-gray-700 mb-1">Тип уведомления</h3>
+                            <div class="bg-gray-50 p-3 rounded-md">
+                                {% if notification.notification_type == 'info' %}
+                                    <span class="bg-blue-100 text-blue-800 py-1 px-3 rounded-full text-xs">Информация</span>
+                                {% elif notification.notification_type == 'important' %}
+                                    <span class="bg-red-100 text-red-800 py-1 px-3 rounded-full text-xs">Важное</span>
+                                {% elif notification.notification_type == 'schedule' %}
+                                    <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Расписание</span>
+                                {% elif notification.notification_type == 'verification' %}
+                                    <span class="bg-purple-100 text-purple-800 py-1 px-3 rounded-full text-xs">Верификация</span>
+                                {% elif notification.notification_type == 'ticket' %}
+                                    <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">Тикет</span>
+                                {% else %}
+                                    <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">{{ notification.notification_type }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        {% if notification.deep_link %}
+                        <div>
+                            <h3 class="text-sm font-medium text-gray-700 mb-1">Глубокая ссылка</h3>
+                            <div class="bg-gray-50 p-3 rounded-md font-mono text-sm">
+                                {{ notification.deep_link }}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Получатели уведомления -->
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                <div class="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800">Получатели уведомления</h2>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <h3 class="text-sm font-medium text-gray-700 mb-1">Тип получателей</h3>
+                            <div class="bg-gray-50 p-3 rounded-md">
+                                {% if recipient_filter.recipient_type == 'all' %}
+                                    <span class="text-gray-700">Все пользователи</span>
+                                {% elif recipient_filter.recipient_type == 'students' %}
+                                    <span class="text-gray-700">Студенты</span>
+                                {% elif recipient_filter.recipient_type == 'teachers' %}
+                                    <span class="text-gray-700">Преподаватели</span>
+                                {% elif recipient_filter.recipient_type == 'verified' %}
+                                    <span class="text-gray-700">Верифицированные пользователи</span>
+                                {% elif recipient_filter.recipient_type == 'custom' %}
+                                    <span class="text-gray-700">Пользовательский список</span>
+                                {% else %}
+                                    <span class="text-gray-700">{{ recipient_filter.recipient_type }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        {% if recipient_filter.recipient_type == 'students' %}
+                            {% if recipient_filter.student_group %}
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-700 mb-1">Группа</h3>
+                                <div class="bg-gray-50 p-3 rounded-md">
+                                    <span class="text-gray-700">{{ recipient_filter.student_group }}</span>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            {% if recipient_filter.student_course %}
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-700 mb-1">Курс</h3>
+                                <div class="bg-gray-50 p-3 rounded-md">
+                                    <span class="text-gray-700">{{ recipient_filter.student_course }}</span>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            {% if recipient_filter.student_faculty %}
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-700 mb-1">Факультет</h3>
+                                <div class="bg-gray-50 p-3 rounded-md">
+                                    <span class="text-gray-700">{{ recipient_filter.student_faculty }}</span>
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endif %}
+
+                        {% if recipient_filter.recipient_type == 'teachers' %}
+                            {% if recipient_filter.teacher_department %}
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-700 mb-1">Кафедра</h3>
+                                <div class="bg-gray-50 p-3 rounded-md">
+                                    <span class="text-gray-700">{{ recipient_filter.teacher_department }}</span>
+                                </div>
+                            </div>
+                            {% endif %}
+
+                            {% if recipient_filter.teacher_position %}
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-700 mb-1">Должность</h3>
+                                <div class="bg-gray-50 p-3 rounded-md">
+                                    <span class="text-gray-700">{{ recipient_filter.teacher_position }}</span>
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+
+                    <!-- Количество получателей -->
+                    <div class="flex flex-wrap gap-4 mt-4">
+                        <div class="bg-indigo-50 border border-indigo-100 rounded-lg px-4 py-3 flex-1">
+                            <div class="text-xs text-indigo-500 uppercase font-semibold mb-1">Пользователей</div>
+                            <div class="text-2xl font-bold text-indigo-700">{{ notification.recipients_count }}</div>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 flex-1">
+                            <div class="text-xs text-blue-500 uppercase font-semibold mb-1">Устройств</div>
+                            <div class="text-2xl font-bold text-blue-700">{{ notification.devices_count }}</div>
+                        </div>
+                        <div class="bg-green-50 border border-green-100 rounded-lg px-4 py-3 flex-1">
+                            <div class="text-xs text-green-500 uppercase font-semibold mb-1">Успешно</div>
+                            <div class="text-2xl font-bold text-green-700">{{ notification.success_count or 0 }}</div>
+                        </div>
+                        <div class="bg-red-50 border border-red-100 rounded-lg px-4 py-3 flex-1">
+                            <div class="text-xs text-red-500 uppercase font-semibold mb-1">Ошибок</div>
+                            <div class="text-2xl font-bold text-red-700">{{ notification.error_count or 0 }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ошибки доставки -->
+            {% if error_details and error_details|length > 0 %}
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                <div class="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800">Ошибки доставки</h2>
+                </div>
+                <div class="p-6">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead>
+                                <tr>
+                                    <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        ID пользователя
+                                    </th>
+                                    <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Токен устройства
+                                    </th>
+                                    <th class="px-6 py-3 bg-gray-50 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        Ошибка
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                {% for error in error_details %}
+                                <tr>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ error.user_id }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                        {{ error.token }}
+                                    </td>
+                                    <td class="px-6 py-4 text-sm text-red-600">
+                                        {{ error.error }}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Статус и действия -->
+        <div class="space-y-6">
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                <div class="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800">Статус отправки</h2>
+                </div>
+                <div class="p-6">
+                    <div class="flex items-center mb-4">
+                        {% if notification.status == 'pending' %}
+                            <div class="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center mr-3">
+                                <svg class="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-medium text-gray-900">Ожидание отправки</div>
+                                <div class="text-sm text-gray-500">Уведомление в очереди на отправку</div>
+                            </div>
+                        {% elif notification.status == 'processing' %}
+                            <div class="h-10 w-10 rounded-full bg-yellow-100 flex items-center justify-center mr-3">
+                                <svg class="animate-spin h-5 w-5 text-yellow-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-medium text-gray-900">Отправка</div>
+                                <div class="text-sm text-gray-500">Уведомление отправляется</div>
+                            </div>
+                        {% elif notification.status == 'completed' %}
+                            <div class="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center mr-3">
+                                <svg class="h-6 w-6 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-medium text-gray-900">Отправлено</div>
+                                <div class="text-sm text-gray-500">Отправка уведомления завершена</div>
+                            </div>
+                        {% elif notification.status == 'failed' %}
+                            <div class="h-10 w-10 rounded-full bg-red-100 flex items-center justify-center mr-3">
+                                <svg class="h-6 w-6 text-red-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-medium text-gray-900">Ошибка</div>
+                                <div class="text-sm text-gray-500">Возникла ошибка при отправке</div>
+                            </div>
+                        {% else %}
+                            <div class="h-10 w-10 rounded-full bg-gray-100 flex items-center justify-center mr-3">
+                                <svg class="h-6 w-6 text-gray-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="font-medium text-gray-900">{{ notification.status }}</div>
+                                <div class="text-sm text-gray-500">Неизвестный статус</div>
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="bg-gray-50 rounded-lg p-4 space-y-2">
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-500">Создано:</span>
+                            <span class="text-sm font-medium">{{ notification.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</span>
+                        </div>
+                        {% if notification.started_at %}
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-500">Начало отправки:</span>
+                            <span class="text-sm font-medium">{{ notification.started_at.strftime('%d.%m.%Y %H:%M:%S') }}</span>
+                        </div>
+                        {% endif %}
+                        {% if notification.completed_at %}
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-500">Завершение:</span>
+                            <span class="text-sm font-medium">{{ notification.completed_at.strftime('%d.%m.%Y %H:%M:%S') }}</span>
+                        </div>
+                        {% endif %}
+                        {% if notification.started_at and notification.completed_at %}
+                        <div class="flex justify-between">
+                            <span class="text-sm text-gray-500">Длительность:</span>
+                            <span class="text-sm font-medium">
+                                {% set duration = (notification.completed_at - notification.started_at).total_seconds() %}
+                                {% if duration < 60 %}
+                                    {{ duration|int }} сек.
+                                {% else %}
+                                    {{ (duration / 60)|int }} мин. {{ (duration % 60)|int }} сек.
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Действия -->
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                <div class="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800">Действия</h2>
+                </div>
+                <div class="p-6 space-y-4">
+                    {% if notification.status == 'completed' %}
+                    <a href="{{ url_for('resend_notification', notification_id=notification.id) }}"
+                       class="w-full flex items-center justify-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-red-900 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Отправить повторно
+                    </a>
+                    {% endif %}
+                    <a href="{{ url_for('notification_history') }}"
+                       class="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                        Создать новое уведомление
+                    </a>
+                </div>
+            </div>
+
+            <!-- Информация об админе -->
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+                <div class="bg-gray-50 px-6 py-4 border-b border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800">Отправитель</h2>
+                </div>
+                <div class="p-6">
+                    <div class="flex items-center">
+                        <div class="bg-primary text-white w-10 h-10 rounded-full flex items-center justify-center text-xl font-bold mr-4">
+                            A
+                        </div>
+                        <div>
+                            <div class="font-medium text-gray-900">
+                                {% if admin %}
+                                    {{ admin.full_name or admin.username }}
+                                {% else %}
+                                    Администратор #{{ notification.admin_id }}
+                                {% endif %}
+                            </div>
+                            <div class="text-sm text-gray-500">ID: {{ notification.admin_id }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

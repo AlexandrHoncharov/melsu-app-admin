@@ -95,6 +95,70 @@ def notification_history():
                            pagination=pagination)
 
 
+# Add these two routes to your app.py file
+
+@app.route('/notifications/view/<int:notification_id>')
+@login_required
+def view_notification_details(notification_id):
+    """View notification details including delivery status and recipients"""
+    notification = NotificationHistory.query.get_or_404(notification_id)
+
+    # Parse the recipients filter if available
+    recipient_filter = {}
+    if notification.recipient_filter:
+        try:
+            recipient_filter = json.loads(notification.recipient_filter)
+        except:
+            pass
+
+    # Parse error details if available
+    error_details = []
+    if notification.error_details:
+        try:
+            error_details = json.loads(notification.error_details)
+        except:
+            pass
+
+    return render_template('notifications/details.html',
+                           notification=notification,
+                           recipient_filter=recipient_filter,
+                           error_details=error_details)
+
+
+@app.route('/notifications/resend/<int:notification_id>')
+@login_required
+def resend_notification(notification_id):
+    """Resend a previously sent notification"""
+    try:
+        # Get the original notification
+        original = NotificationHistory.query.get_or_404(notification_id)
+
+        # Create a new notification with the same content
+        notification = NotificationHistory(
+            admin_id=session['user_id'],
+            title=original.title,
+            message=original.message,
+            notification_type=original.notification_type,
+            deep_link=original.deep_link,
+            recipient_filter=original.recipient_filter,
+            recipients_count=original.recipients_count,
+            devices_count=original.devices_count,
+            status='pending'
+        )
+
+        db.session.add(notification)
+        db.session.commit()
+
+        # Start the background task to send notifications
+        send_notifications_task(notification.id)
+
+        flash(f'Уведомление поставлено в очередь для повторной отправки', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при повторной отправке уведомления: {str(e)}', 'error')
+
+    return redirect(url_for('notification_history'))
+
 @app.route('/notifications/send', methods=['POST'])
 @login_required
 def send_notifications():

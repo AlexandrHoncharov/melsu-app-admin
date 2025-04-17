@@ -52,13 +52,13 @@ interface AuthContextProps {
   manuallyCheckVerificationStatus: () => Promise<void>;
 }
 
-// Update RegisterData interface
 interface RegisterData {
   fullName: string;
+  email: string;  // Add email field
   password: string;
   group?: string;
   role: UserRole;
-  speciality?: SpecialityData;  // Add this field
+  speciality?: SpecialityData;
 }
 
 interface SpecialityData {
@@ -293,17 +293,17 @@ const login = async (username: string, password: string) => {
   }
 };
 
-  // Update the register function
 const register = async (userData: RegisterData) => {
   setIsLoading(true);
   try {
     // Формируем данные для регистрации
     const registerData = {
       fullName: userData.fullName,
+      email: userData.email,  // Include email in the registration data
       password: userData.password,
       group: userData.group,
       role: userData.role,
-      speciality: userData.speciality  // Add speciality data
+      speciality: userData.speciality
     };
 
     const { token, user } = await authApi.register(registerData);
@@ -330,7 +330,7 @@ const register = async (userData: RegisterData) => {
   } finally {
     setIsLoading(false);
   }
-};
+}
 
 const logout = async () => {
   setIsLoading(true);

@@ -1270,20 +1270,19 @@ def register():
     data = request.json
 
     # Проверяем обязательные поля
-    required_fields = ['password', 'fullName', 'role', 'email']  # Добавляем email как обязательное поле
+    # Remove email from required fields to make it optional
+    required_fields = ['password', 'fullName', 'role']
     for field in required_fields:
         if field not in data:
             return jsonify({'message': f'Поле {field} обязательно'}), 400
 
-    # Проверка формата email (простая валидация)
-    email = data['email']
-    if not '@' in email or len(email) < 5:
-        return jsonify({'message': 'Некорректный формат email'}), 400
+    # Still validate email format if provided, but don't make it mandatory
+    if 'email' in data and data['email']:
+        email = data['email']
+        if not '@' in email or len(email) < 5:
+            return jsonify({'message': 'Некорректный формат email'}), 400
 
-    # Проверяем, существует ли пользователь с таким email
-    existing_user = User.query.filter_by(email=email).first()
-    if existing_user:
-        return jsonify({'message': 'Пользователь с таким email уже существует'}), 400
+    # Don't try to check for existing email - skip this step entirely
 
     # Генерируем имя пользователя, если оно не предоставлено
     if 'username' not in data or not data['username']:
@@ -1302,67 +1301,85 @@ def register():
     if username_exists(username):
         return jsonify({'message': 'Пользователь с таким логином уже существует'}), 400
 
-    # Создаем нового пользователя с email
-    new_user = User(
-        username=username,
-        password=data['password'],  # Хэширование произойдет в модели
-        email=email,  # Добавляем email
-        is_admin=False
-    )
+    try:
+        # Create user without email field to avoid database schema issues
+        new_user = User(
+            username=username,
+            password=data['password'],
+            is_admin=False
+        )
 
-    # Добавляем дополнительные поля
-    new_user.role = data.get('role')
-    new_user.full_name = data.get('fullName')
-    new_user.group = data.get('group')
-    new_user.faculty = data.get('faculty')
+        # Don't set email attribute, but keep it for response
+        email_for_response = data.get('email')
 
-    # Add speciality data if provided
-    if 'speciality' in data and data['speciality']:
-        speciality_data = data['speciality']
-        new_user.speciality_id = speciality_data.get('id')
-        new_user.speciality_code = speciality_data.get('code')
-        new_user.speciality_name = speciality_data.get('name')
-        new_user.study_form = speciality_data.get('form')
-        new_user.study_form_name = speciality_data.get('formName')
+        # Добавляем дополнительные поля
+        new_user.role = data.get('role')
+        new_user.full_name = data.get('fullName')
+        new_user.group = data.get('group')
+        new_user.faculty = data.get('faculty')
 
-        # Set faculty from speciality if not provided separately
-        if not new_user.faculty and speciality_data.get('faculty'):
-            new_user.faculty = speciality_data.get('faculty')
+        # Add speciality data if provided
+        if 'speciality' in data and data['speciality']:
+            speciality_data = data['speciality']
+            new_user.speciality_id = speciality_data.get('id')
+            new_user.speciality_code = speciality_data.get('code')
+            new_user.speciality_name = speciality_data.get('name')
+            new_user.study_form = speciality_data.get('form')
+            new_user.study_form_name = speciality_data.get('formName')
 
-    # Для студентов устанавливаем статус верификации
-    if data.get('role') == 'student':
-        new_user.verification_status = 'unverified'
-    elif data.get('role') == 'teacher':
-        new_user.verification_status = 'verified'  # Преподаватели по умолчанию верифицированы
+            # Set faculty from speciality if not provided separately
+            if not new_user.faculty and speciality_data.get('faculty'):
+                new_user.faculty = speciality_data.get('faculty')
 
-    db.session.add(new_user)
-    db.session.commit()
+        # Для студентов устанавливаем статус верификации
+        if data.get('role') == 'student':
+            new_user.verification_status = 'unverified'
+        elif data.get('role') == 'teacher':
+            new_user.verification_status = 'verified'  # Преподаватели по умолчанию верифицированы
 
-    # Создаем токен для пользователя
-    token = create_token(new_user.id)
+        db.session.add(new_user)
+        db.session.commit()
 
-    # Возвращаем данные и токен
-    return jsonify({
-        'message': 'Пользователь успешно создан',
-        'token': token,
-        'user': {
-            'id': new_user.id,
-            'username': new_user.username,
-            'email': new_user.email,  # Добавляем email в ответ
-            'fullName': new_user.full_name,
-            'role': new_user.role,
-            'group': new_user.group,
-            'faculty': new_user.faculty,
-            'verificationStatus': new_user.verification_status,
-            'speciality': {
-                'id': new_user.speciality_id,
-                'code': new_user.speciality_code,
-                'name': new_user.speciality_name,
-                'form': new_user.study_form,
-                'formName': new_user.study_form_name
-            } if new_user.speciality_id else None
-        }
-    }), 201
+        # Создаем токен для пользователя
+        token = create_token(new_user.id)
+
+        # Возвращаем данные и токен
+        return jsonify({
+            'message': 'Пользователь успешно создан',
+            'token': token,
+            'user': {
+                'id': new_user.id,
+                'username': new_user.username,
+                'email': email_for_response,  # Use saved email for response only
+                'fullName': new_user.full_name,
+                'role': new_user.role,
+                'group': new_user.group,
+                'faculty': new_user.faculty,
+                'verificationStatus': new_user.verification_status,
+                'speciality': {
+                    'id': new_user.speciality_id,
+                    'code': new_user.speciality_code,
+                    'name': new_user.speciality_name,
+                    'form': new_user.study_form,
+                    'formName': new_user.study_form_name
+                } if new_user.speciality_id else None
+            }
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error during registration: {str(e)}")
+        error_details = str(e)
+
+        # If we can identify specific issues, provide better error messages
+        if "field 'email' doesn't have a default value" in error_details:
+            return jsonify({
+                               'message': 'Ошибка при сохранении email. Пожалуйста, попробуйте другой формат email или сообщите администратору.'}), 500
+
+        return jsonify({
+            'message': 'Ошибка при создании пользователя',
+            'error': error_details
+        }), 500
 
 
 # Обновленный endpoint для входа в api.py
@@ -2803,10 +2820,15 @@ if __name__ == '__main__':
                 if 'faculty' not in column_names:
                     connection.execute(db.text("ALTER TABLE user ADD COLUMN faculty VARCHAR(255) DEFAULT NULL"))
 
+                # Add email column if it doesn't exist
+                if 'email' not in column_names:
+                    print("Adding missing email column to user table")
+                    connection.execute(
+                        db.text("ALTER TABLE user ADD COLUMN email VARCHAR(120) DEFAULT NULL UNIQUE"))
+
                 connection.commit()
 
             print("База данных успешно обновлена")
         except Exception as e:
             print(f"Ошибка при обновлении базы данных: {str(e)}")
-
     app.run(debug=True, host='0.0.0.0', port=5001)

@@ -16,13 +16,16 @@ interface SpecialityData {
   formName: string;
 }
 
+
+// Update RegisterRequest interface to include email
 interface RegisterRequest {
   username?: string; // Может генерироваться на сервере
   fullName: string;
+  email: string;  // Add email field
   password: string;
   group?: string;
   role: 'student' | 'teacher';
-  speciality?: SpecialityData;  // Add this field
+  speciality?: SpecialityData;
 }
 
 // Типы для ответов
@@ -74,29 +77,30 @@ const authApi = {
    * @returns Результат регистрации
    */
   register: async (userData: RegisterRequest): Promise<AuthResponse> => {
-    // We're not sending username anymore, it will be generated on the server
-    const requestData = {
-      fullName: userData.fullName,
-      password: userData.password,
-      group: userData.group,
-      role: userData.role,
-      speciality: userData.speciality  // Include speciality data
-    };
+  // We're not sending username anymore, it will be generated on the server
+  const requestData = {
+    fullName: userData.fullName,
+    email: userData.email,  // Include email in the request
+    password: userData.password,
+    group: userData.group,
+    role: userData.role,
+    speciality: userData.speciality
+  };
 
-    console.log('Register API request:', requestData);
+  console.log('Register API request:', requestData);
 
-    try {
-      const response = await apiClient.post<AuthResponse>('/auth/register', requestData);
+  try {
+    const response = await apiClient.post<AuthResponse>('/auth/register', requestData);
 
-      // Log response for debugging
-      console.log('Register API response:', response.data);
+    // Log response for debugging
+    console.log('Register API response:', response.data);
 
-      return response.data;
-    } catch (error) {
-      console.error('Register API error:', error);
-      throw error;
-    }
-  },
+    return response.data;
+  } catch (error) {
+    console.error('Register API error:', error);
+    throw error;
+  }
+},
 
   /**
    * Проверка валидности токена и получение текущего пользователя

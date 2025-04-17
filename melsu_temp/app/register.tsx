@@ -15,7 +15,7 @@ import {
   StatusBar
 } from 'react-native';
 import { useAuth } from '../hooks/useAuth';
-import { router } from 'expo-router'; // Уберите Stack из импорта, так как используем кастомный заголовок
+import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import CustomDropdown from '../components/CustomDropdown';
@@ -23,7 +23,7 @@ import CustomDropdown from '../components/CustomDropdown';
 // Типы для ошибок валидации
 interface ValidationErrors {
   fullName?: string;
-  email?: string; // Добавляем поле для ошибки email
+  email?: string;
   password?: string;
   confirmPassword?: string;
   group?: string;
@@ -47,7 +47,7 @@ interface Speciality {
 export default function RegisterScreen() {
   // Состояния для полей формы
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState(''); // Добавляем состояние для email
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [group, setGroup] = useState('');
@@ -202,7 +202,7 @@ export default function RegisterScreen() {
       // Вызываем API для регистрации
       const result = await register({
         fullName,
-        email, // Добавляем email
+        email, // IMPORTANT: Added email to the registration data
         password,
         group,
         role: 'student',

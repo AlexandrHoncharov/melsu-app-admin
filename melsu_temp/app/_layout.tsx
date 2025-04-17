@@ -20,26 +20,27 @@ export default function RootLayout() {
               }}
             />
             <Stack.Screen
-  name="login"
-  options={{
-    headerShown: false,
-    // Disable back gesture for login screen
-    gestureEnabled: false,
-  }}
-/>
-
-// Изменение для register (нужно убрать заголовок):
-<Stack.Screen
-  name="register"
-  options={{
-    headerShown: false, // Убираем стандартный заголовок
-  }}
-/>ы
+              name="login"
+              options={{
+                headerShown: false,
+                // Disable back gesture for login screen
+                gestureEnabled: false,
+              }}
+            />
+            <Stack.Screen
+              name="register"
+              options={{
+                headerShown: false,
+              }}
+            />
             <Stack.Screen
               name="verification"
               options={{
                 title: 'Верификация',
                 headerTintColor: '#770002',
+                // Prevent going back to login from verification
+                headerBackVisible: false,
+                gestureEnabled: false,
               }}
             />
             <Stack.Screen

@@ -12,11 +12,13 @@ import {
   Platform,
   StatusBar,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../hooks/useAuth';
 import { router } from 'expo-router';
 import scheduleService from '../../../src/services/scheduleService';
+import * as Clipboard from 'expo-clipboard';
 
 const { width } = Dimensions.get('window');
 
@@ -158,6 +160,35 @@ export default function ProfileScreen() {
       );
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  // Handle email click
+  const handleEmailPress = async (email) => {
+    try {
+      await Linking.openURL(`mailto:${email}`);
+    } catch (error) {
+      console.error('Error opening mail client:', error);
+
+      // On error, offer to copy email to clipboard
+      Alert.alert(
+        'Почтовый клиент не доступен',
+        'Хотите скопировать адрес электронной почты?',
+        [
+          { text: 'Отмена', style: 'cancel' },
+          {
+            text: 'Копировать',
+            onPress: async () => {
+              try {
+                await Clipboard.setStringAsync(email);
+                Alert.alert('Готово', 'Email скопирован в буфер обмена');
+              } catch (clipboardError) {
+                console.error('Failed to copy to clipboard:', clipboardError);
+              }
+            }
+          }
+        ]
+      );
     }
   };
 
@@ -394,142 +425,163 @@ export default function ProfileScreen() {
         <View style={styles.userInfoCard}>
           <Text style={styles.cardTitle}>Персональная информация</Text>
 
-          {/* Student information */}
-          {user.role === 'student' && (
-            <View style={styles.infoContent}>
-              {/* Group and year */}
-              {user.group && (
-                <View style={styles.infoRow}>
-                  <View style={styles.infoLabelContainer}>
-                    <Ionicons name="people-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Группа</Text>
-                  </View>
-                  <View style={styles.infoValueContainer}>
-                    <Text style={styles.infoValue}>{user.group}</Text>
-                    {course !== null && (
-                      <View style={styles.yearBadge}>
-                        <Ionicons name="calendar-outline" size={12} color="#1976D2" style={{marginRight: 4}} />
-                        <Text style={styles.yearText}>{course}-й курс</Text>
-                      </View>
-                    )}
-                    {isLoadingCourse && (
-                      <ActivityIndicator size="small" color="#1976D2" style={{marginLeft: 8}} />
-                    )}
-                  </View>
+          {/* Common info section - For both student and teacher */}
+          <View style={styles.infoContent}>
+            {/* Email display - added for all users */}
+            {user.email && (
+              <TouchableOpacity
+                style={styles.emailRow}
+                onPress={() => handleEmailPress(user.email)}
+                activeOpacity={0.6}
+              >
+                <View style={styles.infoLabelContainer}>
+                  <Ionicons name="mail-outline" size={18} color="#555" />
+                  <Text style={styles.infoLabel}>Email</Text>
                 </View>
-              )}
-
-              {/* Faculty */}
-              {user.faculty && (
-                <View style={styles.infoRow}>
-                  <View style={styles.infoLabelContainer}>
-                    <Ionicons name="business-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Факультет</Text>
-                  </View>
-                  <View style={styles.infoValueWrap}>
-                    <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.faculty}</Text>
-                  </View>
+                <View style={styles.emailValueContainer}>
+                  <Text style={styles.emailValue}>{user.email}</Text>
+                  <Ionicons name="open-outline" size={14} color="#1976D2" style={styles.emailIcon} />
                 </View>
-              )}
+              </TouchableOpacity>
+            )}
 
-              {/* Study form */}
-              {getFormName(user) && (
-                <View style={styles.infoRow}>
-                  <View style={styles.infoLabelContainer}>
-                    <Ionicons name="time-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Форма обучения</Text>
-                  </View>
-                  <Text style={styles.infoValue}>{getFormName(user)}</Text>
-                </View>
-              )}
-
-              {/* Speciality section - важная часть, которая требует исправления */}
-              <View style={styles.specialitySection}>
-                <View style={styles.specialityHeader}>
-                  <Ionicons name="school-outline" size={18} color="#555" />
-                  <Text style={styles.specialityLabel}>Направление подготовки</Text>
-                </View>
-
-                {user.speciality && (user.speciality.name || user.speciality.code) ? (
-                  <View style={styles.specialityContent}>
-                    {user.speciality.code && (
-                      <View style={styles.codeContainer}>
-                        <Text style={styles.codeLabel}>Код:</Text>
-                        <Text style={styles.codeValue}>{user.speciality.code}</Text>
-                      </View>
-                    )}
-                    {user.speciality.name && (
-                      <Text style={styles.specialityValue}>{user.speciality.name}</Text>
-                    )}
-                  </View>
-                ) : (
-                  <View style={styles.specialityContent}>
-                    <Text style={styles.emptySpeciality}>
-                      Информация о направлении подготовки отсутствует
-                    </Text>
+            {/* Student information */}
+            {user.role === 'student' && (
+              <>
+                {/* Group and year */}
+                {user.group && (
+                  <View style={styles.infoRow}>
+                    <View style={styles.infoLabelContainer}>
+                      <Ionicons name="people-outline" size={18} color="#555" />
+                      <Text style={styles.infoLabel}>Группа</Text>
+                    </View>
+                    <View style={styles.infoValueContainer}>
+                      <Text style={styles.infoValue}>{user.group}</Text>
+                      {course !== null && (
+                        <View style={styles.yearBadge}>
+                          <Ionicons name="calendar-outline" size={12} color="#1976D2" style={{marginRight: 4}} />
+                          <Text style={styles.yearText}>{course}-й курс</Text>
+                        </View>
+                      )}
+                      {isLoadingCourse && (
+                        <ActivityIndicator size="small" color="#1976D2" style={{marginLeft: 8}} />
+                      )}
+                    </View>
                   </View>
                 )}
-              </View>
 
-              {/* Verification status */}
-              <TouchableOpacity
-                style={[styles.verificationRow, { backgroundColor: verificationInfo.bgColor }]}
-                onPress={() => router.push('/verification')}
-              >
-                <View style={styles.verificationInfo}>
-                  <Ionicons name={verificationInfo.icon} size={20} color={verificationInfo.color} />
-                  <Text style={[styles.verificationText, { color: verificationInfo.color }]}>
-                    {verificationInfo.text}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={verificationInfo.color} />
-              </TouchableOpacity>
-            </View>
-          )}
+                {/* Faculty */}
+                {user.faculty && (
+                  <View style={styles.infoRow}>
+                    <View style={styles.infoLabelContainer}>
+                      <Ionicons name="business-outline" size={18} color="#555" />
+                      <Text style={styles.infoLabel}>Факультет</Text>
+                    </View>
+                    <View style={styles.infoValueWrap}>
+                      <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.faculty}</Text>
+                    </View>
+                  </View>
+                )}
 
-          {/* Teacher information */}
-          {user.role === 'teacher' && (
-            <View style={styles.infoContent}>
-              {/* Position */}
-              {user.position && (
-                <View style={styles.infoRow}>
-                  <View style={styles.infoLabelContainer}>
-                    <Ionicons name="briefcase-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Должность</Text>
+                {/* Study form */}
+                {getFormName(user) && (
+                  <View style={styles.infoRow}>
+                    <View style={styles.infoLabelContainer}>
+                      <Ionicons name="time-outline" size={18} color="#555" />
+                      <Text style={styles.infoLabel}>Форма обучения</Text>
+                    </View>
+                    <Text style={styles.infoValue}>{getFormName(user)}</Text>
                   </View>
-                  <View style={styles.infoValueWrap}>
-                    <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.position}</Text>
-                  </View>
-                </View>
-              )}
+                )}
 
-              {/* Department */}
-              {user.department && (
-                <View style={styles.departmentSection}>
-                  <View style={styles.departmentHeader}>
-                    <Ionicons name="business-outline" size={18} color="#555" />
-                    <Text style={styles.departmentLabel}>Кафедра</Text>
-                  </View>
-                  <View style={styles.departmentContent}>
-                    <Text style={styles.departmentValue}>{user.department}</Text>
-                  </View>
-                </View>
-              )}
-
-              {/* Faculty */}
-              {user.faculty && (
-                <View style={styles.infoRow}>
-                  <View style={styles.infoLabelContainer}>
+                {/* Speciality section - важная часть, которая требует исправления */}
+                <View style={styles.specialitySection}>
+                  <View style={styles.specialityHeader}>
                     <Ionicons name="school-outline" size={18} color="#555" />
-                    <Text style={styles.infoLabel}>Факультет</Text>
+                    <Text style={styles.specialityLabel}>Направление подготовки</Text>
                   </View>
-                  <View style={styles.infoValueWrap}>
-                    <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.faculty}</Text>
-                  </View>
+
+                  {user.speciality && (user.speciality.name || user.speciality.code) ? (
+                    <View style={styles.specialityContent}>
+                      {user.speciality.code && (
+                        <View style={styles.codeContainer}>
+                          <Text style={styles.codeLabel}>Код:</Text>
+                          <Text style={styles.codeValue}>{user.speciality.code}</Text>
+                        </View>
+                      )}
+                      {user.speciality.name && (
+                        <Text style={styles.specialityValue}>{user.speciality.name}</Text>
+                      )}
+                    </View>
+                  ) : (
+                    <View style={styles.specialityContent}>
+                      <Text style={styles.emptySpeciality}>
+                        Информация о направлении подготовки отсутствует
+                      </Text>
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-          )}
+
+                {/* Verification status */}
+                <TouchableOpacity
+                  style={[styles.verificationRow, { backgroundColor: verificationInfo.bgColor }]}
+                  onPress={() => router.push('/verification')}
+                >
+                  <View style={styles.verificationInfo}>
+                    <Ionicons name={verificationInfo.icon} size={20} color={verificationInfo.color} />
+                    <Text style={[styles.verificationText, { color: verificationInfo.color }]}>
+                      {verificationInfo.text}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={verificationInfo.color} />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {/* Teacher information */}
+            {user.role === 'teacher' && (
+              <>
+                {/* Position */}
+                {user.position && (
+                  <View style={styles.infoRow}>
+                    <View style={styles.infoLabelContainer}>
+                      <Ionicons name="briefcase-outline" size={18} color="#555" />
+                      <Text style={styles.infoLabel}>Должность</Text>
+                    </View>
+                    <View style={styles.infoValueWrap}>
+                      <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.position}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Department */}
+                {user.department && (
+                  <View style={styles.departmentSection}>
+                    <View style={styles.departmentHeader}>
+                      <Ionicons name="business-outline" size={18} color="#555" />
+                      <Text style={styles.departmentLabel}>Кафедра</Text>
+                    </View>
+                    <View style={styles.departmentContent}>
+                      <Text style={styles.departmentValue}>{user.department}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* Faculty */}
+                {user.faculty && (
+                  <View style={styles.infoRow}>
+                    <View style={styles.infoLabelContainer}>
+                      <Ionicons name="school-outline" size={18} color="#555" />
+                      <Text style={styles.infoLabel}>Факультет</Text>
+                    </View>
+                    <View style={styles.infoValueWrap}>
+                      <Text style={styles.infoValue} numberOfLines={2} ellipsizeMode="tail">{user.faculty}</Text>
+                    </View>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
         </View>
 
         {/* Menu Grid */}
@@ -738,6 +790,31 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '500',
     textAlign: 'right',
+  },
+  // Email specific styles
+  emailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    backgroundColor: '#FAFAFA',
+  },
+  emailValueContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  emailValue: {
+    fontSize: 14,
+    color: '#1976D2',
+    fontWeight: '500',
+    textAlign: 'right',
+  },
+  emailIcon: {
+    marginLeft: 6,
   },
   yearBadge: {
     backgroundColor: '#E3F2FD',

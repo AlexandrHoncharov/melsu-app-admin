@@ -79,7 +79,17 @@ export default function NewChatScreen() {
           });
 
           console.log(`Loaded ${response.data?.length || 0} ${targetRole} from API`);
-          setUsers(response.data || []);
+
+          // Filter out unverified students if current user is a teacher and target role is student
+          let filteredUsers = response.data || [];
+          if (user.role === 'teacher' && targetRole === 'student') {
+            filteredUsers = filteredUsers.filter(student =>
+              student.verificationStatus === 'verified'
+            );
+            console.log(`Filtered to ${filteredUsers.length} verified students`);
+          }
+
+          setUsers(filteredUsers);
         } catch (error) {
           console.error('Error loading users from API:', error);
           Alert.alert(
@@ -316,6 +326,16 @@ export default function NewChatScreen() {
         </Text>
       </View>
 
+      {/* Show note about verified students for teachers */}
+      {user?.role === 'teacher' && targetRole === 'student' && !isGroupChat && (
+        <View style={styles.noteContainer}>
+          <Ionicons name="information-circle-outline" size={20} color="#770002" />
+          <Text style={styles.noteText}>
+            Отображаются только верифицированные студенты
+          </Text>
+        </View>
+      )}
+
       <View style={styles.searchContainer}>
         <Ionicons name="search" size={20} color="#999" />
         <TextInput
@@ -414,6 +434,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     textAlign: 'center',
+  },
+  noteContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFF3E0',
+    margin: 16,
+    marginTop: 0,
+    padding: 10,
+    borderRadius: 8,
+  },
+  noteText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#E65100',
+    marginLeft: 8,
   },
   searchContainer: {
     flexDirection: 'row',

@@ -948,10 +948,10 @@ export default function ScheduleScreen() {
             />
             <Text style={styles.verificationText}>
               {user?.verificationStatus === 'pending'
-                ? 'Student ID is being verified'
+                ? 'Студ. билет подтвержден'
                 : user?.verificationStatus === 'rejected'
-                ? 'Verification rejected. Tap to upload a new photo.'
-                : 'Verify your student ID'}
+                ? 'Верификация отклонена. Нажмите чтобы загрузить новое фото'
+                : 'Верифицируйте свой студ. билет'}
             </Text>
           </TouchableOpacity>
         )}

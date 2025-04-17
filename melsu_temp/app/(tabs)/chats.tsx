@@ -8,12 +8,14 @@ import {
   Alert,
   ActivityIndicator,
   TouchableHighlight,
-  RefreshControl // Импортируем RefreshControl для функции pull-to-refresh
+  RefreshControl, // Import for pull-to-refresh
+  Image
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import chatService from '../../src/services/chatService';
 import Constants from 'expo-constants';
+import { useAuth } from '../../hooks/useAuth'; // Import useAuth hook
 
 const ChatsList = forwardRef((props, ref) => {
   const [chats, setChats] = useState([]);
@@ -26,12 +28,22 @@ const ChatsList = forwardRef((props, ref) => {
   const alreadyLoadedRef = useRef(false); // Для отслеживания первой загрузки
   const focusedRef = useRef(false); // Для отслеживания фокуса экрана
   const router = useRouter();
+  const { user } = useAuth(); // Get user data from Auth context
+
+  // Проверка статуса верификации
+  const isVerified = user?.role === 'teacher' || user?.verificationStatus === 'verified';
+  const isPending = user?.role === 'student' && user?.verificationStatus === 'pending';
 
   // Интервал обновления списка в миллисекундах
   const UPDATE_INTERVAL = 30000; // 30 секунд
 
   // Функция загрузки чатов с таймаутом
   const loadChats = async (silent = false) => {
+    // Если пользователь не верифицирован, не загружаем чаты
+    if (!isVerified && !isPending) {
+      return;
+    }
+
     // Если запущена тихая загрузка, не показываем индикатор загрузки
     if (!silent) {
       console.log('Начинаем загрузку чатов');
@@ -99,6 +111,11 @@ const ChatsList = forwardRef((props, ref) => {
 
   // Функция для настройки интервала обновления
   const setupUpdateInterval = () => {
+    // Skip for unverified users
+    if (!isVerified && !isPending) {
+      return;
+    }
+
     // Очищаем предыдущий интервал, если он существует
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
@@ -121,6 +138,11 @@ const ChatsList = forwardRef((props, ref) => {
       console.log('Экран чатов в фокусе');
       focusedRef.current = true;
 
+      // Skip setup for unverified users
+      if (!isVerified && !isPending) {
+        return;
+      }
+
       // Первая загрузка - выполняем только если список пуст и ранее не загружался
       if (!alreadyLoadedRef.current || chats.length === 0) {
         console.log('Первая загрузка списка чатов');
@@ -142,11 +164,16 @@ const ChatsList = forwardRef((props, ref) => {
           intervalRef.current = null;
         }
       };
-    }, [chats.length])
+    }, [chats.length, isVerified, isPending])
   );
 
   // Загрузка при первом рендере или изменении ключа обновления
   useEffect(() => {
+    // Skip loading for unverified users
+    if (!isVerified && !isPending) {
+      return;
+    }
+
     loadChats();
 
     // Очистка при размонтировании
@@ -154,7 +181,7 @@ const ChatsList = forwardRef((props, ref) => {
       if (timeoutId) clearTimeout(timeoutId);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [refreshKey]);
+  }, [refreshKey, isVerified, isPending]);
 
   // Экспозиция методов для родительского компонента
   useImperativeHandle(ref, () => ({
@@ -319,6 +346,55 @@ const ChatsList = forwardRef((props, ref) => {
     );
   };
 
+  // Render verification required message for unverified students
+  if (user?.role === 'student' && !isVerified && !isPending) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.verificationRequiredContainer}>
+          <Image
+            source={require('../../assets/images/university-logo.png')}
+            style={styles.verificationLogo}
+            resizeMode="contain"
+          />
+          <Ionicons name="shield-outline" size={64} color="#770002" />
+          <Text style={styles.verificationTitle}>Требуется верификация</Text>
+          <Text style={styles.verificationMessage}>
+            Для доступа к чатам необходимо пройти верификацию студенческого билета.
+          </Text>
+          <TouchableOpacity
+            style={styles.verificationButton}
+            onPress={() => router.push('/verification')}
+          >
+            <Text style={styles.verificationButtonText}>Пройти верификацию</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  // Show pending verification message for students with pending verification
+  if (user?.role === 'student' && isPending) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.verificationRequiredContainer}>
+          <Image
+            source={require('../../assets/images/university-logo.png')}
+            style={styles.verificationLogo}
+            resizeMode="contain"
+          />
+          <Ionicons name="hourglass-outline" size={64} color="#FF9800" />
+          <Text style={styles.verificationTitle}>Верификация в процессе</Text>
+          <Text style={styles.verificationMessage}>
+            Ваш студенческий билет находится на проверке. Доступ к чатам будет открыт после успешной верификации.
+          </Text>
+          <Text style={styles.verificationSubMessage}>
+            Обычно проверка занимает 1-2 рабочих дня.
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {isLoading && (
@@ -479,6 +555,50 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 5,
     zIndex: 2,
+  },
+  verificationRequiredContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 30,
+  },
+  verificationLogo: {
+    width: 80,
+    height: 80,
+    marginBottom: 20,
+  },
+  verificationTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  verificationMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  verificationSubMessage: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  verificationButton: {
+    backgroundColor: '#770002',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 24,
+  },
+  verificationButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
 

@@ -8,7 +8,8 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
-  SafeAreaView
+  SafeAreaView,
+  BackHandler
 } from 'react-native';
 import { Stack, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,6 +25,18 @@ export default function VerificationScreen() {
   const [error, setError] = useState<string | null>(null);
   const [cameraPermission, setCameraPermission] = useState<boolean | null>(null);
   const [isReuploading, setIsReuploading] = useState(false);
+
+  // Handle hardware back button press
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Show the same alert as the skip button
+      handleSkip();
+      // Return true to prevent default back behavior
+      return true;
+    });
+
+    return () => backHandler.remove();
+  }, []);
 
   useEffect(() => {
     // Check verification status immediately when component mounts
@@ -60,7 +73,7 @@ export default function VerificationScreen() {
           'Уже верифицировано',
           'Ваш студенческий билет уже прошел верификацию.',
           [
-            { text: 'OK', onPress: () => router.back() }
+            { text: 'OK', onPress: () => router.replace('/(tabs)') }
           ]
         );
       } else if (user?.verificationStatus === 'pending') {
@@ -231,6 +244,16 @@ export default function VerificationScreen() {
     );
   };
 
+  // Custom header back button
+  const renderCustomBackButton = () => (
+    <TouchableOpacity
+      style={styles.backButton}
+      onPress={handleSkip}
+    >
+      <Ionicons name="arrow-back" size={24} color="#770002" />
+    </TouchableOpacity>
+  );
+
   if (isLoading) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -247,6 +270,7 @@ export default function VerificationScreen() {
         options={{
           title: isReuploading ? 'Повторная верификация' : 'Верификация',
           headerTintColor: '#770002',
+          headerLeft: () => renderCustomBackButton(),
         }}
       />
 
@@ -525,5 +549,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4CAF50',
     marginLeft: 8,
+  },
+  backButton: {
+    padding: 8,
   },
 });

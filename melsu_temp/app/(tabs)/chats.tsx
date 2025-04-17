@@ -7,7 +7,8 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  TouchableHighlight
+  TouchableHighlight,
+  RefreshControl // Импортируем RefreshControl для функции pull-to-refresh
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +21,7 @@ const ChatsList = forwardRef((props, ref) => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [deletingChatId, setDeletingChatId] = useState(null);
   const [timeoutId, setTimeoutId] = useState(null); // Таймаут для отмены бесконечной загрузки
+  const [isRefreshing, setIsRefreshing] = useState(false); // Состояние для pull-to-refresh
   const intervalRef = useRef(null); // Для хранения ссылки на интервал обновления
   const alreadyLoadedRef = useRef(false); // Для отслеживания первой загрузки
   const focusedRef = useRef(false); // Для отслеживания фокуса экрана
@@ -42,6 +44,7 @@ const ChatsList = forwardRef((props, ref) => {
     const loadingTimeout = setTimeout(() => {
       console.log('Превышен таймаут загрузки чатов');
       if (!silent) setIsLoading(false);
+      setIsRefreshing(false); // Сбрасываем состояние pull-to-refresh при тайм-ауте
       // Если после тайм-аута список чатов пуст, добавляем пустой массив
       setChats(prevChats => prevChats.length > 0 ? prevChats : []);
     }, 8000);
@@ -54,6 +57,7 @@ const ChatsList = forwardRef((props, ref) => {
       if (!initialized) {
         console.log('Не удалось инициализировать chatService');
         if (!silent) setIsLoading(false);
+        setIsRefreshing(false); // Сбрасываем состояние pull-to-refresh
         clearTimeout(loadingTimeout);
         // Если инициализация не удалась, устанавливаем пустой массив
         setChats([]);
@@ -81,8 +85,16 @@ const ChatsList = forwardRef((props, ref) => {
     } finally {
       console.log('Завершаем загрузку чатов');
       if (!silent) setIsLoading(false);
+      setIsRefreshing(false); // Сбрасываем состояние pull-to-refresh
       clearTimeout(loadingTimeout);
     }
+  };
+
+  // Обработчик pull-to-refresh
+  const handlePullToRefresh = () => {
+    console.log('Обновление списка через pull-to-refresh');
+    setIsRefreshing(true); // Устанавливаем состояние обновления
+    loadChats(true); // Загружаем чаты в тихом режиме (без полного индикатора загрузки)
   };
 
   // Функция для настройки интервала обновления
@@ -320,12 +332,24 @@ const ChatsList = forwardRef((props, ref) => {
         renderItem={renderChatItem}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContainer}
+        // Добавляем RefreshControl для поддержки pull-to-refresh
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handlePullToRefresh}
+            colors={['#770002']} // Цвет индикатора загрузки для Android
+            tintColor="#770002" // Цвет индикатора загрузки для iOS
+            title="Обновление..." // Только для iOS
+            titleColor="#770002" // Только для iOS
+          />
+        }
         ListEmptyComponent={
           !isLoading ? (
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubbles-outline" size={48} color="#ccc" />
               <Text style={styles.emptyText}>У вас пока нет чатов</Text>
               <Text style={styles.emptyHint}>Для удаления чата удерживайте его</Text>
+              <Text style={styles.emptyHint}>Потяните вниз для обновления</Text>
             </View>
           ) : null
         }

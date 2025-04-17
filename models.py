@@ -16,6 +16,9 @@ class User(db.Model):
     is_admin = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Добавляем поле для email
+    email = db.Column(db.String(120, collation='utf8mb4_unicode_ci'), unique=True, nullable=True)
+
     # Дополнительные поля для мобильного приложения
     role = db.Column(db.String(20), default=None)  # student / teacher
     verification_status = db.Column(db.String(20), default=None)  # unverified / pending / verified / rejected
@@ -30,10 +33,11 @@ class User(db.Model):
     study_form = db.Column(db.String(20), default=None)  # 'full-time', 'full-part', or 'correspondence'
     study_form_name = db.Column(db.String(50), default=None)  # 'Очная', 'Очно-заочная', or 'Заочная'
 
-    def __init__(self, username, password, is_admin=False):
+    def __init__(self, username, password, email=None, is_admin=False):
         self.username = username
         self.password_plain = password  # Сохраняем пароль в открытом виде
         self.password = generate_password_hash(password)
+        self.email = email
         self.is_admin = is_admin
 
     def check_password(self, password):

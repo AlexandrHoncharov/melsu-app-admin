@@ -11,17 +11,19 @@ import {
   Platform,
   Image,
   ScrollView,
-  SafeAreaView
+  SafeAreaView,
+  StatusBar
 } from 'react-native';
 import { useAuth } from '../hooks/useAuth';
-import { Stack, router } from 'expo-router';
+import { router } from 'expo-router'; // Уберите Stack из импорта, так как используем кастомный заголовок
 import { Ionicons } from '@expo/vector-icons';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
 import CustomDropdown from '../components/CustomDropdown';
 
 // Типы для ошибок валидации
 interface ValidationErrors {
   fullName?: string;
+  email?: string; // Добавляем поле для ошибки email
   password?: string;
   confirmPassword?: string;
   group?: string;
@@ -45,6 +47,7 @@ interface Speciality {
 export default function RegisterScreen() {
   // Состояния для полей формы
   const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState(''); // Добавляем состояние для email
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [group, setGroup] = useState('');
@@ -92,6 +95,12 @@ export default function RegisterScreen() {
     }
   };
 
+  // Validate email
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
   // Prepare dropdown items from specialities data
   const getSpecialityDropdownItems = () => {
     return Object.keys(specialities).map(key => ({
@@ -132,6 +141,13 @@ export default function RegisterScreen() {
       newErrors.fullName = 'Введите ФИО';
     } else if (fullName.trim().split(' ').length < 2) {
       newErrors.fullName = 'Введите фамилию и имя';
+    }
+
+    // Проверка email
+    if (!email.trim()) {
+      newErrors.email = 'Введите email';
+    } else if (!validateEmail(email.trim())) {
+      newErrors.email = 'Некорректный формат email';
     }
 
     if (!password) {
@@ -186,6 +202,7 @@ export default function RegisterScreen() {
       // Вызываем API для регистрации
       const result = await register({
         fullName,
+        email, // Добавляем email
         password,
         group,
         role: 'student',
@@ -229,14 +246,19 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar style="dark" />
+      <ExpoStatusBar style="dark" />
 
-      <Stack.Screen
-        options={{
-          title: 'Регистрация',
-          headerTintColor: '#770002',
-        }}
-      />
+      {/* Кастомный заголовок с кнопкой назад */}
+      <View style={styles.customHeader}>
+        <TouchableOpacity
+          style={styles.backButton}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="chevron-back" size={24} color="#770002" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Регистрация</Text>
+        <View style={styles.placeholderRight} />
+      </View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -283,6 +305,35 @@ export default function RegisterScreen() {
               </View>
               {errors.fullName && (
                 <Text style={styles.fieldErrorText}>{errors.fullName}</Text>
+              )}
+            </View>
+
+            {/* Email */}
+            <View style={styles.inputBlock}>
+              <Text style={styles.inputLabel}>Email</Text>
+              <View style={[
+                styles.inputContainer,
+                errors.email ? styles.inputError : {}
+              ]}>
+                <Ionicons name="mail-outline" size={20} color="#666" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="example@mail.ru"
+                  placeholderTextColor="#999"
+                  value={email}
+                  onChangeText={(text) => {
+                    setEmail(text);
+                    if (errors.email) {
+                      setErrors(prev => ({ ...prev, email: undefined }));
+                    }
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  testID="register-email"
+                />
+              </View>
+              {errors.email && (
+                <Text style={styles.fieldErrorText}>{errors.email}</Text>
               )}
             </View>
 
@@ -418,6 +469,14 @@ export default function RegisterScreen() {
               </Text>
             </View>
 
+            <View style={styles.termsContainer}>
+              <Text style={styles.termsText}>
+                Нажимая на "Зарегистрироваться", вы соглашаетесь с
+                <Text style={styles.termsLink}> Условиями использования</Text> и
+                <Text style={styles.termsLink}> Политикой конфиденциальности</Text>
+              </Text>
+            </View>
+
             <TouchableOpacity
               style={styles.registerButton}
               onPress={handleRegister}
@@ -448,6 +507,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
+  customHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+    backgroundColor: '#FFFFFF',
+    zIndex: 10,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#770002',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 8,
+  },
+  placeholderRight: {
+    width: 40,
+    height: 40,
   },
   keyboardView: {
     flex: 1,
@@ -559,6 +648,20 @@ const styles = StyleSheet.create({
     marginLeft: 10,
     fontSize: 14,
     color: '#2196F3',
+  },
+  termsContainer: {
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  termsText: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  termsLink: {
+    color: '#770002',
+    fontWeight: '500',
   },
   registerButton: {
     backgroundColor: '#770002',

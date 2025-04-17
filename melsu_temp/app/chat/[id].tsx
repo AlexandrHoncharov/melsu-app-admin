@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import {
   SafeAreaView,
   RefreshControl,
   Alert,
-  ToastAndroid
+  ToastAndroid,
+  AppState // Добавляем для отслеживания состояния приложения
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -32,9 +33,12 @@ export default function ChatScreen() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [lastSent, setLastSent] = useState(null);
   const [otherUserInfo, setOtherUserInfo] = useState(null);
+  const [lastMessageTimestamp, setLastMessageTimestamp] = useState(0); // Добавляем для отслеживания последнего полученного сообщения
 
   const { user } = useAuth();
   const flatListRef = useRef(null);
+  const appStateRef = useRef(AppState.currentState); // Для отслеживания состояния приложения
+  const pollingIntervalRef = useRef(null); // Для хранения ссылки на интервал
 
   // Сохраняем ID текущего пользователя в ref для надежного доступа
   const currentUserIdRef = useRef(user ? String(user.id) : null);
@@ -47,7 +51,67 @@ export default function ChatScreen() {
     }
   }, [user]);
 
-  // Загрузка данных чата
+  // Мемоизированная функция загрузки только новых сообщений
+  const loadNewMessages = useCallback(async () => {
+    if (!user || !user.id) return;
+
+    try {
+      await chatService.initialize();
+
+      if (typeof chatService.forceCurrentUserId === 'function') {
+        await chatService.forceCurrentUserId(user.id);
+      }
+
+      // Получаем только новые сообщения после последнего известного timestamp
+      const newMessages = await chatService.getNewChatMessages(chatId, lastMessageTimestamp);
+
+      if (newMessages && newMessages.length > 0) {
+        // Обрабатываем новые сообщения
+        const processedNewMessages = newMessages.map(msg => {
+          const msgSenderId = String(msg.senderId || '');
+          const myUserId = String(currentUserIdRef.current);
+          const isOwn = msgSenderId === myUserId;
+
+          return {
+            ...msg,
+            senderId: msgSenderId,
+            isFromCurrentUser: isOwn
+          };
+        });
+
+        // Добавляем новые сообщения и обновляем последний timestamp
+        setMessages(prevMessages => {
+          // Фильтруем дубликаты по ID
+          const existingIds = new Set(prevMessages.map(m => m.id));
+          const uniqueNewMessages = processedNewMessages.filter(m => !existingIds.has(m.id));
+
+          const updatedMessages = [...prevMessages, ...uniqueNewMessages];
+
+          // Обновляем timestamp последнего сообщения
+          if (uniqueNewMessages.length > 0) {
+            const latestTimestamp = Math.max(...uniqueNewMessages.map(m => m.timestamp || 0));
+            setLastMessageTimestamp(prev => Math.max(prev, latestTimestamp));
+
+            // Прокручиваем к новому сообщению
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+          }
+
+          return updatedMessages;
+        });
+
+        // Отмечаем сообщения как прочитанные
+        await chatService.markMessagesAsRead(chatId);
+      }
+    } catch (error) {
+      console.error('📱 Error loading new messages:', error);
+    }
+  }, [chatId, lastMessageTimestamp, user]);
+
+  // Загрузка данных чата - полная загрузка всех сообщений
   const loadChatData = async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
 
@@ -62,7 +126,6 @@ export default function ChatScreen() {
       await chatService.initialize();
 
       // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Принудительно устанавливаем правильный ID пользователя
-      // Это гарантирует, что chatService использует тот же ID, что и компонент
       if (typeof chatService.forceCurrentUserId === 'function') {
         await chatService.forceCurrentUserId(user.id);
       } else {
@@ -121,6 +184,10 @@ export default function ChatScreen() {
       if (chatMessages.length > 0) {
         const lastMsg = chatMessages[chatMessages.length - 1];
         console.log(`📱 Last message: sender=${lastMsg.senderId}, text="${lastMsg.text.substring(0, 20)}...", isOwn=${lastMsg.isFromCurrentUser}`);
+
+        // Обновляем последний известный timestamp
+        const latestTimestamp = Math.max(...chatMessages.map(m => m.timestamp || 0));
+        setLastMessageTimestamp(latestTimestamp);
       }
 
       setMessages(chatMessages);
@@ -143,31 +210,125 @@ export default function ChatScreen() {
     }
   };
 
-  // Загрузка при первом рендере
-  useEffect(() => {
-    loadChatData();
+  // Улучшенная настройка слушателя сообщений с оптимизацией
+  const setupEnhancedMessageListener = useCallback(async () => {
+    try {
+      await chatService.initialize();
 
-    // Настраиваем слушатель сообщений для обновления в реальном времени
-    const setupMessageListener = async () => {
-      try {
-        await chatService.initialize();
-        await chatService.setupChatMessageListener(chatId, () => {
-          // Перезагружаем сообщения при изменениях
-          loadChatData(true);
-        });
-      } catch (error) {
-        console.error('Ошибка при настройке слушателя сообщений:', error);
+      // Настраиваем измененный слушатель с колбэком, который будет загружать только новые сообщения
+      await chatService.setupChatMessageListener(chatId, async (newMessageData) => {
+        console.log('📱 New message detected via listener!');
+
+        // Если у нас есть данные о новом сообщении, мы можем обработать его напрямую
+        if (newMessageData) {
+          const msgSenderId = String(newMessageData.senderId || '');
+          const myUserId = String(currentUserIdRef.current);
+          const isOwn = msgSenderId === myUserId;
+
+          const processedNewMessage = {
+            ...newMessageData,
+            senderId: msgSenderId,
+            isFromCurrentUser: isOwn
+          };
+
+          // Добавляем новое сообщение в список, избегая дубликатов
+          setMessages(prevMessages => {
+            // Проверяем, есть ли уже это сообщение
+            if (prevMessages.some(m => m.id === processedNewMessage.id)) {
+              return prevMessages;
+            }
+
+            const updatedMessages = [...prevMessages, processedNewMessage];
+
+            // Прокручиваем к новому сообщению
+            setTimeout(() => {
+              if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+              }
+            }, 100);
+
+            // Обновляем timestamp последнего сообщения
+            setLastMessageTimestamp(Math.max(lastMessageTimestamp, processedNewMessage.timestamp || 0));
+
+            return updatedMessages;
+          });
+
+          // Отмечаем как прочитанное
+          await chatService.markMessagesAsRead(chatId);
+        } else {
+          // Если данные о сообщении не предоставлены, загружаем только новые сообщения
+          await loadNewMessages();
+        }
+      });
+
+      console.log('📱 Enhanced message listener setup complete');
+    } catch (error) {
+      console.error('📱 Error setting up enhanced message listener:', error);
+    }
+  }, [chatId, loadNewMessages, lastMessageTimestamp]);
+
+  // Запускаем или останавливаем интервал опроса в зависимости от состояния приложения
+  const setupPolling = useCallback(() => {
+    // Очищаем предыдущий интервал, если он был
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+
+    // Устанавливаем новый интервал для загрузки новых сообщений
+    pollingIntervalRef.current = setInterval(() => {
+      console.log('📱 Polling for new messages...');
+      loadNewMessages();
+    }, 5000); // Опрашиваем каждые 5 секунд
+
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
       }
     };
+  }, [loadNewMessages]);
 
-    setupMessageListener();
+  // Отслеживаем состояние приложения для оптимизации работы в фоне
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      if (appStateRef.current === 'background' && nextAppState === 'active') {
+        console.log('📱 App has come to the foreground, refreshing messages...');
+        loadNewMessages();
+        setupPolling(); // Восстанавливаем интервал опроса
+      } else if (nextAppState === 'background') {
+        console.log('📱 App has gone to the background, pausing polling...');
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+        }
+      }
+      appStateRef.current = nextAppState;
+    };
+
+    // Подписываемся на изменения состояния приложения
+    const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      appStateSubscription.remove();
+    };
+  }, [loadNewMessages, setupPolling]);
+
+  // Загрузка при первом рендере с расширенной настройкой обновлений
+  useEffect(() => {
+    // Загружаем начальные данные
+    loadChatData();
+
+    // Настраиваем улучшенный слушатель сообщений
+    setupEnhancedMessageListener();
+
+    // Настраиваем дополнительный опрос для надежности
+    const cleanupPolling = setupPolling();
 
     // Отписка от слушателей при уходе с экрана
     return () => {
       chatService.removeChatMessageListener(chatId);
       chatService.cleanup();
+      cleanupPolling();
     };
-  }, [chatId]);
+  }, [chatId, setupEnhancedMessageListener, setupPolling]);
 
   // Обработчик pull-to-refresh
   const handleRefresh = () => {
@@ -241,7 +402,7 @@ export default function ChatScreen() {
 
       // Перезагружаем сообщения после отправки для синхронизации с сервером
       setTimeout(() => {
-        loadChatData(true);
+        loadNewMessages(); // Используем оптимизированную загрузку только новых сообщений
       }, 500);
 
     } catch (error) {

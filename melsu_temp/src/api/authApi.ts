@@ -40,6 +40,13 @@ interface AuthResponse {
   };
 }
 
+interface DeviceTokenRequest {
+  token: string;
+  platform: string;
+  device_name?: string;
+  replace_existing?: boolean;
+}
+
 // API для работы с авторизацией
 const authApi = {
   /**
@@ -148,6 +155,44 @@ const authApi = {
   checkUsername: async (username: string) => {
     const response = await apiClient.get<{ available: boolean }>(`/auth/check-username?username=${username}`);
     return response.data;
+  },
+
+  /**
+   * Регистрация токена устройства для push-уведомлений
+   * @param deviceData Данные устройства
+   * @returns Результат регистрации
+   */
+  registerDeviceToken: async (deviceData: DeviceTokenRequest) => {
+    console.log(`UserAPI: Registering device token: ${deviceData.token.substring(0, 10)}...`);
+
+    // Добавляем таймаут для API-запроса, чтобы избежать долгого ожидания
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 секунд таймаут
+
+    try {
+      const response = await apiClient.post('/device/register', deviceData, {
+        signal: controller.signal
+      });
+
+      clearTimeout(timeoutId);
+      console.log('UserAPI: Token registration successful:', response.data);
+      return response.data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+
+      // Проверяем, было ли прервано из-за таймаута
+      if (error.name === 'AbortError') {
+        console.warn('UserAPI: Token registration request timed out');
+        return {
+          message: 'Время ожидания регистрации истекло, но устройство может быть зарегистрировано.',
+          success: true,
+          timedOut: true
+        };
+      }
+
+      console.error('UserAPI: Error registering device token:', error);
+      throw error;
+    }
   },
 
   /**

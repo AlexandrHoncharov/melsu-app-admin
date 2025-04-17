@@ -1,4 +1,3 @@
-// File: melsu_temp/app/(tabs)/profile/index.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -283,22 +282,13 @@ export default function ProfileScreen() {
       },
       {
         id: 'support',
-        title: 'Справка',
-        subtitle: 'Получите помощь по использованию',
-        icon: 'help-buoy-outline',
+        title: 'Электронные услуги',
+        subtitle: 'Справки и цифровые сервисы',
+        icon: 'globe-outline',
         iconBgColor: '#FFF3E0',
         iconColor: '#F57C00',
         route: '/profile/support'
       },
-        {
-  id: 'notification-test',
-        title: 'Справка',
-        subtitle: 'Получите помощь по использованию',
-        icon: 'notification-test',
-        iconBgColor: '#FFF3E0',
-        iconColor: '#F57C00',
-        route: '/profile/notification-test'
-},
       {
         id: 'about',
         title: 'О приложении',
@@ -331,8 +321,8 @@ export default function ProfileScreen() {
   // Handler for support button click
   const handleSupportClick = () => {
     Alert.alert(
-      'Справка',
-      'Данный раздел находится в разработке.',
+      'Электронные услуги',
+      'Сервис электронных услуг и запроса справок находится в разработке.',
       [{ text: 'OK' }]
     );
   };

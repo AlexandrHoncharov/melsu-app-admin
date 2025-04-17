@@ -1265,39 +1265,25 @@ def create_token(user_id):
     )
 
 
-# Декоратор для проверки токена
-
-
-# Маршрут для регистрации студента
-"""
-1. Updates to models.py (User model)
-
-Add these new fields to the User model:
-"""
-
-# Add to the User class in models.py
-speciality_id = db.Column(db.Integer, default=None)
-speciality_code = db.Column(db.String(20), default=None)
-speciality_name = db.Column(db.String(255), default=None)
-study_form = db.Column(db.String(20), default=None)  # 'full-time', 'full-part', or 'correspondence'
-study_form_name = db.Column(db.String(50), default=None)  # 'Очная', 'Очно-заочная', or 'Заочная'
-
-"""
-2. Update the register endpoint in api.py
-
-Modify the /api/auth/register route to handle speciality information:
-"""
-
-
 @app.route('/api/auth/register', methods=['POST'])
 def register():
     data = request.json
 
     # Проверяем обязательные поля
-    required_fields = ['password', 'fullName', 'role']
+    required_fields = ['password', 'fullName', 'role', 'email']  # Добавляем email как обязательное поле
     for field in required_fields:
         if field not in data:
             return jsonify({'message': f'Поле {field} обязательно'}), 400
+
+    # Проверка формата email (простая валидация)
+    email = data['email']
+    if not '@' in email or len(email) < 5:
+        return jsonify({'message': 'Некорректный формат email'}), 400
+
+    # Проверяем, существует ли пользователь с таким email
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
+        return jsonify({'message': 'Пользователь с таким email уже существует'}), 400
 
     # Генерируем имя пользователя, если оно не предоставлено
     if 'username' not in data or not data['username']:
@@ -1316,10 +1302,11 @@ def register():
     if username_exists(username):
         return jsonify({'message': 'Пользователь с таким логином уже существует'}), 400
 
-    # Создаем нового пользователя
+    # Создаем нового пользователя с email
     new_user = User(
         username=username,
         password=data['password'],  # Хэширование произойдет в модели
+        email=email,  # Добавляем email
         is_admin=False
     )
 
@@ -1361,6 +1348,7 @@ def register():
         'user': {
             'id': new_user.id,
             'username': new_user.username,
+            'email': new_user.email,  # Добавляем email в ответ
             'fullName': new_user.full_name,
             'role': new_user.role,
             'group': new_user.group,
@@ -1377,7 +1365,8 @@ def register():
     }), 201
 
 
-# Маршрут для авторизации
+# Обновленный endpoint для входа в api.py
+
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     data = request.json
@@ -1416,6 +1405,7 @@ def login():
         'user': {
             'id': user.id,
             'username': user.username,
+            'email': user.email,  # Добавляем email в ответ
             'fullName': user.full_name or (teacher_info['name'] if teacher_info else ''),
             'role': role,
             'group': user.group,
@@ -1427,7 +1417,8 @@ def login():
     }), 200
 
 
-# Маршрут для получения профиля
+# Обновленный endpoint для получения профиля в api.py
+
 @app.route('/api/user/profile', methods=['GET'])
 @token_required
 def get_profile(current_user):
@@ -1440,7 +1431,8 @@ def get_profile(current_user):
         SELECT 
             id, 
             username, 
-            full_name, 
+            full_name,
+            email,
             role, 
             `group`, 
             faculty, 
@@ -1471,6 +1463,7 @@ def get_profile(current_user):
         user_dict = {
             'id': current_user.id,
             'username': current_user.username,
+            'email': current_user.email,
             'full_name': current_user.full_name,
             'role': current_user.role,
             'group': current_user.group,
@@ -1499,6 +1492,7 @@ def get_profile(current_user):
     profile_data = {
         'id': user_dict['id'],
         'username': user_dict['username'],
+        'email': user_dict['email'],  # Добавляем email в ответ
         'fullName': user_dict['full_name'] or (teacher_info['name'] if teacher_info else ''),
         'role': user_dict['role'],
         'group': user_dict['group'],

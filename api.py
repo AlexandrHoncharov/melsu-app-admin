@@ -2672,33 +2672,54 @@ def send_push_notification(current_user):
         }), 500
 
 
+# Enhanced device registration endpoint for api.py
+# Add or replace this function in your api.py file
+
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Регистрация токена устройства для push-уведомлений"""
+    """Enhanced device token registration with better logging and error handling"""
     try:
+        print(f"📱 Device registration attempt for user_id={current_user.id}")
+
+        # Get request data with thorough validation
         data = request.json
+        if not data:
+            print(f"📱 Missing request data for user_id={current_user.id}")
+            return jsonify({'message': 'No data provided', 'success': False}), 400
 
-        if not data or not data.get('token'):
-            return jsonify({'message': 'Токен не предоставлен', 'success': False}), 400
+        # Log all incoming data (sensitive parts obscured)
+        token_preview = data.get('token', '')[:15] + '...' if data.get('token') else 'None'
+        print(f"📱 Received token data: token={token_preview}, "
+              f"platform={data.get('platform', 'unknown')}, "
+              f"device={data.get('device', 'unknown')}, "
+              f"token_type={data.get('tokenType', 'unknown')}")
 
+        # Validate token
         token = data.get('token')
-        device = data.get('device', 'Неизвестное устройство')
+        if not token:
+            print(f"📱 Token not provided for user_id={current_user.id}")
+            return jsonify({'message': 'Token not provided', 'success': False}), 400
+
+        device = data.get('device', 'Unknown device')
         platform = data.get('platform', 'unknown')
         token_type = data.get('tokenType', 'unknown')
 
-        # Проверяем, существует ли уже запись с таким токеном
+        # Check if token already exists
         existing_token = DeviceToken.query.filter_by(token=token).first()
 
         if existing_token:
-            # Обновляем существующую запись
+            # Update existing token
+            print(f"📱 Updating existing token for user_id={current_user.id}")
             existing_token.user_id = current_user.id
             existing_token.device_name = device
             existing_token.platform = platform
             existing_token.token_type = token_type
             existing_token.last_used_at = datetime.datetime.utcnow()
+            action = 'updated'
         else:
-            # Создаем новую запись
+            # Create new token record
+            print(f"📱 Creating new token for user_id={current_user.id}")
             new_token = DeviceToken(
                 user_id=current_user.id,
                 token=token,
@@ -2709,50 +2730,101 @@ def register_device(current_user):
                 last_used_at=datetime.datetime.utcnow()
             )
             db.session.add(new_token)
+            action = 'registered'
 
-        db.session.commit()
-
-        return jsonify({
-            'message': 'Токен устройства зарегистрирован',
-            'success': True,
-            'action': 'registered'
-        }), 200
+        # Commit changes with error handling
+        try:
+            db.session.commit()
+            print(f"📱 Successfully {action} token for user_id={current_user.id}")
+            return jsonify({
+                'message': f'Device token {action}',
+                'success': True,
+                'action': action
+            }), 200
+        except Exception as db_error:
+            db.session.rollback()
+            print(f"📱 Database error during token {action}: {str(db_error)}")
+            return jsonify({
+                'message': f'Database error: {str(db_error)}',
+                'success': False,
+                'error': 'database_error'
+            }), 500
 
     except Exception as e:
-        db.session.rollback()
-        print(f"Ошибка при регистрации токена устройства: {str(e)}")
+        print(f"📱 Unexpected error registering token for user_id={current_user.id}: {str(e)}")
         return jsonify({
-            'message': f'Ошибка: {str(e)}',
-            'success': False
+            'message': f'Error: {str(e)}',
+            'success': False,
+            'error': 'unexpected_error'
         }), 500
 
 
-# STUB endpoint for unregistering device tokens
 @app.route('/api/device/unregister', methods=['POST'])
 @token_required
 def unregister_device(current_user):
-    """Отмена регистрации токена устройства"""
+    """Improved device token unregistration with better logging and error handling"""
     try:
+        print(f"📱 Device unregistration attempt for user_id={current_user.id}")
+
         data = request.json
 
-        if not data or not data.get('token'):
-            return jsonify({'message': 'Токен не предоставлен', 'success': False}), 400
+        if not data:
+            print(f"📱 Missing request data for unregistration, user_id={current_user.id}")
+            return jsonify({'message': 'No data provided', 'success': False}), 400
 
         token = data.get('token')
+        if not token:
+            print(f"📱 Token not provided for unregistration, user_id={current_user.id}")
 
-        # Удаление токена из базы данных
-        # Здесь вы можете использовать вашу модель DeviceToken или другую структуру
+            # Special case: unregister all tokens for this user
+            if data.get('unregister_all'):
+                print(f"📱 Unregistering ALL tokens for user_id={current_user.id}")
+                deleted = DeviceToken.query.filter_by(user_id=current_user.id).delete()
+                db.session.commit()
+                return jsonify({
+                    'message': f'Removed all device tokens ({deleted} tokens)',
+                    'success': True,
+                    'deleted_count': deleted
+                }), 200
 
-        return jsonify({
-            'message': 'Токен устройства удален',
-            'success': True,
-            'deleted_count': 1
-        }), 200
+            return jsonify({'message': 'Token not provided', 'success': False}), 400
+
+        # Find and delete the token
+        token_preview = token[:15] + '...' if len(token) > 15 else token
+        print(f"📱 Unregistering token: {token_preview} for user_id={current_user.id}")
+
+        device_token = DeviceToken.query.filter_by(token=token).first()
+        if device_token:
+            # Extra security: Only allow deletion if token belongs to current user
+            if device_token.user_id != current_user.id:
+                print(f"📱 Token belongs to user_id={device_token.user_id}, not current user={current_user.id}")
+                return jsonify({
+                    'message': 'You are not authorized to unregister this token',
+                    'success': False
+                }), 403
+
+            # Delete the token
+            db.session.delete(device_token)
+            db.session.commit()
+            print(f"📱 Successfully unregistered token for user_id={current_user.id}")
+
+            return jsonify({
+                'message': 'Device token unregistered',
+                'success': True,
+                'deleted_count': 1
+            }), 200
+        else:
+            print(f"📱 Token not found for unregistration, user_id={current_user.id}")
+            return jsonify({
+                'message': 'Token not found',
+                'success': False
+            }), 404
 
     except Exception as e:
-        print(f"Ошибка при удалении токена устройства: {str(e)}")
+        db.session.rollback()
+        print(f"📱 Error unregistering device token for user_id={current_user.id}: {str(e)}")
         return jsonify({
-            'message': f'Ошибка: {str(e)}',
+            'message': f'Error: {str(e)}',
             'success': False
         }), 500
 
@@ -2760,68 +2832,90 @@ def unregister_device(current_user):
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
-    """Отправка тестового push-уведомления"""
+    """Improved test notification endpoint with better logging and error handling"""
     try:
+        print(f"📱 Test notification request from user_id={current_user.id}")
+
         data = request.json
         token = data.get('token')
         token_type = data.get('tokenType', 'unknown')
+        device = data.get('device', 'Unknown device')
+        platform = data.get('platform', 'unknown')
 
         if not token:
+            print(f"📱 Token not provided for test notification, user_id={current_user.id}")
             return jsonify({
-                'message': 'Токен не предоставлен',
+                'message': 'Token not provided',
                 'success': False
             }), 400
 
-        # Проверяем тип токена и выбираем способ отправки
-        if token_type == 'expo' or token.startswith('ExponentPushToken['):
-            # Отправка через Expo Push API
-            try:
-                response = requests.post(
-                    'https://exp.host/--/api/v2/push/send',
-                    json={
-                        'to': token,
-                        'title': 'Тестовое уведомление',
-                        'body': 'Это тестовое push-уведомление отправлено через Expo Push API',
-                        'data': {
-                            'type': 'test',
-                            'timestamp': datetime.datetime.now().isoformat()
-                        }
-                    },
-                    headers={
-                        'Accept': 'application/json',
-                        'Accept-encoding': 'gzip, deflate',
-                        'Content-Type': 'application/json',
-                    }
-                )
+        # Log token details
+        token_preview = token[:15] + '...' if len(token) > 15 else token
+        print(f"📱 Testing notification for token: {token_preview}, type: {token_type}, platform: {platform}")
 
-                if response.status_code == 200:
-                    result = response.json()
+        # Check if Firebase is available
+        if not FIREBASE_AVAILABLE:
+            print(f"📱 Firebase not available, using fallback for user_id={current_user.id}")
+            # Try sending through Expo if it's an Expo token
+            if token_type == 'expo' or token.startswith('ExponentPushToken['):
+                try:
+                    print(f"📱 Sending Expo test notification for user_id={current_user.id}")
+                    response = requests.post(
+                        'https://exp.host/--/api/v2/push/send',
+                        json={
+                            'to': token,
+                            'title': 'Test Notification',
+                            'body': 'This is a test push notification from MelSU Go app',
+                            'data': {
+                                'type': 'test',
+                                'timestamp': datetime.datetime.now().isoformat()
+                            }
+                        },
+                        headers={
+                            'Accept': 'application/json',
+                            'Accept-encoding': 'gzip, deflate',
+                            'Content-Type': 'application/json',
+                        }
+                    )
+
+                    if response.status_code == 200:
+                        print(f"📱 Expo notification sent successfully for user_id={current_user.id}")
+                        return jsonify({
+                            'message': 'Test notification sent through Expo',
+                            'success': True,
+                            'response': response.json()
+                        }), 200
+                    else:
+                        print(f"📱 Expo notification failed: {response.text}, user_id={current_user.id}")
+                        return jsonify({
+                            'message': f'Failed to send Expo notification: {response.text}',
+                            'success': False
+                        }), 500
+                except Exception as expo_error:
+                    print(f"📱 Error sending Expo notification: {str(expo_error)}, user_id={current_user.id}")
                     return jsonify({
-                        'message': 'Тестовое уведомление отправлено через Expo Push API',
-                        'success': True,
-                        'response': result
-                    }), 200
-                else:
-                    return jsonify({
-                        'message': f'Ошибка при отправке через Expo Push API: {response.text}',
+                        'message': f'Error sending Expo notification: {str(expo_error)}',
                         'success': False
                     }), 500
-            except Exception as expo_error:
-                print(f"Ошибка при отправке через Expo Push API: {str(expo_error)}")
+            else:
                 return jsonify({
-                    'message': f'Ошибка при отправке через Expo: {str(expo_error)}',
+                    'message': 'Firebase is not available and token is not an Expo token',
                     'success': False
-                }), 500
-        else:
-            # Отправка через Firebase Cloud Messaging
-            try:
-                # Создаем объект уведомления
-                notification = messaging.Notification(
-                    title='Тестовое уведомление',
-                    body='Это тестовое push-уведомление отправлено через Firebase'
-                )
+                }), 503
 
-                # Настройки для Android
+        # Create notification for Firebase
+        try:
+            # Create notification with proper platform-specific configuration
+            print(f"📱 Creating notification for {platform} device, user_id={current_user.id}")
+
+            notification = messaging.Notification(
+                title='Test Notification',
+                body='This is a test push notification from MelSU Go app'
+            )
+
+            # Configure for Android
+            android_config = None
+            if platform.lower() == 'android':
                 android_config = messaging.AndroidConfig(
                     priority='high',
                     notification=messaging.AndroidNotification(
@@ -2830,8 +2924,11 @@ def test_notification(current_user):
                         channel_id='default'
                     )
                 )
+                print(f"📱 Added Android configuration for user_id={current_user.id}")
 
-                # Настройки для iOS
+            # Configure for iOS
+            apns_config = None
+            if platform.lower() == 'ios':
                 apns_config = messaging.APNSConfig(
                     payload=messaging.APNSPayload(
                         aps=messaging.Aps(
@@ -2840,44 +2937,44 @@ def test_notification(current_user):
                         )
                     )
                 )
+                print(f"📱 Added iOS configuration for user_id={current_user.id}")
 
-                # Данные уведомления
-                data = {
-                    'type': 'test',
-                    'timestamp': datetime.datetime.now().isoformat(),
-                    'user_id': str(current_user.id)
-                }
+            # Add test data
+            data_payload = {
+                'type': 'test',
+                'timestamp': datetime.datetime.now().isoformat(),
+                'user_id': str(current_user.id)
+            }
 
-                # Создаем объект Message правильно
-                message_obj = messaging.Message(
-                    token=token,
-                    notification=notification,
-                    android=android_config,
-                    apns=apns_config,
-                    data=data
-                )
+            # Create message object
+            message_obj = messaging.Message(
+                token=token,
+                notification=notification,
+                android=android_config,
+                apns=apns_config,
+                data=data_payload
+            )
 
-                # Отправляем сообщение
-                response = messaging.send(message_obj)
-                print(f"Уведомление успешно отправлено через FCM: {response}")
+            # Send message
+            print(f"📱 Sending FCM notification for user_id={current_user.id}")
+            response = messaging.send(message_obj)
+            print(f"📱 FCM notification sent successfully: {response}, user_id={current_user.id}")
 
-                return jsonify({
-                    'message': 'Тестовое уведомление отправлено через Firebase',
-                    'success': True,
-                    'message_id': response
-                }), 200
-
-            except Exception as fcm_error:
-                print(f"Ошибка при отправке через FCM: {str(fcm_error)}")
-                return jsonify({
-                    'message': f'Ошибка при отправке через Firebase: {str(fcm_error)}',
-                    'success': False
-                }), 500
-
+            return jsonify({
+                'message': 'Test notification sent through Firebase',
+                'success': True,
+                'message_id': response
+            }), 200
+        except Exception as fcm_error:
+            print(f"📱 Error sending FCM notification: {str(fcm_error)}, user_id={current_user.id}")
+            return jsonify({
+                'message': f'Error sending Firebase notification: {str(fcm_error)}',
+                'success': False
+            }), 500
     except Exception as e:
-        print(f"Общая ошибка при отправке тестового уведомления: {str(e)}")
+        print(f"📱 Unexpected error in test notification for user_id={current_user.id}: {str(e)}")
         return jsonify({
-            'message': f'Ошибка: {str(e)}',
+            'message': f'Error: {str(e)}',
             'success': False
         }), 500
 

@@ -35,6 +35,7 @@ module.exports = {
         "backgroundColor": "#ffffff"
       },
       "package": "com.melsu.app",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",

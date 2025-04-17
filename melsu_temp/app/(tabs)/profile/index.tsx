@@ -22,6 +22,9 @@ import * as Clipboard from 'expo-clipboard';
 
 const { width } = Dimensions.get('window');
 
+// Add the statusBarHeight calculation
+const STATUSBAR_HEIGHT = StatusBar.currentHeight || 0;
+
 // Menu item type definition
 interface MenuItem {
   id: string;
@@ -388,7 +391,11 @@ export default function ProfileScreen() {
 
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          // Apply conditional padding for Android
+          Platform.OS === 'android' && styles.androidScrollContent
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -428,22 +435,22 @@ export default function ProfileScreen() {
           {/* Common info section - For both student and teacher */}
           <View style={styles.infoContent}>
             {/* Email display - added for all users */}
-            {user.email && (
-              <TouchableOpacity
-                style={styles.emailRow}
-                onPress={() => handleEmailPress(user.email)}
-                activeOpacity={0.6}
-              >
-                <View style={styles.infoLabelContainer}>
-                  <Ionicons name="mail-outline" size={18} color="#555" />
-                  <Text style={styles.infoLabel}>Email</Text>
-                </View>
-                <View style={styles.emailValueContainer}>
-                  <Text style={styles.emailValue}>{user.email}</Text>
-                  <Ionicons name="open-outline" size={14} color="#1976D2" style={styles.emailIcon} />
-                </View>
-              </TouchableOpacity>
-            )}
+            {user.email && user.email.trim && user.email.trim() !== '' && (
+  <TouchableOpacity
+    style={styles.emailRow}
+    onPress={() => handleEmailPress(user.email)}
+    activeOpacity={0.6}
+  >
+    <View style={styles.infoLabelContainer}>
+      <Ionicons name="mail-outline" size={18} color="#555" />
+      <Text style={styles.infoLabel}>Email</Text>
+    </View>
+    <View style={styles.emailValueContainer}>
+      <Text style={styles.emailValue}>{user.email}</Text>
+      <Ionicons name="open-outline" size={14} color="#1976D2" style={styles.emailIcon} />
+    </View>
+  </TouchableOpacity>
+)}
 
             {/* Student information */}
             {user.role === 'student' && (
@@ -650,6 +657,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f7fa',
+    // Add padding top for Android
+    paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0,
   },
   scrollView: {
     flex: 1,
@@ -657,6 +666,10 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 16,
     paddingBottom: 30,
+  },
+  // New style for Android scroll content
+  androidScrollContent: {
+    paddingTop: 16,
   },
   loadingContainer: {
     flex: 1,
@@ -670,11 +683,12 @@ const styles = StyleSheet.create({
     color: '#666',
   },
 
-  // Header styles
+  // Header styles - improved for Android
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start', // Changed from 'center' to 'flex-start'
     marginBottom: 20,
+    paddingTop: 10, // Added padding at the top
   },
   avatarSection: {
     marginRight: 16,
@@ -699,6 +713,7 @@ const styles = StyleSheet.create({
   },
   nameSection: {
     flex: 1,
+    paddingRight: 8, // Added right padding to prevent text overflow
   },
   nameText: {
     fontSize: 20,
@@ -706,6 +721,7 @@ const styles = StyleSheet.create({
     color: '#333',
     marginBottom: 8,
     flexWrap: 'wrap',
+    width: '100%', // Ensure text doesn't overflow
   },
   roleBadge: {
     flexDirection: 'row',

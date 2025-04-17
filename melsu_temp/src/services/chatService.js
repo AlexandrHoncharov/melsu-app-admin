@@ -12,6 +12,7 @@ import {
     ref,
     serverTimestamp,
     set,
+    startAfter,
     update
 } from 'firebase/database';
 import {signInAnonymously, signInWithCustomToken} from 'firebase/auth';
@@ -919,8 +920,94 @@ async deleteChat(chatId) {
         }
     }
 
-    // Обновление метода sendNotificationToUser в chatService.js
-// Замените существующий метод этим кодом
+/**
+ * Get only new messages from a chat since a specific timestamp
+ * @param {string} chatId - The chat ID to fetch messages for
+ * @param {number} lastTimestamp - Only get messages newer than this timestamp
+ * @returns {Promise<Array>} - Array of new messages
+ */
+async getNewChatMessages(chatId, lastTimestamp = 0) {
+    if (!chatId) {
+        console.error('Chat ID is empty');
+        return [];
+    }
+
+    // Ensure proper initialization
+    if (!this.initialized || !this.currentUser) {
+        const initResult = await this.initialize();
+        if (!initResult) {
+            console.error('Failed to initialize when getting new chat messages');
+            return [];
+        }
+    }
+
+    if (!this.currentUser || !this.currentUser.id) {
+        console.error('Current user is not initialized');
+        return [];
+    }
+
+    // Always use string ID
+    const myUserId = this.getCurrentUserId();
+
+    try {
+        console.log(`Getting new messages for chat ${chatId} since timestamp ${lastTimestamp}`);
+        const messagesRef = ref(database, `messages/${chatId}`);
+
+        // Create appropriate query based on whether we have a timestamp
+        let messagesQuery;
+
+        if (lastTimestamp > 0) {
+            // If we have a timestamp, query messages newer than that timestamp
+            messagesQuery = query(
+                messagesRef,
+                orderByChild('timestamp'),
+                // Use startAfter for timestamps - critical fix
+                startAfter(lastTimestamp)
+            );
+        } else {
+            // If no timestamp, just order by timestamp
+            messagesQuery = query(
+                messagesRef,
+                orderByChild('timestamp')
+            );
+        }
+
+        const snapshot = await get(messagesQuery);
+        if (!snapshot.exists()) {
+            console.log(`No new messages found for chat ${chatId}`);
+            return [];
+        }
+
+        // Process messages the same way as in getChatMessages
+        const messagesData = snapshot.val() || {};
+        const messages = Object.values(messagesData);
+
+        // Sort messages by timestamp
+        messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+        // Process messages to ensure consistency
+        const processedMessages = messages.map(message => {
+            // Convert senderId to string
+            const senderId = String(message.senderId || '');
+
+            // Determine message ownership
+            const isFromCurrentUser = senderId === myUserId;
+
+            return {
+                ...message,
+                senderId,
+                isFromCurrentUser,
+                senderName: message.senderName || `Пользователь ${senderId}`
+            };
+        });
+
+        console.log(`Loaded ${processedMessages.length} new messages for chat ${chatId}`);
+        return processedMessages;
+    } catch (error) {
+        console.error(`Error getting new messages for chat ${chatId}:`, error);
+        return [];
+    }
+}
 
 async sendNotificationToUser(recipientId, chatId, messagePreview, senderName) {
     try {

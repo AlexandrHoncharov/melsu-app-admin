@@ -13,12 +13,87 @@ import {
   RefreshControl,
   Alert,
   ToastAndroid,
-  AppState // Добавляем для отслеживания состояния приложения
+  AppState,
+  Linking
 } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import chatService from '../../src/services/chatService';
+
+// Utility function to detect and render clickable links
+const renderTextWithLinks = (text, isOwnMessage) => {
+  if (!text) return null;
+
+  // Regular expression to match URLs
+  // This pattern matches most common URL formats including http, https, ftp, www
+  const urlPattern = /(https?:\/\/|www\.)[^\s]+(\.[^\s]+)/g;
+
+  // Split the text by URLs
+  const parts = text.split(urlPattern);
+
+  // Extract URLs from the original text
+  const urls = text.match(urlPattern) || [];
+
+  // Combine parts and URLs back together
+  const result = [];
+  for (let i = 0; i < parts.length; i++) {
+    // Add text part
+    if (parts[i]) {
+      result.push(
+        <Text key={`text-${i}`} style={isOwnMessage ? styles.ownMessageText : {}}>
+          {parts[i]}
+        </Text>
+      );
+    }
+
+    // Add URL part if available
+    if (urls[i - (parts.length - urls.length - 1)]) {
+      const url = urls[i - (parts.length - urls.length - 1)];
+      result.push(
+        <Text
+          key={`url-${i}`}
+          style={[
+            isOwnMessage ? styles.ownMessageLink : styles.messageLink
+          ]}
+          onPress={() => handleUrlPress(url)}
+        >
+          {url}
+        </Text>
+      );
+    }
+  }
+
+  return result;
+};
+
+// Function to handle URL press
+const handleUrlPress = (url) => {
+  // Add http:// prefix if the URL starts with www
+  const formattedUrl = url.startsWith('www.') ? `http://${url}` : url;
+
+  // Open URL in device browser
+  Linking.canOpenURL(formattedUrl)
+    .then(supported => {
+      if (supported) {
+        Linking.openURL(formattedUrl);
+      } else {
+        console.log(`Cannot open URL: ${formattedUrl}`);
+        // Optionally show an alert to the user
+        Alert.alert(
+          "Ошибка",
+          `Не удалось открыть ссылку: ${url}`
+        );
+      }
+    })
+    .catch(err => {
+      console.error('Error opening URL:', err);
+      Alert.alert(
+        "Ошибка",
+        "Не удалось открыть ссылку"
+      );
+    });
+};
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
@@ -33,17 +108,17 @@ export default function ChatScreen() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [lastSent, setLastSent] = useState(null);
   const [otherUserInfo, setOtherUserInfo] = useState(null);
-  const [lastMessageTimestamp, setLastMessageTimestamp] = useState(0); // Добавляем для отслеживания последнего полученного сообщения
+  const [lastMessageTimestamp, setLastMessageTimestamp] = useState(0);
 
   const { user } = useAuth();
   const flatListRef = useRef(null);
-  const appStateRef = useRef(AppState.currentState); // Для отслеживания состояния приложения
-  const pollingIntervalRef = useRef(null); // Для хранения ссылки на интервал
+  const appStateRef = useRef(AppState.currentState);
+  const pollingIntervalRef = useRef(null);
 
-  // Сохраняем ID текущего пользователя в ref для надежного доступа
+  // Save current user ID in ref for reliable access
   const currentUserIdRef = useRef(user ? String(user.id) : null);
 
-  // При изменении user обновляем ref
+  // Update ref when user changes
   useEffect(() => {
     if (user && user.id) {
       currentUserIdRef.current = String(user.id);
@@ -51,7 +126,7 @@ export default function ChatScreen() {
     }
   }, [user]);
 
-  // Мемоизированная функция загрузки только новых сообщений
+  // Memoized function to load only new messages
   const loadNewMessages = useCallback(async () => {
     if (!user || !user.id) return;
 
@@ -62,11 +137,11 @@ export default function ChatScreen() {
         await chatService.forceCurrentUserId(user.id);
       }
 
-      // Получаем только новые сообщения после последнего известного timestamp
+      // Get only new messages after the last known timestamp
       const newMessages = await chatService.getNewChatMessages(chatId, lastMessageTimestamp);
 
       if (newMessages && newMessages.length > 0) {
-        // Обрабатываем новые сообщения
+        // Process new messages
         const processedNewMessages = newMessages.map(msg => {
           const msgSenderId = String(msg.senderId || '');
           const myUserId = String(currentUserIdRef.current);
@@ -79,20 +154,20 @@ export default function ChatScreen() {
           };
         });
 
-        // Добавляем новые сообщения и обновляем последний timestamp
+        // Add new messages and update the last timestamp
         setMessages(prevMessages => {
-          // Фильтруем дубликаты по ID
+          // Filter duplicates by ID
           const existingIds = new Set(prevMessages.map(m => m.id));
           const uniqueNewMessages = processedNewMessages.filter(m => !existingIds.has(m.id));
 
           const updatedMessages = [...prevMessages, ...uniqueNewMessages];
 
-          // Обновляем timestamp последнего сообщения
+          // Update last message timestamp
           if (uniqueNewMessages.length > 0) {
             const latestTimestamp = Math.max(...uniqueNewMessages.map(m => m.timestamp || 0));
             setLastMessageTimestamp(prev => Math.max(prev, latestTimestamp));
 
-            // Прокручиваем к новому сообщению
+            // Scroll to new message
             setTimeout(() => {
               if (flatListRef.current) {
                 flatListRef.current.scrollToEnd({ animated: true });
@@ -103,7 +178,7 @@ export default function ChatScreen() {
           return updatedMessages;
         });
 
-        // Отмечаем сообщения как прочитанные
+        // Mark messages as read
         await chatService.markMessagesAsRead(chatId);
       }
     } catch (error) {
@@ -111,37 +186,37 @@ export default function ChatScreen() {
     }
   }, [chatId, lastMessageTimestamp, user]);
 
-  // Загрузка данных чата - полная загрузка всех сообщений
+  // Load chat data - full load of all messages
   const loadChatData = async (isRefresh = false) => {
     if (!isRefresh) setLoading(true);
 
     console.log(`📱 Loading chat data for chat ${chatId}...`);
     try {
-      // Важно! Сначала проверяем текущего пользователя
+      // Important! First check current user
       if (!user || !user.id) {
         throw new Error('User data not available');
       }
 
-      // Инициализируем сервис
+      // Initialize service
       await chatService.initialize();
 
-      // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Принудительно устанавливаем правильный ID пользователя
+      // CRITICAL CHANGE: Force set correct user ID
       if (typeof chatService.forceCurrentUserId === 'function') {
         await chatService.forceCurrentUserId(user.id);
       } else {
         console.warn('⚠️ forceCurrentUserId method not found in chatService - your messages may appear incorrectly');
       }
 
-      // Получаем чаты пользователя для определения имени собеседника
+      // Get user chats to determine conversation partner's name
       const userChats = await chatService.getUserChats();
       const thisChat = userChats.find(chat => chat.id === chatId);
 
-      // Устанавливаем заголовок чата и сохраняем информацию о собеседнике
+      // Set chat title and save conversation partner info
       if (thisChat) {
         if (thisChat.type === 'personal') {
           setChatTitle(thisChat.withUserName || 'Личный чат');
 
-          // Сохраняем информацию о собеседнике для уведомлений
+          // Save conversation partner info for notifications
           setOtherUserInfo({
             id: thisChat.withUser,
             name: thisChat.withUserName,
@@ -152,47 +227,47 @@ export default function ChatScreen() {
         }
       }
 
-      // ВАЖНО: сохраняем текущий user ID снова для надежности
+      // IMPORTANT: Save current user ID again for reliability
       if (user && user.id) {
         currentUserIdRef.current = String(user.id);
       }
 
-      // Получаем сообщения
+      // Get messages
       let chatMessages = await chatService.getChatMessages(chatId);
 
-      // КРИТИЧЕСКИ ВАЖНО: Обрабатываем сообщения локально, чтобы убедиться, что владелец определен правильно
+      // CRITICALLY IMPORTANT: Process messages locally to ensure owner is correctly identified
       chatMessages = chatMessages.map(msg => {
         const msgSenderId = String(msg.senderId || '');
         const myUserId = String(currentUserIdRef.current);
 
-        // Явное сравнение строковых ID
+        // Explicit string ID comparison
         const isOwn = msgSenderId === myUserId;
 
-        // Выводим подробную информацию о каждом сообщении для отладки
+        // Output detailed info about each message for debugging
         console.log(`📱 Message processing: ID=${msg.id}, sender=${msgSenderId}, currentUser=${myUserId}, isOwn=${isOwn}`);
 
         return {
           ...msg,
           senderId: msgSenderId,
-          // ПРИНУДИТЕЛЬНО устанавливаем isFromCurrentUser на основе сравнения ID
+          // FORCE set isFromCurrentUser based on ID comparison
           isFromCurrentUser: isOwn
         };
       });
 
-      // Отладочная информация
+      // Debug info
       console.log(`📱 Processed ${chatMessages.length} messages, my ID: ${currentUserIdRef.current}`);
       if (chatMessages.length > 0) {
         const lastMsg = chatMessages[chatMessages.length - 1];
         console.log(`📱 Last message: sender=${lastMsg.senderId}, text="${lastMsg.text.substring(0, 20)}...", isOwn=${lastMsg.isFromCurrentUser}`);
 
-        // Обновляем последний известный timestamp
+        // Update last known timestamp
         const latestTimestamp = Math.max(...chatMessages.map(m => m.timestamp || 0));
         setLastMessageTimestamp(latestTimestamp);
       }
 
       setMessages(chatMessages);
 
-      // Отмечаем сообщения как прочитанные
+      // Mark messages as read
       await chatService.markMessagesAsRead(chatId);
 
     } catch (error) {
@@ -210,16 +285,16 @@ export default function ChatScreen() {
     }
   };
 
-  // Улучшенная настройка слушателя сообщений с оптимизацией
+  // Enhanced message listener setup with optimization
   const setupEnhancedMessageListener = useCallback(async () => {
     try {
       await chatService.initialize();
 
-      // Настраиваем измененный слушатель с колбэком, который будет загружать только новые сообщения
+      // Set up modified listener with callback that will load only new messages
       await chatService.setupChatMessageListener(chatId, async (newMessageData) => {
         console.log('📱 New message detected via listener!');
 
-        // Если у нас есть данные о новом сообщении, мы можем обработать его напрямую
+        // If we have data about the new message, we can process it directly
         if (newMessageData) {
           const msgSenderId = String(newMessageData.senderId || '');
           const myUserId = String(currentUserIdRef.current);
@@ -231,32 +306,32 @@ export default function ChatScreen() {
             isFromCurrentUser: isOwn
           };
 
-          // Добавляем новое сообщение в список, избегая дубликатов
+          // Add new message to list, avoiding duplicates
           setMessages(prevMessages => {
-            // Проверяем, есть ли уже это сообщение
+            // Check if this message already exists
             if (prevMessages.some(m => m.id === processedNewMessage.id)) {
               return prevMessages;
             }
 
             const updatedMessages = [...prevMessages, processedNewMessage];
 
-            // Прокручиваем к новому сообщению
+            // Scroll to new message
             setTimeout(() => {
               if (flatListRef.current) {
                 flatListRef.current.scrollToEnd({ animated: true });
               }
             }, 100);
 
-            // Обновляем timestamp последнего сообщения
+            // Update last message timestamp
             setLastMessageTimestamp(Math.max(lastMessageTimestamp, processedNewMessage.timestamp || 0));
 
             return updatedMessages;
           });
 
-          // Отмечаем как прочитанное
+          // Mark as read
           await chatService.markMessagesAsRead(chatId);
         } else {
-          // Если данные о сообщении не предоставлены, загружаем только новые сообщения
+          // If message data is not provided, load only new messages
           await loadNewMessages();
         }
       });
@@ -267,18 +342,18 @@ export default function ChatScreen() {
     }
   }, [chatId, loadNewMessages, lastMessageTimestamp]);
 
-  // Запускаем или останавливаем интервал опроса в зависимости от состояния приложения
+  // Start or stop polling interval depending on app state
   const setupPolling = useCallback(() => {
-    // Очищаем предыдущий интервал, если он был
+    // Clear previous interval if it exists
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
     }
 
-    // Устанавливаем новый интервал для загрузки новых сообщений
+    // Set new interval for loading new messages
     pollingIntervalRef.current = setInterval(() => {
       console.log('📱 Polling for new messages...');
       loadNewMessages();
-    }, 5000); // Опрашиваем каждые 5 секунд
+    }, 5000); // Poll every 5 seconds
 
     return () => {
       if (pollingIntervalRef.current) {
@@ -287,13 +362,13 @@ export default function ChatScreen() {
     };
   }, [loadNewMessages]);
 
-  // Отслеживаем состояние приложения для оптимизации работы в фоне
+  // Track app state to optimize background operation
   useEffect(() => {
     const handleAppStateChange = (nextAppState) => {
       if (appStateRef.current === 'background' && nextAppState === 'active') {
         console.log('📱 App has come to the foreground, refreshing messages...');
         loadNewMessages();
-        setupPolling(); // Восстанавливаем интервал опроса
+        setupPolling(); // Restore polling interval
       } else if (nextAppState === 'background') {
         console.log('📱 App has gone to the background, pausing polling...');
         if (pollingIntervalRef.current) {
@@ -303,7 +378,7 @@ export default function ChatScreen() {
       appStateRef.current = nextAppState;
     };
 
-    // Подписываемся на изменения состояния приложения
+    // Subscribe to app state changes
     const appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
 
     return () => {
@@ -311,18 +386,18 @@ export default function ChatScreen() {
     };
   }, [loadNewMessages, setupPolling]);
 
-  // Загрузка при первом рендере с расширенной настройкой обновлений
+  // Load on first render with enhanced update setup
   useEffect(() => {
-    // Загружаем начальные данные
+    // Load initial data
     loadChatData();
 
-    // Настраиваем улучшенный слушатель сообщений
+    // Set up enhanced message listener
     setupEnhancedMessageListener();
 
-    // Настраиваем дополнительный опрос для надежности
+    // Set up additional polling for reliability
     const cleanupPolling = setupPolling();
 
-    // Отписка от слушателей при уходе с экрана
+    // Unsubscribe from listeners when leaving the screen
     return () => {
       chatService.removeChatMessageListener(chatId);
       chatService.cleanup();
@@ -330,48 +405,48 @@ export default function ChatScreen() {
     };
   }, [chatId, setupEnhancedMessageListener, setupPolling]);
 
-  // Обработчик pull-to-refresh
+  // Handler for pull-to-refresh
   const handleRefresh = () => {
     setRefreshing(true);
     loadChatData(true);
   };
 
-  // Показать уведомление о статусе отправки
+  // Show notification about sending status
   const showNotification = (message) => {
     if (Platform.OS === 'android') {
       ToastAndroid.show(message, ToastAndroid.SHORT);
     }
-    // Для iOS можно использовать Alert или другую библиотеку
+    // For iOS you can use Alert or another library
   };
 
-  // Отправка сообщения
+  // Send message
   const handleSendMessage = async () => {
     if (!messageText.trim() || sending) return;
 
     try {
       setSending(true);
 
-      // ПРОВЕРКА! Убедимся, что используется правильный ID
+      // CHECK! Make sure the correct ID is used
       if (!user || !user.id) {
         throw new Error('User data not available');
       }
 
-      // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ: Принудительно устанавливаем правильный ID пользователя
+      // CRITICAL CHANGE: Force set correct user ID
       if (typeof chatService.forceCurrentUserId === 'function') {
         await chatService.forceCurrentUserId(user.id);
       }
 
-      // Создаем копию текста (чтобы очистить поле сразу)
+      // Create a copy of the text (to clear the field immediately)
       const messageToSend = messageText.trim();
       setMessageText('');
 
-      // Для принудительной перезагрузки после отправки
+      // For forced reload after sending
       const timestamp = Date.now();
       setLastSent(timestamp);
 
       console.log(`📱 Sending message from ${currentUserIdRef.current}: "${messageToSend.substring(0, 20)}..."`);
 
-      // ВАЖНО: Сначала добавляем "фейковое" сообщение локально, чтобы оно сразу появилось
+      // IMPORTANT: First add a "fake" message locally so it appears immediately
       const tempMessageId = `temp_${Date.now()}`;
       const tempMessage = {
         id: tempMessageId,
@@ -379,30 +454,30 @@ export default function ChatScreen() {
         senderName: user?.fullName || user?.username || 'Я',
         text: messageToSend,
         timestamp: Date.now(),
-        isFromCurrentUser: true, // ВАЖНО: Принудительно устанавливаем, что это от текущего пользователя
+        isFromCurrentUser: true, // IMPORTANT: Force set that this is from the current user
         isTempMessage: true
       };
 
-      // Добавляем временное сообщение в список
+      // Add temporary message to the list
       setMessages(prevMessages => [...prevMessages, tempMessage]);
 
-      // Прокручиваем вниз к новому сообщению
+      // Scroll down to the new message
       setTimeout(() => {
         if (flatListRef.current) {
           flatListRef.current.scrollToEnd({ animated: true });
         }
       }, 100);
 
-      // Отправляем сообщение в Firebase
+      // Send message to Firebase
       const messageId = await chatService.sendMessage(chatId, messageToSend);
       console.log(`📱 Message sent successfully with ID: ${messageId}`);
 
-      // Показываем уведомление об успешной отправке
+      // Show notification about successful sending
       showNotification('Сообщение отправлено');
 
-      // Перезагружаем сообщения после отправки для синхронизации с сервером
+      // Reload messages after sending to sync with server
       setTimeout(() => {
-        loadNewMessages(); // Используем оптимизированную загрузку только новых сообщений
+        loadNewMessages(); // Use optimized loading of only new messages
       }, 500);
 
     } catch (error) {
@@ -411,14 +486,14 @@ export default function ChatScreen() {
         "Ошибка при отправке",
         "Не удалось отправить сообщение. Попробуйте еще раз."
       );
-      // Восстанавливаем текст сообщения в случае ошибки
+      // Restore message text in case of error
       setMessageText(messageText);
     } finally {
       setSending(false);
     }
   };
 
-  // Форматирование времени сообщения
+  // Format message time
   const formatMessageTime = (timestamp) => {
     if (!timestamp) return '';
 
@@ -426,9 +501,9 @@ export default function ChatScreen() {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Рендер сообщения
+  // Render message
   const renderMessage = ({ item }) => {
-    // КРИТИЧЕСКИ ВАЖНО: используем явно указанное свойство
+    // CRITICALLY IMPORTANT: use explicitly specified property
     const isOwnMessage = item.isFromCurrentUser;
 
     return (
@@ -445,12 +520,9 @@ export default function ChatScreen() {
           isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
           item.isTempMessage && styles.tempMessageBubble
         ]}>
-          <Text style={[
-            styles.messageText,
-            isOwnMessage ? styles.ownMessageText : {}
-          ]}>
-            {item.text}
-          </Text>
+          <View style={styles.messageText}>
+            {renderTextWithLinks(item.text, isOwnMessage)}
+          </View>
         </View>
 
         <Text style={styles.messageTime}>
@@ -461,7 +533,7 @@ export default function ChatScreen() {
     );
   };
 
-  // При изменении messages, прокручиваем вниз
+  // When messages change, scroll down
   useEffect(() => {
     if (messages.length > 0 && (!isInitialLoad || lastSent)) {
       setTimeout(() => {
@@ -472,12 +544,12 @@ export default function ChatScreen() {
     }
   }, [messages, isInitialLoad, lastSent]);
 
-  // Обработчик кнопки назад
+  // Back button handler
   const handleBackPress = () => {
     router.back();
   };
 
-  // Состояние загрузки
+  // Loading state
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
@@ -605,9 +677,19 @@ const styles = StyleSheet.create({
   messageText: {
     fontSize: 16,
     color: '#333',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
   },
   ownMessageText: {
     color: '#fff',
+  },
+  messageLink: {
+    color: '#007AFF', // iOS blue link color
+    textDecorationLine: 'underline',
+  },
+  ownMessageLink: {
+    color: '#B3E5FC', // Lighter blue for better visibility on dark background
+    textDecorationLine: 'underline',
   },
   messageTime: {
     fontSize: 10,

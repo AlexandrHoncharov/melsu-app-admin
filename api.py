@@ -874,38 +874,117 @@ def image_proxy():
         return jsonify({"message": f"Error: {str(e)}"}), 500
 
 
-# Helper function to generate username
-def generate_username(full_name, group=None):
-    """Generate a username based on full name and group"""
+def generate_username(full_name, group=None, role=None, department=None):
+    """Generate a username based on full name, role, and other details
+
+    Args:
+        full_name (str): The person's full name
+        group (str, optional): Student's group (for students)
+        role (str, optional): 'student' or 'teacher'
+        department (str, optional): Teacher's department (for teachers)
+
+    Returns:
+        str: A generated username
+    """
+    import re
+    import random
+    import string
+    import transliterate
+
+    # Handle empty or invalid name
+    if not full_name or full_name.strip() == '':
+        return ''.join(random.choices(string.ascii_lowercase, k=6))
+
     # Remove any non-alphanumeric characters and split the name
-    clean_name = ''.join(c for c in full_name if c.isalnum() or c.isspace())
+    # First try to transliterate if the name contains Cyrillic characters
+    if re.search('[а-яА-Я]', full_name):
+        try:
+            transliterated = transliterate.translit(full_name, 'ru', reversed=True)
+            # Remove diacritical marks
+            transliterated = ''.join(c for c in unicodedata.normalize('NFD', transliterated)
+                                     if unicodedata.category(c) != 'Mn')
+            clean_name = transliterated
+        except:
+            # If transliteration fails, just use the original with non-alphanumeric chars removed
+            clean_name = ''.join(c for c in full_name if c.isalnum() or c.isspace())
+    else:
+        clean_name = ''.join(c for c in full_name if c.isalnum() or c.isspace())
+
     name_parts = clean_name.split()
 
     if not name_parts:
-        # Fallback if name is empty or has no valid parts
         return ''.join(random.choices(string.ascii_lowercase, k=6))
 
-    # Take first letter of first name and first letter of last name if available
-    if len(name_parts) >= 2:
-        initials = name_parts[0][0] + name_parts[-1][0]
+    # Different username formation based on role
+    if role == 'teacher':
+        # For teachers: lastname.firstname or lastname.initial
+        if len(name_parts) >= 2:
+            lastname = name_parts[-1].lower()
+            firstname = name_parts[0].lower()
+
+            # Include department code if available (first 2-3 letters)
+            dept_code = ""
+            if department:
+                # Extract department code
+                dept_words = department.split()
+                if dept_words:
+                    # Take first letters of each word in department name
+                    dept_code = ''.join(word[0].lower() for word in dept_words if word)
+                    dept_code = dept_code[:3]  # Limit to 3 chars
+
+            # Try a few username patterns
+            if len(lastname) > 2 and len(firstname) > 2:
+                username = f"{lastname}.{firstname[:3]}{dept_code}"
+            else:
+                # If names are very short, use full first name
+                username = f"{lastname}.{firstname}{dept_code}"
+        else:
+            # If only one name part is available
+            username = f"{name_parts[0].lower()}"
     else:
-        initials = name_parts[0][0]
+        # For students or default
+        if len(name_parts) >= 2:
+            # Get first name and last name
+            firstname = name_parts[0].lower()
+            lastname = name_parts[-1].lower()
 
-    # Make it lowercase
-    initials = initials.lower()
+            # Take first three letters of first name and last name
+            # unless they're shorter
+            first_part = firstname[:min(3, len(firstname))]
+            last_part = lastname[:min(4, len(lastname))]
 
-    # Add group info if available
-    suffix = ""
-    if group:
-        # Clean group and take up to 3 chars
-        clean_group = ''.join(c for c in group if c.isalnum())
-        suffix = clean_group[:3].lower()
+            # Group code (clean and take up to 3 chars)
+            group_code = ""
+            if group:
+                # Extract numeric part of the group if possible
+                match = re.search(r'\d+', group)
+                if match:
+                    group_code = match.group()[:2]  # Take first 2 digits
+                else:
+                    # Otherwise take first 2-3 alphanumeric chars
+                    clean_group = ''.join(c for c in group if c.isalnum())
+                    group_code = clean_group[:3].lower()
 
-    # Add random digits
-    random_digits = ''.join(random.choices(string.digits, k=4))
+            # Build the username with a more readable structure
+            username = f"{first_part}_{last_part}"
 
-    # Combine all parts
-    username = f"{initials}{suffix}{random_digits}"
+            if group_code:
+                username = f"{username}{group_code}"
+        else:
+            # If only one name part is available
+            name = name_parts[0].lower()
+            username = f"{name[:6]}"  # Take up to 6 chars
+
+    # Add a small random suffix to handle duplicates (2 digits)
+    random_suffix = ''.join(random.choices(string.digits, k=2))
+    username = f"{username}{random_suffix}"
+
+    # Remove any non-alphanumeric characters
+    username = ''.join(c for c in username if c.isalnum() or c == '_' or c == '.')
+
+    # Ensure username is not too long
+    if len(username) > 20:
+        username = username[:20]
 
     return username
 
@@ -967,9 +1046,10 @@ def get_schedule_groups(current_user):
 @app.route('/api/users', methods=['GET'])
 @token_required
 def get_users(current_user):
-    """Get users filtered by role and optionally by group"""
+    """Get users filtered by role and optionally by group and verification status"""
     role = request.args.get('role')
     group = request.args.get('group')
+    verification_status = request.args.get('verification_status')
 
     query = User.query
     if role:
@@ -978,6 +1058,16 @@ def get_users(current_user):
     # Add filter by group if specified
     if group:
         query = query.filter_by(group=group)
+
+    # Add filter by verification status if specified
+    if verification_status:
+        if verification_status == 'verified_only':
+            query = query.filter_by(verification_status='verified')
+        elif verification_status == 'all':
+            # No filtering, return all users regardless of verification
+            pass
+        elif verification_status == 'unverified_only':
+            query = query.filter(User.verification_status.in_(['unverified', 'pending', 'rejected']))
 
     users = query.all()
 
@@ -988,7 +1078,8 @@ def get_users(current_user):
                 'id': user.id,
                 'username': user.username,
                 'fullName': user.full_name,
-                'role': user.role
+                'role': user.role,
+                'verificationStatus': user.verification_status or 'verified'  # Add verification status
             }
 
             if user.role == 'student':
@@ -1001,7 +1092,7 @@ def get_users(current_user):
                     'name': user.speciality_name,
                     'form': user.study_form,
                     'formName': user.study_form_name
-                }
+                } if user.speciality_id else None
                 # Получаем курс из расписания
                 try:
                     schedule_item = Schedule.query.filter_by(group_name=user.group).first()
@@ -1019,12 +1110,6 @@ def get_users(current_user):
 
     return jsonify(result)
 
-
-# REMOVED: Device token registration endpoints
-
-# Исправление для api.py - маршрут /api/users/<int:user_id>
-
-# Исправление для api.py - функция get_user
 
 @app.route('/api/users/<int:user_id>', methods=['GET'])
 @token_required
@@ -1276,17 +1361,14 @@ def register():
         if field not in data:
             return jsonify({'message': f'Поле {field} обязательно'}), 400
 
-    # Still validate email format if provided, but don't make it mandatory
-    if 'email' in data and data['email']:
-        email = data['email']
-        if not '@' in email or len(email) < 5:
-            return jsonify({'message': 'Некорректный формат email'}), 400
-
-    # Don't try to check for existing email - skip this step entirely
+    # Still validate email format if provided
+    email = data.get('email', '')  # Default to empty string instead of None
+    if email and '@' not in email:
+        return jsonify({'message': 'Некорректный формат email'}), 400
 
     # Генерируем имя пользователя, если оно не предоставлено
     if 'username' not in data or not data['username']:
-        username = generate_username(data['fullName'], data.get('group'))
+        username = generate_username(data['fullName'], data.get('group'), data.get('role'))
 
         # Проверяем, что username уникален
         attempt = 0
@@ -1302,15 +1384,13 @@ def register():
         return jsonify({'message': 'Пользователь с таким логином уже существует'}), 400
 
     try:
-        # Create user without email field to avoid database schema issues
+        # Create user with email field (empty string if not provided)
         new_user = User(
             username=username,
             password=data['password'],
+            email=email,  # Set email (will be empty string if not provided)
             is_admin=False
         )
-
-        # Don't set email attribute, but keep it for response
-        email_for_response = data.get('email')
 
         # Добавляем дополнительные поля
         new_user.role = data.get('role')
@@ -1350,7 +1430,7 @@ def register():
             'user': {
                 'id': new_user.id,
                 'username': new_user.username,
-                'email': email_for_response,  # Use saved email for response only
+                'email': email,  # Include email in response
                 'fullName': new_user.full_name,
                 'role': new_user.role,
                 'group': new_user.group,
@@ -1371,10 +1451,11 @@ def register():
         print(f"Error during registration: {str(e)}")
         error_details = str(e)
 
-        # If we can identify specific issues, provide better error messages
+        # Check for specific database errors
         if "field 'email' doesn't have a default value" in error_details:
             return jsonify({
-                               'message': 'Ошибка при сохранении email. Пожалуйста, попробуйте другой формат email или сообщите администратору.'}), 500
+                'message': 'Ошибка при сохранении email. Пожалуйста, попробуйте заполнить поле email или сообщите администратору.'
+            }), 500
 
         return jsonify({
             'message': 'Ошибка при создании пользователя',
@@ -1416,25 +1497,35 @@ def login():
                 'name': teacher.name
             }
 
+    # Создаем объект ответа с безопасным доступом к атрибутам
+    user_data = {
+        'id': user.id,
+        'username': user.username,
+        'fullName': user.full_name or (teacher_info['name'] if teacher_info else ''),
+        'role': role,
+        'group': user.group,
+        'faculty': user.faculty,
+        'department': teacher_info['department'] if teacher_info else None,
+        'position': teacher_info['position'] if teacher_info else None,
+        'verificationStatus': user.verification_status or 'verified',
+        'email': None  # Устанавливаем значение email по умолчанию как None
+    }
+
+    # Проверяем наличие атрибута email в объекте и в базе данных
+    # (используем hasattr для безопасной проверки)
+    if hasattr(user, 'email'):
+        user_data['email'] = user.email
+
     # Возвращаем данные и токен
     return jsonify({
         'token': token,
-        'user': {
-            'id': user.id,
-            'username': user.username,
-            'email': user.email,  # Добавляем email в ответ
-            'fullName': user.full_name or (teacher_info['name'] if teacher_info else ''),
-            'role': role,
-            'group': user.group,
-            'faculty': user.faculty,
-            'department': teacher_info['department'] if teacher_info else None,
-            'position': teacher_info['position'] if teacher_info else None,
-            'verificationStatus': user.verification_status or 'verified'
-        }
+        'user': user_data
     }), 200
 
 
 # Обновленный endpoint для получения профиля в api.py
+
+# Fix for get_profile function in api.py
 
 @app.route('/api/user/profile', methods=['GET'])
 @token_required
@@ -1444,13 +1535,13 @@ def get_profile(current_user):
 
     # Напрямую запрашиваем данные из базы данных, минуя ORM
     try:
+        # Add email to the SQL query
         query = """
         SELECT 
             id, 
             username, 
             full_name,
-            email,
-            role, 
+            email,              role, 
             `group`, 
             faculty, 
             verification_status, 
@@ -1461,11 +1552,12 @@ def get_profile(current_user):
             study_form,
             study_form_name
         FROM user 
-        WHERE id = %s
+        WHERE id = :user_id
         """
 
         with db.engine.connect() as connection:
-            result = connection.execute(db.text(query), [current_user.id])
+            # Use named parameters with a dictionary
+            result = connection.execute(db.text(query), {"user_id": current_user.id})
             user_data = result.fetchone()
 
             if not user_data:
@@ -1480,7 +1572,8 @@ def get_profile(current_user):
         user_dict = {
             'id': current_user.id,
             'username': current_user.username,
-            'email': current_user.email,
+            # Safely check if email attribute exists
+            'email': getattr(current_user, 'email', None),
             'full_name': current_user.full_name,
             'role': current_user.role,
             'group': current_user.group,
@@ -1509,7 +1602,7 @@ def get_profile(current_user):
     profile_data = {
         'id': user_dict['id'],
         'username': user_dict['username'],
-        'email': user_dict['email'],  # Добавляем email в ответ
+        'email': user_dict.get('email'),  # Use .get() for safe access
         'fullName': user_dict['full_name'] or (teacher_info['name'] if teacher_info else ''),
         'role': user_dict['role'],
         'group': user_dict['group'],
@@ -1518,7 +1611,6 @@ def get_profile(current_user):
         'position': teacher_info['position'] if teacher_info else None,
         'verificationStatus': user_dict['verification_status'] or 'verified',
         'studentCardImage': user_dict['student_card_image'],
-        # Всегда добавляем информацию о специальности из прямого запроса
         'speciality': {
             'id': user_dict['speciality_id'],
             'code': user_dict['speciality_code'],
@@ -1531,9 +1623,9 @@ def get_profile(current_user):
     # Для студентов получаем курс из расписания
     if role == 'student' and user_dict['group']:
         try:
-            schedule_query = "SELECT course FROM schedule WHERE group_name = %s LIMIT 1"
+            schedule_query = "SELECT course FROM schedule WHERE group_name = :group_name LIMIT 1"
             with db.engine.connect() as connection:
-                schedule_result = connection.execute(db.text(schedule_query), [user_dict['group']])
+                schedule_result = connection.execute(db.text(schedule_query), {"group_name": user_dict['group']})
                 schedule_data = schedule_result.fetchone()
 
                 if schedule_data:

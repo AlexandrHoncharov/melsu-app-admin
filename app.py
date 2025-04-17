@@ -9,6 +9,15 @@ from werkzeug.utils import secure_filename
 import uuid
 from sqlalchemy import text
 import re
+import csv
+from io import StringIO
+from werkzeug.security import generate_password_hash
+from flask import jsonify, request, redirect, url_for
+from sqlalchemy import or_, and_, func
+import json
+from datetime import datetime
+
+
 
 
 # Создание экземпляра приложения
@@ -19,7 +28,7 @@ app.config.from_object('config')
 db.init_app(app)
 
 # Импорт моделей ПОСЛЕ инициализации db
-from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog, DeviceToken, Ticket, TicketAttachment, TicketMessage
+from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog, DeviceToken, Ticket, TicketAttachment, TicketMessage, NotificationHistory
 
 # Папка для хранения загруженных изображений
 UPLOAD_FOLDER = 'uploads'
@@ -29,6 +38,395 @@ TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 # Remove this: from api import send_push_message
+
+# Определяем login_required локально
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    """Страница отправки уведомлений"""
+    # Получаем уникальные группы для фильтрации
+    groups = db.session.query(User.group).filter(User.role == 'student', User.group.isnot(None)).distinct().order_by(
+        User.group).all()
+    groups = [g[0] for g in groups if g[0]]
+
+    # Получаем уникальные факультеты для фильтрации
+    faculties = db.session.query(User.faculty).filter(User.faculty.isnot(None)).distinct().order_by(User.faculty).all()
+    faculties = [f[0] for f in faculties if f[0]]
+
+    # Получаем уникальные кафедры преподавателей для фильтрации
+    departments = db.session.query(Teacher.department).distinct().order_by(Teacher.department).all()
+    departments = [d[0] for d in departments if d[0]]
+
+    # Получаем уникальные должности преподавателей для фильтрации
+    positions = db.session.query(Teacher.position).distinct().order_by(Teacher.position).all()
+    positions = [p[0] for p in positions if p[0]]
+
+    return render_template('notifications/send.html',
+                           groups=groups,
+                           faculties=faculties,
+                           departments=departments,
+                           positions=positions)
+
+
+@app.route('/notifications/history')
+@login_required
+def notification_history():
+    """История отправленных уведомлений"""
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+
+    # Получаем историю уведомлений с пагинацией
+    pagination = NotificationHistory.query.order_by(NotificationHistory.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    notifications = pagination.items
+
+    return render_template('notifications/history.html',
+                           notifications=notifications,
+                           pagination=pagination)
+
+
+@app.route('/notifications/send', methods=['POST'])
+@login_required
+def send_notifications():
+    """Обработка формы отправки уведомлений"""
+    try:
+        # Получаем данные из формы
+        title = request.form.get('title')
+        message = request.form.get('message')
+        notification_type = request.form.get('notification_type', 'info')
+        deep_link = request.form.get('deep_link', '')
+
+        recipient_type = request.form.get('recipient_type')
+
+        # Создаем фильтр получателей в зависимости от типа
+        filter_data = {
+            'recipient_type': recipient_type
+        }
+
+        # Для типа "студенты" добавляем соответствующие фильтры
+        if recipient_type == 'students':
+            filter_data['student_group'] = request.form.get('student_group', '')
+            filter_data['student_course'] = request.form.get('student_course', '')
+            filter_data['student_faculty'] = request.form.get('student_faculty', '')
+            filter_data['verification_status'] = request.form.get('verification_status', '')
+
+        # Для типа "преподаватели" добавляем соответствующие фильтры
+        elif recipient_type == 'teachers':
+            filter_data['teacher_department'] = request.form.get('teacher_department', '')
+            filter_data['teacher_position'] = request.form.get('teacher_position', '')
+
+        # Для пользовательского фильтра добавляем список ID пользователей
+        elif recipient_type == 'custom':
+            selected_user_ids = request.form.get('selected_user_ids', '')
+            filter_data['selected_user_ids'] = selected_user_ids
+
+        # Получаем список получателей
+        recipients, devices = get_notification_recipients(filter_data)
+
+        # Если нет получателей, выводим ошибку
+        if not recipients:
+            flash('Нет получателей для отправки уведомления!', 'error')
+            return redirect(url_for('notifications_page'))
+
+        # Создаем запись в истории уведомлений
+        notification_history = NotificationHistory(
+            admin_id=session['user_id'],
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            deep_link=deep_link,
+            recipient_filter=json.dumps(filter_data, ensure_ascii=False),
+            recipients_count=len(recipients),
+            devices_count=len(devices),
+            status='pending'
+        )
+
+        db.session.add(notification_history)
+        db.session.commit()
+
+        # Запускаем фоновую задачу для отправки уведомлений (в реальном проекте)
+        # В этом примере сразу отправляем уведомления
+        send_notifications_task(notification_history.id)
+
+        flash(f'Уведомление отправлено {len(recipients)} пользователям ({len(devices)} устройств)', 'success')
+
+        return redirect(url_for('notification_history'))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при отправке уведомления: {str(e)}', 'error')
+        return redirect(url_for('notifications_page'))
+
+
+@app.route('/api/notifications/preview', methods=['POST'])
+@login_required
+def preview_notifications():
+    """API для предварительного просмотра количества получателей"""
+    try:
+        # Получаем данные из формы
+        recipient_type = request.form.get('recipient_type')
+
+        # Создаем фильтр получателей в зависимости от типа
+        filter_data = {
+            'recipient_type': recipient_type
+        }
+
+        # Для типа "студенты" добавляем соответствующие фильтры
+        if recipient_type == 'students':
+            filter_data['student_group'] = request.form.get('student_group', '')
+            filter_data['student_course'] = request.form.get('student_course', '')
+            filter_data['student_faculty'] = request.form.get('student_faculty', '')
+            filter_data['verification_status'] = request.form.get('verification_status', '')
+
+        # Для типа "преподаватели" добавляем соответствующие фильтры
+        elif recipient_type == 'teachers':
+            filter_data['teacher_department'] = request.form.get('teacher_department', '')
+            filter_data['teacher_position'] = request.form.get('teacher_position', '')
+
+        # Для пользовательского фильтра добавляем список ID пользователей
+        elif recipient_type == 'custom':
+            selected_user_ids = request.form.get('selected_user_ids', '')
+            filter_data['selected_user_ids'] = selected_user_ids
+
+        # Получаем список получателей
+        recipients, devices = get_notification_recipients(filter_data)
+
+        # Возвращаем информацию о количестве получателей
+        return jsonify({
+            'users_count': len(recipients),
+            'devices_count': len(devices)
+        })
+
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'users_count': 0,
+            'devices_count': 0
+        }), 500
+
+
+@app.route('/api/users/search')
+@login_required
+def search_users():
+    """API для поиска пользователей по имени или логину"""
+    search_term = request.args.get('term', '')
+
+    if len(search_term) < 2:
+        return jsonify([])
+
+    try:
+        # Ищем пользователей по ФИО, логину или email
+        users = User.query.filter(
+            or_(
+                User.full_name.ilike(f'%{search_term}%'),
+                User.username.ilike(f'%{search_term}%'),
+                User.email.ilike(f'%{search_term}%')
+            )
+        ).limit(10).all()
+
+        # Преобразуем результаты в список словарей
+        results = []
+        for user in users:
+            results.append({
+                'id': user.id,
+                'username': user.username,
+                'full_name': user.full_name,
+                'email': user.email,
+                'role': user.role,
+                'group': user.group if user.role == 'student' else None
+            })
+
+        return jsonify(results)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+def get_notification_recipients(filter_data):
+    """
+    Получение списка получателей на основе фильтров
+
+    Args:
+        filter_data (dict): Словарь с условиями фильтрации
+
+    Returns:
+        tuple: (users_list, devices_list) - список пользователей и список токенов устройств
+    """
+    # Создаем базовый запрос для получения токенов устройств
+    query = db.session.query(DeviceToken).join(User, DeviceToken.user_id == User.id)
+
+    recipient_type = filter_data.get('recipient_type')
+
+    # Применяем фильтры в зависимости от типа получателей
+    if recipient_type == 'all':
+        # Все пользователи
+        pass
+
+    elif recipient_type == 'students':
+        # Только студенты
+        query = query.filter(User.role == 'student')
+
+        # Дополнительные фильтры для студентов
+        student_group = filter_data.get('student_group')
+        if student_group:
+            query = query.filter(User.group == student_group)
+
+        student_course = filter_data.get('student_course')
+        if student_course:
+            # Фильтрация по курсу на основе шаблона группы (например, курс указан в первой цифре)
+            # Этот пример нужно адаптировать под реальную структуру номеров групп в вашем вузе
+            query = query.filter(User.group.like(f'{student_course}%'))
+
+        student_faculty = filter_data.get('student_faculty')
+        if student_faculty:
+            query = query.filter(User.faculty == student_faculty)
+
+        verification_status = filter_data.get('verification_status')
+        if verification_status:
+            query = query.filter(User.verification_status == verification_status)
+
+    elif recipient_type == 'teachers':
+        # Только преподаватели
+        query = query.filter(User.role == 'teacher')
+
+        # Дополнительные фильтры для преподавателей
+        teacher_department = filter_data.get('teacher_department')
+        teacher_position = filter_data.get('teacher_position')
+
+        # Для фильтрации по параметрам преподавателей нужно присоединить таблицу Teacher
+        if teacher_department or teacher_position:
+            query = query.join(Teacher, Teacher.user_id == User.id)
+
+            if teacher_department:
+                query = query.filter(Teacher.department == teacher_department)
+
+            if teacher_position:
+                query = query.filter(Teacher.position == teacher_position)
+
+    elif recipient_type == 'verified':
+        # Только верифицированные пользователи
+        query = query.filter(User.verification_status == 'verified')
+
+    elif recipient_type == 'custom':
+        # Пользовательский фильтр - конкретные пользователи по ID
+        selected_user_ids = filter_data.get('selected_user_ids')
+
+        if selected_user_ids:
+            user_ids = [int(id) for id in selected_user_ids.split(',') if id.strip()]
+            query = query.filter(User.id.in_(user_ids))
+        else:
+            # Если не выбраны пользователи, возвращаем пустые списки
+            return [], []
+
+    # Получаем список токенов устройств
+    devices = query.all()
+
+    # Получаем уникальный список пользователей
+    user_ids = set(device.user_id for device in devices)
+    users = User.query.filter(User.id.in_(user_ids)).all()
+
+    return users, devices
+
+
+def send_notifications_task(notification_id):
+    """
+    Задача для отправки уведомлений в фоновом режиме.
+    В реальном проекте эту функцию лучше реализовать как фоновую задачу
+    с использованием Celery, RQ или другого решения для асинхронной обработки.
+
+    Args:
+        notification_id (int): ID записи в истории уведомлений
+    """
+    try:
+        # Получаем данные уведомления
+        notification = NotificationHistory.query.get(notification_id)
+        if not notification:
+            return
+
+        # Обновляем статус и время начала отправки
+        notification.status = 'processing'
+        notification.started_at = datetime.utcnow()
+        db.session.commit()
+
+        # Получаем список получателей на основе сохраненного фильтра
+        filter_data = json.loads(notification.recipient_filter)
+        _, devices = get_notification_recipients(filter_data)
+
+        # Подготавливаем данные для уведомления
+        notification_data = {
+            'type': notification.notification_type,
+            'timestamp': datetime.utcnow().isoformat(),
+            'notification_id': notification.id
+        }
+
+        # Если есть глубокая ссылка, добавляем ее
+        if notification.deep_link:
+            notification_data['deep_link'] = notification.deep_link
+
+        # Счетчики успешных и неудачных отправок
+        success_count = 0
+        error_count = 0
+        error_details = []
+
+        # Отправляем уведомления на каждое устройство
+        for device in devices:
+            try:
+                # Используем функцию send_push_message из вашего приложения
+                result = send_push_message(
+                    device.token,
+                    notification.title,
+                    notification.message,
+                    notification_data
+                )
+
+                # Проверяем успешность отправки
+                if result.get('success'):
+                    success_count += 1
+                else:
+                    error_count += 1
+                    error_details.append({
+                        'user_id': device.user_id,
+                        'token': device.token[:10] + '...',
+                        'error': result.get('error', 'Неизвестная ошибка')
+                    })
+            except Exception as e:
+                error_count += 1
+                error_details.append({
+                    'user_id': device.user_id,
+                    'token': device.token[:10] + '...',
+                    'error': str(e)
+                })
+
+        # Обновляем статус и счетчики в записи истории
+        notification.status = 'completed'
+        notification.completed_at = datetime.utcnow()
+        notification.success_count = success_count
+        notification.error_count = error_count
+        notification.error_details = json.dumps(error_details[:100],
+                                                ensure_ascii=False)  # Ограничиваем количество деталей ошибок
+
+        db.session.commit()
+
+    except Exception as e:
+        # В случае ошибки обновляем статус
+        if notification:
+            notification.status = 'failed'
+            notification.error_details = json.dumps([{'error': str(e)}], ensure_ascii=False)
+            notification.completed_at = datetime.utcnow()
+            db.session.commit()
+
+
+# Не забудьте добавить ссылку на страницу уведомлений в sidebar.html или другое меню
 
 def send_push_message(token, title, message, extra=None):
     """
@@ -175,15 +573,7 @@ def send_push_message(token, title, message, extra=None):
         print(error_msg)
         return {"success": False, "error": error_msg}
 
-# Определяем login_required локально
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
 
-    return decorated_function
 
 
 # Создание первого администратора
@@ -1319,15 +1709,78 @@ def verify_student():
     return redirect(url_for('student_verification_list'))
 # Add this route to your app.py file
 
+@app.route('/students/edit/<int:student_id>', methods=['GET', 'POST'])
+@login_required
+def edit_student(student_id):
+    """Edit student information"""
+    student = User.query.filter_by(id=student_id, role='student').first_or_404()
+
+    if request.method == 'POST':
+        try:
+            # Update basic information
+            student.username = request.form.get('username')
+            student.full_name = request.form.get('full_name')
+            student.email = request.form.get('email')
+            student.group = request.form.get('group')
+            student.faculty = request.form.get('faculty')
+            student.verification_status = request.form.get('verification_status')
+
+            # Update academic information
+            student.speciality_code = request.form.get('speciality_code')
+            student.speciality_name = request.form.get('speciality_name')
+            student.study_form = request.form.get('study_form')
+            student.study_form_name = request.form.get('study_form_name')
+
+            # Only update password if provided
+            new_password = request.form.get('password')
+            if new_password:
+                student.password_plain = new_password  # Store plain password for admin reference
+                student.password = generate_password_hash(new_password)  # Store hashed password
+
+            db.session.commit()
+            flash('Информация о студенте успешно обновлена', 'success')
+            return redirect(url_for('students_list'))
+
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка при обновлении информации: {str(e)}', 'error')
+
+    return render_template('students/edit.html', student=student)
+
+
+@app.route('/students/<int:student_id>/delete', methods=['POST'])
+@login_required
+def delete_student(student_id):
+    """Delete a student"""
+    try:
+        student = User.query.filter_by(id=student_id, role='student').first_or_404()
+
+        # Store name for flash message
+        student_name = student.full_name or student.username
+
+        # Delete the student
+        db.session.delete(student)
+        db.session.commit()
+
+        flash(f'Студент "{student_name}" успешно удален', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при удалении студента: {str(e)}', 'error')
+
+    return redirect(url_for('students_list'))
+
+
+# Update the students_list route to include the new functionality
 @app.route('/students')
 @login_required
 def students_list():
-    """List all students with filtering options"""
+    """List all students with filtering options and export capability"""
     # Get the filter parameters
     status = request.args.get('status', 'all')
     search_query = request.args.get('search', '')
     page = request.args.get('page', 1, type=int)
     per_page = 20  # Number of records per page
+    export = request.args.get('export', '')
 
     # Build query
     query = User.query.filter_by(role='student')
@@ -1336,17 +1789,67 @@ def students_list():
     if status != 'all':
         query = query.filter_by(verification_status=status)
 
-    # Apply search filter if provided
+    # Apply search filter if provided - now includes email search
     if search_query:
         query = query.filter(
             db.or_(
                 User.username.ilike(f'%{search_query}%'),
                 User.full_name.ilike(f'%{search_query}%'),
-                User.group.ilike(f'%{search_query}%')
+                User.group.ilike(f'%{search_query}%'),
+                User.email.ilike(f'%{search_query}%')
             )
         )
 
-    # Execute query with pagination
+    # Get counts for stats display
+    verified_count = User.query.filter_by(role='student', verification_status='verified').count()
+    pending_count = User.query.filter_by(role='student', verification_status='pending').count()
+    rejected_count = User.query.filter_by(role='student', verification_status='rejected').count()
+
+    # Handle CSV export if requested
+    if export == 'csv':
+        # Create a CSV response
+        csv_data = StringIO()
+        csv_writer = csv.writer(csv_data)
+
+        # Write header row
+        csv_writer.writerow([
+            'ID', 'Логин', 'ФИО', 'Email', 'Группа', 'Факультет',
+            'Код специальности', 'Специальность', 'Форма обучения', 'Статус верификации',
+            'Дата регистрации'
+        ])
+
+        # Write data rows - no pagination for export
+        students = query.all()
+        for student in students:
+            status_map = {
+                'verified': 'Подтвержден',
+                'pending': 'На проверке',
+                'rejected': 'Отклонен',
+                'unverified': 'Не верифицирован',
+                None: 'Не указан'
+            }
+
+            csv_writer.writerow([
+                student.id,
+                student.username,
+                student.full_name or '',
+                student.email or '',
+                student.group or '',
+                student.faculty or '',
+                student.speciality_code or '',
+                student.speciality_name or '',
+                student.study_form_name or '',
+                status_map.get(student.verification_status, 'Не указан'),
+                student.created_at.strftime('%d.%m.%Y %H:%M') if student.created_at else ''
+            ])
+
+        # Prepare response
+        response = make_response(csv_data.getvalue())
+        response.headers["Content-Disposition"] = "attachment; filename=students_export.csv"
+        response.headers["Content-type"] = "text/csv; charset=utf-8"
+        return response
+
+    # Execute query with pagination for normal web display
     pagination = query.order_by(User.created_at.desc()).paginate(
         page=page, per_page=per_page, error_out=False
     )
@@ -1357,7 +1860,10 @@ def students_list():
         students=students,
         pagination=pagination,
         status=status,
-        search_query=search_query
+        search_query=search_query,
+        verified_count=verified_count,
+        pending_count=pending_count,
+        rejected_count=rejected_count
     )
 
 @app.route('/uploads/student_cards/admin/<filename>')

@@ -1,0 +1,512 @@
+
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="bg-white shadow rounded-lg p-6">
+    <!-- Заголовок страницы -->
+    <div class="flex justify-between items-center mb-6">
+        <div class="flex items-center space-x-3">
+            <div class="bg-primary text-white p-3 rounded-lg shadow-md">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800">Отправка уведомлений</h1>
+                <p class="text-sm text-gray-500">Рассылка push-уведомлений пользователям мобильного приложения</p>
+            </div>
+        </div>
+        <div>
+            <a href="{{ url_for('notification_history') }}" class="bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                История уведомлений
+            </a>
+        </div>
+    </div>
+
+    <!-- Основная форма -->
+    <form id="notification-form" action="{{ url_for('send_notifications') }}" method="POST" class="space-y-6">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Левая колонка: Содержимое уведомления -->
+            <div class="space-y-6">
+                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Содержимое уведомления</h2>
+
+                    <div class="mb-4">
+                        <label for="title" class="block text-sm font-medium text-gray-700 mb-1">Заголовок уведомления</label>
+                        <input type="text" id="title" name="title"
+                               class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                               placeholder="Важное сообщение" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="message" class="block text-sm font-medium text-gray-700 mb-1">Текст уведомления</label>
+                        <textarea id="message" name="message" rows="4"
+                                 class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                                 placeholder="Подробный текст уведомления" required></textarea>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="notification_type" class="block text-sm font-medium text-gray-700 mb-1">Тип уведомления</label>
+                        <select id="notification_type" name="notification_type"
+                                class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                            <option value="info">Информационное</option>
+                            <option value="important">Важное</option>
+                            <option value="schedule">Расписание</option>
+                            <option value="verification">Верификация</option>
+                            <option value="ticket">Тикет/обращение</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="deep_link" class="block text-sm font-medium text-gray-700 mb-1">Глубокая ссылка (опционально)</label>
+                        <input type="text" id="deep_link" name="deep_link"
+                               class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                               placeholder="app://schedule">
+                        <p class="text-xs text-gray-500 mt-1">Используется для перехода к конкретному разделу приложения</p>
+                    </div>
+                </div>
+
+                <!-- Предпросмотр уведомления -->
+                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Предпросмотр уведомления</h2>
+
+                    <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 max-w-sm mx-auto">
+                        <div class="flex items-center mb-2">
+                            <div class="bg-primary rounded-full w-10 h-10 flex items-center justify-center text-white mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <p class="font-bold text-gray-900" id="preview-title">Важное сообщение</p>
+                                <p class="text-xs text-gray-500">Сейчас • Университетское приложение</p>
+                            </div>
+                        </div>
+                        <p class="text-gray-800" id="preview-message">Подробный текст уведомления будет здесь.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Правая колонка: Получатели уведомления -->
+            <div class="space-y-6">
+                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Получатели уведомления</h2>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Категория пользователей</label>
+                        <div class="space-y-2">
+                            <div class="flex items-center">
+                                <input type="radio" name="recipient_type" id="all_users" value="all"
+                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
+                                       onchange="toggleRecipientOptions()" checked>
+                                <label for="all_users" class="ml-2 block text-sm text-gray-700">
+                                    Все пользователи
+                                </label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" name="recipient_type" id="students" value="students"
+                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
+                                       onchange="toggleRecipientOptions()">
+                                <label for="students" class="ml-2 block text-sm text-gray-700">
+                                    Только студенты
+                                </label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" name="recipient_type" id="teachers" value="teachers"
+                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
+                                       onchange="toggleRecipientOptions()">
+                                <label for="teachers" class="ml-2 block text-sm text-gray-700">
+                                    Только преподаватели
+                                </label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" name="recipient_type" id="verified_users" value="verified"
+                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
+                                       onchange="toggleRecipientOptions()">
+                                <label for="verified_users" class="ml-2 block text-sm text-gray-700">
+                                    Только верифицированные пользователи
+                                </label>
+                            </div>
+                            <div class="flex items-center">
+                                <input type="radio" name="recipient_type" id="custom_filter" value="custom"
+                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
+                                       onchange="toggleRecipientOptions()">
+                                <label for="custom_filter" class="ml-2 block text-sm text-gray-700">
+                                    Пользовательский фильтр
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Дополнительные параметры для студентов -->
+                    <div id="student_options" class="hidden mb-4 pl-6 border-l-2 border-gray-200">
+                        <div class="mb-3">
+                            <label for="student_group" class="block text-sm font-medium text-gray-700 mb-1">Группа</label>
+                            <select id="student_group" name="student_group"
+                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                                <option value="">Все группы</option>
+                                {% for group in groups %}
+                                    <option value="{{ group }}">{{ group }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="student_course" class="block text-sm font-medium text-gray-700 mb-1">Курс</label>
+                            <select id="student_course" name="student_course"
+                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                                <option value="">Все курсы</option>
+                                <option value="1">1 курс</option>
+                                <option value="2">2 курс</option>
+                                <option value="3">3 курс</option>
+                                <option value="4">4 курс</option>
+                                <option value="5">5 курс</option>
+                                <option value="6">6 курс</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="student_faculty" class="block text-sm font-medium text-gray-700 mb-1">Факультет</label>
+                            <select id="student_faculty" name="student_faculty"
+                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                                <option value="">Все факультеты</option>
+                                {% for faculty in faculties %}
+                                    <option value="{{ faculty }}">{{ faculty }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="verification_status" class="block text-sm font-medium text-gray-700 mb-1">Статус верификации</label>
+                            <select id="verification_status" name="verification_status"
+                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                                <option value="">Любой статус</option>
+                                <option value="verified">Верифицированные</option>
+                                <option value="pending">На проверке</option>
+                                <option value="rejected">Отклоненные</option>
+                                <option value="unverified">Не верифицированные</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Дополнительные параметры для преподавателей -->
+                    <div id="teacher_options" class="hidden mb-4 pl-6 border-l-2 border-gray-200">
+                        <div class="mb-3">
+                            <label for="teacher_department" class="block text-sm font-medium text-gray-700 mb-1">Кафедра</label>
+                            <select id="teacher_department" name="teacher_department"
+                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                                <option value="">Все кафедры</option>
+                                {% for department in departments %}
+                                    <option value="{{ department }}">{{ department }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="teacher_position" class="block text-sm font-medium text-gray-700 mb-1">Должность</label>
+                            <select id="teacher_position" name="teacher_position"
+                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
+                                <option value="">Все должности</option>
+                                {% for position in positions %}
+                                    <option value="{{ position }}">{{ position }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Поиск конкретных пользователей -->
+                    <div id="custom_options" class="hidden mb-4 pl-6 border-l-2 border-gray-200">
+                        <div class="mb-3">
+                            <label for="user_search" class="block text-sm font-medium text-gray-700 mb-1">Поиск пользователей</label>
+                            <div class="flex">
+                                <input type="text" id="user_search"
+                                       class="flex-1 px-4 py-2 border rounded-l-md focus:outline-none focus:ring-2 focus:ring-primary"
+                                       placeholder="Введите ФИО или логин">
+                                <button type="button" onclick="searchUsers()"
+                                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-r-md">
+                                    Найти
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="user_search_results" class="hidden mb-3 max-h-64 overflow-y-auto bg-white rounded-md border border-gray-200 p-2">
+                            <!-- Результаты поиска пользователей будут здесь -->
+                        </div>
+
+                        <div id="selected_users_container" class="mb-3">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Выбранные пользователи</label>
+                            <div id="selected_users" class="flex flex-wrap gap-2 min-h-[50px] p-2 bg-white rounded-md border border-gray-200">
+                                <!-- Выбранные пользователи будут здесь -->
+                            </div>
+                            <input type="hidden" id="selected_user_ids" name="selected_user_ids" value="">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Статистика получателей -->
+                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Статистика получателей</h2>
+                    <div class="flex justify-between mb-2">
+                        <span class="text-sm text-gray-700">Всего устройств:</span>
+                        <span class="text-sm font-semibold" id="total_devices">-</span>
+                    </div>
+                    <div class="flex justify-between mb-2">
+                        <span class="text-sm text-gray-700">Всего пользователей:</span>
+                        <span class="text-sm font-semibold" id="total_users">-</span>
+                    </div>
+                    <div class="flex justify-between mb-4">
+                        <span class="text-sm text-gray-700">Примерное время отправки:</span>
+                        <span class="text-sm font-semibold" id="estimated_time">-</span>
+                    </div>
+
+                    <button type="button" onclick="getRecipientsPreview()"
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md flex items-center justify-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        Рассчитать количество получателей
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Кнопки действий -->
+        <div class="flex justify-end mt-6 pt-4 border-t">
+            <button type="button" onclick="showConfirmDialog()"
+                    class="bg-primary hover:bg-red-900 text-white py-3 px-8 rounded-md flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+                Отправить уведомление
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Диалог подтверждения отправки -->
+<div id="confirm-dialog" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-lg p-6 max-w-md w-full">
+        <h3 class="text-lg font-bold text-gray-900 mb-4">Подтверждение отправки</h3>
+        <p class="text-gray-700 mb-4">Вы собираетесь отправить уведомление <span id="confirm-count" class="font-semibold">N</span> пользователям. Продолжить?</p>
+        <p class="text-gray-700 mb-6 text-sm bg-yellow-50 p-2 rounded border border-yellow-200">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            После отправки уведомление нельзя будет отозвать.
+        </p>
+        <div class="flex justify-end space-x-3">
+            <button type="button" onclick="hideConfirmDialog()" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded">
+                Отмена
+            </button>
+            <button type="button" onclick="submitForm()" class="bg-primary hover:bg-red-900 text-white px-4 py-2 rounded">
+                Подтвердить отправку
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Обновление превью уведомления
+    document.getElementById('title').addEventListener('input', function() {
+        document.getElementById('preview-title').textContent = this.value || 'Важное сообщение';
+    });
+
+    document.getElementById('message').addEventListener('input', function() {
+        document.getElementById('preview-message').textContent = this.value || 'Подробный текст уведомления будет здесь.';
+    });
+
+    // Управление отображением опций получателей
+    function toggleRecipientOptions() {
+        const recipientType = document.querySelector('input[name="recipient_type"]:checked').value;
+
+        document.getElementById('student_options').classList.add('hidden');
+        document.getElementById('teacher_options').classList.add('hidden');
+        document.getElementById('custom_options').classList.add('hidden');
+
+        if (recipientType === 'students') {
+            document.getElementById('student_options').classList.remove('hidden');
+        } else if (recipientType === 'teachers') {
+            document.getElementById('teacher_options').classList.remove('hidden');
+        } else if (recipientType === 'custom') {
+            document.getElementById('custom_options').classList.remove('hidden');
+        }
+    }
+
+    // Поиск пользователей
+    function searchUsers() {
+        const searchTerm = document.getElementById('user_search').value.trim();
+        if (!searchTerm) return;
+
+        const resultsContainer = document.getElementById('user_search_results');
+        resultsContainer.innerHTML = '<div class="text-center py-2"><span class="spinner"></span> Поиск...</div>';
+        resultsContainer.classList.remove('hidden');
+
+        // AJAX запрос для поиска пользователей
+        fetch(`/api/users/search?term=${encodeURIComponent(searchTerm)}`)
+            .then(response => response.json())
+            .then(data => {
+                resultsContainer.innerHTML = '';
+
+                if (data.length === 0) {
+                    resultsContainer.innerHTML = '<div class="text-center py-2 text-gray-500">Пользователи не найдены</div>';
+                    return;
+                }
+
+                data.forEach(user => {
+                    const userDiv = document.createElement('div');
+                    userDiv.className = 'p-2 hover:bg-gray-100 cursor-pointer flex items-center justify-between';
+                    userDiv.innerHTML = `
+                        <div>
+                            <div class="font-medium">${user.full_name || user.username}</div>
+                            <div class="text-xs text-gray-500">${user.role === 'student' ? 'Студент' : 'Преподаватель'} • ${user.email || user.username}</div>
+                        </div>
+                        <button type="button" class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                            Добавить
+                        </button>
+                    `;
+                    userDiv.addEventListener('click', () => addUser(user));
+                    resultsContainer.appendChild(userDiv);
+                });
+            })
+            .catch(error => {
+                console.error('Ошибка при поиске пользователей:', error);
+                resultsContainer.innerHTML = '<div class="text-center py-2 text-red-500">Ошибка при поиске пользователей</div>';
+            });
+    }
+
+    // Добавление пользователя в список выбранных
+    function addUser(user) {
+        const selectedUsersContainer = document.getElementById('selected_users');
+        const selectedUserIds = document.getElementById('selected_user_ids');
+
+        // Проверяем, не выбран ли уже этот пользователь
+        if (document.getElementById(`user-${user.id}`)) {
+            return;
+        }
+
+        const userTag = document.createElement('div');
+        userTag.id = `user-${user.id}`;
+        userTag.className = 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm flex items-center';
+        userTag.innerHTML = `
+            <span>${user.full_name || user.username}</span>
+            <button type="button" onclick="removeUser(${user.id})" class="ml-2 text-blue-600 hover:text-blue-800">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        `;
+
+        selectedUsersContainer.appendChild(userTag);
+
+        // Обновляем скрытое поле с ID выбранных пользователей
+        const currentIds = selectedUserIds.value ? selectedUserIds.value.split(',') : [];
+        currentIds.push(user.id);
+        selectedUserIds.value = currentIds.join(',');
+
+        // Скрываем результаты поиска
+        document.getElementById('user_search_results').classList.add('hidden');
+        document.getElementById('user_search').value = '';
+    }
+
+    // Удаление пользователя из списка выбранных
+    function removeUser(userId) {
+        const userTag = document.getElementById(`user-${userId}`);
+        if (userTag) {
+            userTag.remove();
+
+            // Обновляем скрытое поле с ID выбранных пользователей
+            const selectedUserIds = document.getElementById('selected_user_ids');
+            const currentIds = selectedUserIds.value.split(',');
+            selectedUserIds.value = currentIds.filter(id => id != userId).join(',');
+        }
+    }
+
+    // Получение предварительного просмотра количества получателей
+    function getRecipientsPreview() {
+        const form = document.getElementById('notification-form');
+        const formData = new FormData(form);
+        formData.append('preview_only', 'true');
+
+        // Заменяем статус на "загрузка"
+        document.getElementById('total_devices').textContent = "Загрузка...";
+        document.getElementById('total_users').textContent = "Загрузка...";
+        document.getElementById('estimated_time').textContent = "Загрузка...";
+
+        // AJAX запрос для получения статистики
+        fetch('/api/notifications/preview', {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('total_devices').textContent = data.devices_count;
+                document.getElementById('total_users').textContent = data.users_count;
+
+                // Рассчитываем примерное время отправки (1 секунда на 10 уведомлений)
+                const timeInSeconds = Math.ceil(data.devices_count / 10);
+                let timeText = "меньше минуты";
+
+                if (timeInSeconds >= 60) {
+                    const minutes = Math.ceil(timeInSeconds / 60);
+                    timeText = `примерно ${minutes} ${minutes === 1 ? 'минута' : minutes < 5 ? 'минуты' : 'минут'}`;
+                }
+
+                document.getElementById('estimated_time').textContent = timeText;
+            })
+            .catch(error => {
+                console.error('Ошибка при получении статистики получателей:', error);
+                document.getElementById('total_devices').textContent = "Ошибка";
+                document.getElementById('total_users').textContent = "Ошибка";
+                document.getElementById('estimated_time').textContent = "Ошибка";
+            });
+    }
+
+    // Отображение диалога подтверждения
+    function showConfirmDialog() {
+        // Получаем количество получателей
+        const usersCount = document.getElementById('total_users').textContent;
+        if (usersCount === '-' || usersCount === 'Загрузка...' || usersCount === 'Ошибка') {
+            alert('Сначала рассчитайте количество получателей!');
+            return;
+        }
+
+        // Проверяем заполнение обязательных полей
+        const title = document.getElementById('title').value.trim();
+        const message = document.getElementById('message').value.trim();
+
+        if (!title || !message) {
+            alert('Заполните заголовок и текст уведомления!');
+            return;
+        }
+
+        // Проверяем наличие получателей
+        if (usersCount === '0') {
+            alert('Нет получателей для отправки уведомления!');
+            return;
+        }
+
+        // Обновляем текст в диалоге и показываем его
+        document.getElementById('confirm-count').textContent = usersCount;
+        document.getElementById('confirm-dialog').classList.remove('hidden');
+    }
+
+    // Скрытие диалога подтверждения
+    function hideConfirmDialog() {
+        document.getElementById('confirm-dialog').classList.add('hidden');
+    }
+
+    // Отправка формы
+    function submitForm() {
+        document.getElementById('notification-form').submit();
+    }
+
+    // При загрузке страницы
+    document.addEventListener('DOMContentLoaded', function() {
+        // Инициализация отображения опций получателей
+        toggleRecipientOptions();
+    });
+</script>
+{% endblock %}

@@ -19,6 +19,7 @@ export interface User {
   id: number;
   username: string;
   role: UserRole;
+  email?: string;
   verificationStatus?: VerificationStatus;
   fullName?: string;
   faculty?: string;
@@ -208,6 +209,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         id: userData.id,
         username: userData.username,
         role: userData.role,
+        email: userData.email,
         verificationStatus: userData.verificationStatus,
         fullName: userData.fullName,
         group: userData.group,

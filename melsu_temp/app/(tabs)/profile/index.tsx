@@ -294,15 +294,7 @@ export default function ProfileScreen() {
         iconColor: '#1976D2',
         route: '/profile/change-password'
       },
-      {
-        id: 'edit',
-        title: 'Редактировать профиль',
-        subtitle: 'Обновите личную информацию',
-        icon: 'person-outline',
-        iconBgColor: '#E8F5E9',
-        iconColor: '#43A047',
-        route: '/profile/edit'
-      },
+
       // Notifications item removed as requested
       {
         id: 'tickets',

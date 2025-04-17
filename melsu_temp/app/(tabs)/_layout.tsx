@@ -8,13 +8,16 @@ import chatService from '../../src/services/chatService';
 
 export default function TabLayout() {
   const { isAuthenticated, isLoading } = useAuth();
-  const { unreadCount } = useUnreadMessages();
+  const { unreadCount, refreshUnreadCount } = useUnreadMessages();
   const [localUnreadCount, setLocalUnreadCount] = useState(unreadCount || 0);
   const appState = useRef(AppState.currentState);
   const isMountedRef = useRef(true);
   const lastUpdateRef = useRef(0);
+  const updateTimeoutRef = useRef(null); // Для таймаута обновления
   const currentPath = usePathname();
-  const isChatsScreen = currentPath?.includes('/chats');
+
+  // Определение, находимся ли мы на экране чатов
+  const isOnChatsScreen = currentPath?.includes('/chats');
 
   // Проверяем, авторизован ли пользователь
   useEffect(() => {
@@ -38,15 +41,47 @@ export default function TabLayout() {
       // Обновляем время последнего вызова
       lastUpdateRef.current = now;
 
-      // Инициализируем чат-сервис, если нужно
-      const initialized = await chatService.initialize();
-      if (!initialized) {
-        console.log('Chat service initialization failed');
-        return;
+      // Установка таймаута для предотвращения бесконечной загрузки
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
       }
 
-      // Получаем актуальное количество непрочитанных сообщений
-      const count = await chatService.getTotalUnreadCount();
+      updateTimeoutRef.current = setTimeout(() => {
+        console.log('Превышено время ожидания обновления счетчика сообщений');
+        updateTimeoutRef.current = null;
+      }, 5000); // 5 секунд максимум на операцию
+
+      // Создаем Promise с таймаутом для получения счетчика непрочитанных сообщений
+      const getUnreadCount = async () => {
+        // Инициализируем чат-сервис, если нужно
+        const initialized = await chatService.initialize();
+        if (!initialized) {
+          console.log('Chat service initialization failed');
+          return 0;
+        }
+
+        // Получаем актуальное количество непрочитанных сообщений
+        return await chatService.getTotalUnreadCount();
+      };
+
+      // Promise с таймаутом в 4 секунды
+      const countPromise = getUnreadCount();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Таймаут получения непрочитанных сообщений')), 4000)
+      );
+
+      // Используем Promise.race для ограничения времени выполнения
+      const count = await Promise.race([countPromise, timeoutPromise])
+        .catch(err => {
+          console.warn('Ошибка или таймаут при получении непрочитанных сообщений:', err.message);
+          return 0; // Возвращаем 0 в случае ошибки или таймаута
+        });
+
+      // Очищаем таймаут, так как операция завершена
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = null;
+      }
 
       // Обновляем состояние только если компонент еще смонтирован
       if (isMountedRef.current) {
@@ -54,8 +89,23 @@ export default function TabLayout() {
       }
     } catch (error) {
       console.error('Ошибка при обновлении счетчика сообщений:', error);
+
+      // Очищаем таймаут в случае ошибки
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = null;
+      }
     }
   };
+
+  // Эффект для отслеживания изменения пути и немедленного обновления при переходе на экран чатов
+  useEffect(() => {
+    // Если путь изменился и теперь это экран чатов, сразу обновляем счетчик
+    if (isOnChatsScreen && isAuthenticated && !isLoading) {
+      console.log('Переход на экран чатов, немедленно обновляем счетчик');
+      updateUnreadCount(true);
+    }
+  }, [isOnChatsScreen, isAuthenticated, isLoading]);
 
   // Эффект для управления интервалом обновления с учетом активного экрана
   useEffect(() => {
@@ -64,23 +114,36 @@ export default function TabLayout() {
     // Устанавливаем флаг монтирования
     isMountedRef.current = true;
 
-    // Обновляем счетчик сразу при монтировании
-    updateUnreadCount(true);
+    // Отложенное выполнение первого обновления для предотвращения блокировки основного потока при запуске
+    const initialUpdateTimeout = setTimeout(() => {
+      if (isMountedRef.current) {
+        updateUnreadCount(true);
+      }
+    }, 1000); // Даем 1 секунду для загрузки UI и других компонентов
 
     // Определяем интервал в зависимости от экрана
-    // На экране чатов обновляем чаще (каждые 7 секунд), на остальных - реже (каждые 30 секунд)
-    const intervalTime = isChatsScreen ? 7000 : 30000;
+    // На экране чатов обновляем чаще (каждые 10 секунд), на остальных - реже (каждые 30 секунд)
+    const intervalTime = isOnChatsScreen ? 10000 : 30000;
 
-    console.log(`Установлен интервал обновления: ${intervalTime}ms (${isChatsScreen ? 'экран чатов' : 'другой экран'})`);
+    console.log(`Установлен интервал обновления: ${intervalTime}ms (${isOnChatsScreen ? 'экран чатов' : 'другой экран'})`);
 
-    // Настраиваем интервал для периодического обновления
-    const intervalId = setInterval(() => updateUnreadCount(), intervalTime);
+    // Настраиваем интервал для периодического обновления, с отсрочкой первого запуска
+    const intervalId = setInterval(() => {
+      if (isMountedRef.current) {
+        updateUnreadCount();
+      }
+    }, intervalTime);
 
     // Обработчик изменения состояния приложения
     const handleAppStateChange = (nextAppState) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
         console.log('Приложение вернулось из фона, обновляем счетчик сообщений');
-        updateUnreadCount(true);
+        // Отложенное обновление при возвращении из фона
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            updateUnreadCount(true);
+          }
+        }, 500);
       }
       appState.current = nextAppState;
     };
@@ -91,10 +154,24 @@ export default function TabLayout() {
     // Очистка при размонтировании
     return () => {
       isMountedRef.current = false;
+      clearTimeout(initialUpdateTimeout);
       clearInterval(intervalId);
       appStateSubscription.remove();
+
+      // Очищаем таймаут обновления, если он был установлен
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = null;
+      }
     };
-  }, [isAuthenticated, isLoading, isChatsScreen]);
+  }, [isAuthenticated, isLoading, isOnChatsScreen]);
+
+  // Синхронизация со значением из хука useUnreadMessages
+  useEffect(() => {
+    if (unreadCount !== undefined && unreadCount !== localUnreadCount) {
+      setLocalUnreadCount(unreadCount);
+    }
+  }, [unreadCount]);
 
   // Пока идет проверка авторизации, показываем пустой экран
   if (isLoading) {
@@ -170,6 +247,8 @@ export default function TabLayout() {
           tabBarOnPress: ({ navigation, defaultHandler }) => {
             // Форсируем обновление при нажатии на вкладку чатов
             updateUnreadCount(true);
+            // Также обновляем через хук для полной синхронизации
+            refreshUnreadCount();
             defaultHandler();
           }
         }}

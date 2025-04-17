@@ -1,5 +1,4 @@
-// components/ChatsList.jsx
-import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
+import React, { forwardRef, useImperativeHandle, useState, useEffect, useRef } from 'react';
 import {
   View,
   FlatList,
@@ -7,48 +6,142 @@ import {
   Text,
   StyleSheet,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  TouchableHighlight
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import chatService from '../../src/services/chatService';
+import Constants from 'expo-constants';
 
 const ChatsList = forwardRef((props, ref) => {
   const [chats, setChats] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [deletingChatId, setDeletingChatId] = useState(null); // Трекер удаляемого чата
+  const [deletingChatId, setDeletingChatId] = useState(null);
+  const [timeoutId, setTimeoutId] = useState(null); // Таймаут для отмены бесконечной загрузки
+  const intervalRef = useRef(null); // Для хранения ссылки на интервал обновления
+  const alreadyLoadedRef = useRef(false); // Для отслеживания первой загрузки
+  const focusedRef = useRef(false); // Для отслеживания фокуса экрана
   const router = useRouter();
 
-  // Простая функция загрузки чатов
-  const loadChats = async () => {
-    console.log('Начинаем загрузку чатов');
-    setIsLoading(true);
+  // Интервал обновления списка в миллисекундах
+  const UPDATE_INTERVAL = 30000; // 30 секунд
+
+  // Функция загрузки чатов с таймаутом
+  const loadChats = async (silent = false) => {
+    // Если запущена тихая загрузка, не показываем индикатор загрузки
+    if (!silent) {
+      console.log('Начинаем загрузку чатов');
+      setIsLoading(true);
+    } else {
+      console.log('Начинаем тихую фоновую загрузку чатов');
+    }
+
+    // Устанавливаем таймаут, который отменит загрузку через 8 секунд
+    const loadingTimeout = setTimeout(() => {
+      console.log('Превышен таймаут загрузки чатов');
+      if (!silent) setIsLoading(false);
+      // Если после тайм-аута список чатов пуст, добавляем пустой массив
+      setChats(prevChats => prevChats.length > 0 ? prevChats : []);
+    }, 8000);
+
+    setTimeoutId(loadingTimeout);
 
     try {
       // Инициализируем chatService если необходимо
       const initialized = await chatService.initialize();
       if (!initialized) {
         console.log('Не удалось инициализировать chatService');
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
+        clearTimeout(loadingTimeout);
+        // Если инициализация не удалась, устанавливаем пустой массив
+        setChats([]);
         return;
       }
 
-      // Получаем список чатов
-      const userChats = await chatService.getUserChats();
+      // Получаем список чатов с ограничением времени выполнения
+      const fetchPromise = chatService.getUserChats();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Таймаут получения списка чатов')), 6000)
+      );
+
+      const userChats = await Promise.race([fetchPromise, timeoutPromise])
+        .catch(err => {
+          console.log('Ошибка или таймаут при получении чатов:', err.message);
+          return []; // Возвращаем пустой массив в случае ошибки или таймаута
+        });
+
       console.log(`Загружено ${userChats.length} чатов`);
       setChats(userChats);
     } catch (error) {
       console.error('Ошибка загрузки чатов:', error);
+      // В случае ошибки устанавливаем пустой массив
+      setChats([]);
     } finally {
       console.log('Завершаем загрузку чатов');
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
+      clearTimeout(loadingTimeout);
     }
   };
+
+  // Функция для настройки интервала обновления
+  const setupUpdateInterval = () => {
+    // Очищаем предыдущий интервал, если он существует
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+    }
+
+    // Устанавливаем новый интервал
+    intervalRef.current = setInterval(() => {
+      if (focusedRef.current) {
+        console.log('Интервальное обновление списка чатов');
+        loadChats(true); // Тихая загрузка без индикатора
+      }
+    }, UPDATE_INTERVAL);
+
+    console.log(`Установлен интервал обновления списка чатов: ${UPDATE_INTERVAL}ms`);
+  };
+
+  // Используем хук useFocusEffect для обновления списка чатов
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log('Экран чатов в фокусе');
+      focusedRef.current = true;
+
+      // Первая загрузка - выполняем только если список пуст и ранее не загружался
+      if (!alreadyLoadedRef.current || chats.length === 0) {
+        console.log('Первая загрузка списка чатов');
+        setRefreshKey(prev => prev + 1);
+        alreadyLoadedRef.current = true;
+      }
+
+      // Настраиваем интервал обновления
+      setupUpdateInterval();
+
+      // При потере фокуса экраном
+      return () => {
+        console.log('Экран чатов потерял фокус');
+        focusedRef.current = false;
+
+        // Очищаем интервал обновления при потере фокуса
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      };
+    }, [chats.length])
+  );
 
   // Загрузка при первом рендере или изменении ключа обновления
   useEffect(() => {
     loadChats();
+
+    // Очистка при размонтировании
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
   }, [refreshKey]);
 
   // Экспозиция методов для родительского компонента
@@ -94,6 +187,13 @@ const ChatsList = forwardRef((props, ref) => {
               return;
             }
 
+            // Устанавливаем таймаут для отмены бесконечной загрузки
+            const deleteTimeout = setTimeout(() => {
+              console.log('Превышен таймаут удаления чата');
+              setDeletingChatId(null);
+              Alert.alert('Ошибка', 'Превышено время ожидания. Попробуйте еще раз.');
+            }, 10000);
+
             // Отмечаем чат как удаляемый
             setDeletingChatId(chat.id);
 
@@ -105,7 +205,9 @@ const ChatsList = forwardRef((props, ref) => {
               // Проверяем наличие метода deleteChat в chatService
               if (typeof chatService.deleteChat !== 'function') {
                 console.log('Метод deleteChat не найден, оставляем только локальное удаление');
+                clearTimeout(deleteTimeout);
                 Alert.alert('Готово', 'Чат удален из вашего списка');
+                setDeletingChatId(null);
                 return;
               }
 
@@ -125,13 +227,20 @@ const ChatsList = forwardRef((props, ref) => {
                 'Не удалось удалить чат. Список чатов обновлен.'
               );
             } finally {
-              // Сбрасываем идентификатор удаляемого чата
+              // Очищаем таймаут и сбрасываем идентификатор удаляемого чата
+              clearTimeout(deleteTimeout);
               setDeletingChatId(null);
             }
           }
         }
       ]
     );
+  };
+
+  // Обработчик долгого нажатия на чат
+  const handleLongPress = (chat) => {
+    // Вызываем функцию удаления при долгом нажатии
+    handleDeleteChat(chat);
   };
 
   // Рендер элемента чата
@@ -151,50 +260,48 @@ const ChatsList = forwardRef((props, ref) => {
 
     return (
       <View style={styles.chatItemContainer}>
-        <TouchableOpacity
+        <TouchableHighlight
           style={styles.chatItem}
           onPress={() => handleChatPress(item.id)}
+          onLongPress={() => handleLongPress(item)}
+          underlayColor="#f5f5f5"
           activeOpacity={0.7}
+          delayLongPress={500} // 500мс для долгого нажатия
           disabled={isDeleting}
         >
-          <View style={styles.chatAvatar}>
-            <Ionicons
-              name={item.type === 'group' ? 'people' : 'person'}
-              size={24}
-              color="#770002"
-            />
-          </View>
-          <View style={styles.chatInfo}>
-            <View style={styles.chatHeader}>
-              <Text style={[styles.chatName, isDeleting && styles.textDisabled]} numberOfLines={1}>
-                {chatName}
-              </Text>
-              {lastMessageTime && (
-                <Text style={[styles.messageTime, isDeleting && styles.textDisabled]}>
-                  {lastMessageTime}
+          <View style={styles.chatItemContent}>
+            <View style={styles.chatAvatar}>
+              <Ionicons
+                name={item.type === 'group' ? 'people' : 'person'}
+                size={24}
+                color="#770002"
+              />
+            </View>
+            <View style={styles.chatInfo}>
+              <View style={styles.chatHeader}>
+                <Text style={[styles.chatName, isDeleting && styles.textDisabled]} numberOfLines={1}>
+                  {chatName}
+                </Text>
+                {lastMessageTime && (
+                  <Text style={[styles.messageTime, isDeleting && styles.textDisabled]}>
+                    {lastMessageTime}
+                  </Text>
+                )}
+              </View>
+              {item.lastMessage && (
+                <Text style={[styles.lastMessage, isDeleting && styles.textDisabled]} numberOfLines={1}>
+                  {item.lastMessage.text}
                 </Text>
               )}
             </View>
-            {item.lastMessage && (
-              <Text style={[styles.lastMessage, isDeleting && styles.textDisabled]} numberOfLines={1}>
-                {item.lastMessage.text}
-              </Text>
-            )}
           </View>
-        </TouchableOpacity>
+        </TouchableHighlight>
 
-        {/* Кнопка удаления чата или индикатор удаления */}
-        {isDeleting ? (
-          <View style={styles.deleteButton}>
+        {/* Индикатор удаления чата */}
+        {isDeleting && (
+          <View style={styles.deleteIndicator}>
             <ActivityIndicator size="small" color="#FF3B30" />
           </View>
-        ) : (
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => handleDeleteChat(item)}
-          >
-            <Ionicons name="trash-outline" size={22} color="#FF3B30" />
-          </TouchableOpacity>
         )}
       </View>
     );
@@ -218,10 +325,20 @@ const ChatsList = forwardRef((props, ref) => {
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubbles-outline" size={48} color="#ccc" />
               <Text style={styles.emptyText}>У вас пока нет чатов</Text>
+              <Text style={styles.emptyHint}>Для удаления чата удерживайте его</Text>
             </View>
           ) : null
         }
       />
+
+      {/* Кнопка добавления нового чата */}
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={() => router.push('/new-chat')}
+        activeOpacity={0.8}
+      >
+        <Ionicons name="add" size={28} color="#FFF" />
+      </TouchableOpacity>
     </View>
   );
 });
@@ -244,6 +361,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     flexGrow: 1,
+    paddingBottom: 80, // Пространство для плавающей кнопки
   },
   chatItemContainer: {
     flexDirection: 'row',
@@ -253,10 +371,13 @@ const styles = StyleSheet.create({
   },
   chatItem: {
     flex: 1,
+    paddingVertical: 12,
+  },
+  chatItemContent: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
   },
   chatAvatar: {
     width: 50,
@@ -303,7 +424,13 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
-  deleteButton: {
+  emptyHint: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  deleteIndicator: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     justifyContent: 'center',
@@ -311,6 +438,23 @@ const styles = StyleSheet.create({
   },
   textDisabled: {
     color: '#cccccc',
+  },
+  addButton: {
+    position: 'absolute',
+    right: 20,
+    bottom: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#770002',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+    elevation: 5,
+    zIndex: 2,
   },
 });
 

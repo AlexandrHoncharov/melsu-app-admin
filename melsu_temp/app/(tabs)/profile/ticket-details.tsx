@@ -15,7 +15,8 @@ import {
   RefreshControl,
   Dimensions,
   Modal,
-  ScrollView
+  ScrollView,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -28,6 +29,21 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import * as Sharing from 'expo-sharing';
 import * as SecureStore from 'expo-secure-store';
 import { API_URL } from '../../../src/api/apiClient';
+
+// Custom StatusBar component for more reliable status bar handling
+function CustomStatusBar({ backgroundColor = '#ffffff', barStyle = 'dark-content' }) {
+  const STATUS_BAR_HEIGHT = Platform.OS === 'android' ? 30 : 0;
+
+  return (
+    <View style={{ height: STATUS_BAR_HEIGHT, backgroundColor }}>
+      <StatusBar
+        translucent
+        backgroundColor={backgroundColor}
+        barStyle={barStyle}
+      />
+    </View>
+  );
+}
 
 // Получаем ширину экрана для адаптивной верстки
 const { width, height } = Dimensions.get('window');
@@ -181,6 +197,15 @@ export default function TicketDetailsScreen() {
 
   // Ref для автоматической прокрутки к последнему сообщению
   const flatListRef = useRef<FlatList>(null);
+
+  // Set status bar properties for Android
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      StatusBar.setBackgroundColor('#ffffff');
+      StatusBar.setBarStyle('dark-content');
+      StatusBar.setTranslucent(true);
+    }
+  }, []);
 
   // Загрузка данных тикета
   const loadTicket = useCallback(async () => {
@@ -659,6 +684,7 @@ export default function TicketDetailsScreen() {
   if (isLoading && !ticket) {
     return (
       <SafeAreaView style={styles.container}>
+        <CustomStatusBar />
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
@@ -681,6 +707,7 @@ export default function TicketDetailsScreen() {
   if (!ticket) {
     return (
       <SafeAreaView style={styles.container}>
+        <CustomStatusBar />
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
@@ -715,6 +742,7 @@ export default function TicketDetailsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <CustomStatusBar />
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -915,6 +943,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9F9F9',
+    // Remove paddingTop as we're now using CustomStatusBar
   },
   keyboardAvoid: {
     flex: 1,

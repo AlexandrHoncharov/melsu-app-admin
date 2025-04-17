@@ -11,13 +11,18 @@ import {
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
-  Image
+  Image,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useAuth } from '../../../hooks/useAuth';
 import ticketsApi, { CreateTicketRequest } from '../../../src/api/ticketsApi';
 import * as ImagePicker from 'expo-image-picker';
+
+
+// Add the statusBarHeight calculation
+const STATUSBAR_HEIGHT = StatusBar.currentHeight || 0;
 
 // Категории тикетов
 const categories = [
@@ -284,6 +289,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9F9F9',
+    // Add padding top for Android
+    paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0,
   },
   keyboardAvoid: {
     flex: 1

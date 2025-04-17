@@ -10,12 +10,17 @@ import {
   SafeAreaView,
   RefreshControl,
   Image,
-  ScrollView
+  ScrollView,
+  Platform,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useNavigation } from 'expo-router';
 import { useAuth } from '../../../hooks/useAuth';
 import ticketsApi, { Ticket } from '../../../src/api/ticketsApi';
+
+// Add the statusBarHeight calculation
+const STATUSBAR_HEIGHT = StatusBar.currentHeight || 0;
 
 // Хелпер для отображения времени
 const formatDate = (dateString: string): string => {
@@ -289,6 +294,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9F9F9',
+    // Add padding top for Android
+    paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0,
   },
   header: {
     flexDirection: 'row',

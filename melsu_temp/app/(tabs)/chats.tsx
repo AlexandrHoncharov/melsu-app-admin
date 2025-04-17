@@ -1,13 +1,13 @@
 // components/ChatsList.jsx
-import React, { forwardRef, useImperativeHandle, useState, useEffect, useRef } from 'react';
+import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import {
   View,
   FlatList,
   TouchableOpacity,
   Text,
   StyleSheet,
-  ActivityIndicator,
-  Alert
+  Alert,
+  ActivityIndicator
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,67 +15,50 @@ import chatService from '../../src/services/chatService';
 
 const ChatsList = forwardRef((props, ref) => {
   const [chats, setChats] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState(null);
-  const mountedRef = useRef(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [deletingChatId, setDeletingChatId] = useState(null); // Трекер удаляемого чата
   const router = useRouter();
 
-  // Базовая загрузка чатов при монтировании компонента
-  useEffect(() => {
-    const fetchChats = async () => {
-      try {
-        console.log('Загрузка чатов...');
-        const userChats = await chatService.getUserChats();
-
-        // Проверяем, что компонент все еще смонтирован
-        if (!mountedRef.current) return;
-
-        setChats(userChats || []);
-        console.log(`Загружено ${userChats?.length || 0} чатов`);
-      } catch (error) {
-        console.error('Ошибка при загрузке чатов:', error);
-      } finally {
-        // Проверяем, что компонент все еще смонтирован
-        if (mountedRef.current) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    // Загружаем чаты при монтировании
-    fetchChats();
-
-    // Очистка при размонтировании
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // Простой рефреш для родительского компонента
-  const handleRefresh = async () => {
-    if (isLoading) return;
-
+  // Простая функция загрузки чатов
+  const loadChats = async () => {
+    console.log('Начинаем загрузку чатов');
     setIsLoading(true);
+
     try {
-      const userChats = await chatService.getUserChats();
-      if (mountedRef.current) {
-        setChats(userChats || []);
-      }
-    } catch (error) {
-      console.error('Ошибка при обновлении чатов:', error);
-    } finally {
-      if (mountedRef.current) {
+      // Инициализируем chatService если необходимо
+      const initialized = await chatService.initialize();
+      if (!initialized) {
+        console.log('Не удалось инициализировать chatService');
         setIsLoading(false);
+        return;
       }
+
+      // Получаем список чатов
+      const userChats = await chatService.getUserChats();
+      console.log(`Загружено ${userChats.length} чатов`);
+      setChats(userChats);
+    } catch (error) {
+      console.error('Ошибка загрузки чатов:', error);
+    } finally {
+      console.log('Завершаем загрузку чатов');
+      setIsLoading(false);
     }
   };
 
+  // Загрузка при первом рендере или изменении ключа обновления
+  useEffect(() => {
+    loadChats();
+  }, [refreshKey]);
+
   // Экспозиция методов для родительского компонента
   useImperativeHandle(ref, () => ({
-    handleRefresh,
-    // Минимальный набор методов
+    handleRefresh: async () => {
+      // Форсируем обновление списка через изменение ключа
+      setRefreshKey(prev => prev + 1);
+    },
     updateChatsData: (newChats) => {
-      if (Array.isArray(newChats) && mountedRef.current) {
+      if (Array.isArray(newChats)) {
         setChats(newChats);
       }
     }
@@ -86,14 +69,16 @@ const ChatsList = forwardRef((props, ref) => {
     router.push(`/chat/${chatId}`);
   };
 
-  // Обработчик удаления чата
-  const handleDeleteChat = (chat) => {
-    // Проверяем, не удаляется ли уже другой чат
-    if (deletingId) return;
+  // Локальное удаление чата из состояния
+  const removeLocalChat = (chatId) => {
+    setChats(prevChats => prevChats.filter(chat => chat.id !== chatId));
+  };
 
+  // Функция удаления чата
+  const handleDeleteChat = (chat) => {
     Alert.alert(
       'Удаление чата',
-      `Вы уверены, что хотите удалить чат с ${chat.withUserName || 'пользователем'}?`,
+      `Вы уверены, что хотите удалить чат "${chat.name || (chat.withUserName || 'Без имени')}"?`,
       [
         {
           text: 'Отмена',
@@ -103,34 +88,45 @@ const ChatsList = forwardRef((props, ref) => {
           text: 'Удалить',
           style: 'destructive',
           onPress: async () => {
+            // Проверяем, не идет ли уже процесс удаления
+            if (deletingChatId) {
+              console.log('Удаление другого чата уже в процессе');
+              return;
+            }
+
+            // Отмечаем чат как удаляемый
+            setDeletingChatId(chat.id);
+
+            console.log(`Начинаем удаление чата ${chat.id}`);
             try {
-              setDeletingId(chat.id);
+              // Локально удаляем чат для моментальной обратной связи
+              removeLocalChat(chat.id);
 
-              // Оптимистично удаляем чат из UI
-              setChats(currentChats =>
-                currentChats.filter(c => c.id !== chat.id)
+              // Проверяем наличие метода deleteChat в chatService
+              if (typeof chatService.deleteChat !== 'function') {
+                console.log('Метод deleteChat не найден, оставляем только локальное удаление');
+                Alert.alert('Готово', 'Чат удален из вашего списка');
+                return;
+              }
+
+              // Сервисное удаление чата
+              await chatService.deleteChat(chat.id);
+
+              console.log(`Чат ${chat.id} успешно удален`);
+              Alert.alert('Готово', 'Чат был удален');
+            } catch (error) {
+              console.error(`Ошибка при удалении чата ${chat.id}:`, error);
+
+              // В случае ошибки восстанавливаем список
+              setRefreshKey(prev => prev + 1);
+
+              Alert.alert(
+                'Ошибка',
+                'Не удалось удалить чат. Список чатов обновлен.'
               );
-
-              // Проверяем наличие метода deleteChat
-              if (typeof chatService.deleteChat === 'function') {
-                try {
-                  await chatService.deleteChat(chat.id);
-                  console.log(`Чат ${chat.id} успешно удален`);
-                } catch (error) {
-                  console.error(`Ошибка при удалении чата ${chat.id}:`, error);
-
-                  // В случае ошибки восстанавливаем список чатов
-                  if (mountedRef.current) {
-                    handleRefresh();
-                  }
-                }
-              } else {
-                console.log(`Метод deleteChat не найден. Чат ${chat.id} удален только из UI`);
-              }
             } finally {
-              if (mountedRef.current) {
-                setDeletingId(null);
-              }
+              // Сбрасываем идентификатор удаляемого чата
+              setDeletingChatId(null);
             }
           }
         }
@@ -150,7 +146,8 @@ const ChatsList = forwardRef((props, ref) => {
       ? new Date(item.lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : '';
 
-    const isDeleting = item.id === deletingId;
+    // Проверка, идет ли процесс удаления этого чата
+    const isDeleting = deletingChatId === item.id;
 
     return (
       <View style={styles.chatItemContainer}>
@@ -169,57 +166,62 @@ const ChatsList = forwardRef((props, ref) => {
           </View>
           <View style={styles.chatInfo}>
             <View style={styles.chatHeader}>
-              <Text style={styles.chatName} numberOfLines={1}>
+              <Text style={[styles.chatName, isDeleting && styles.textDisabled]} numberOfLines={1}>
                 {chatName}
               </Text>
               {lastMessageTime && (
-                <Text style={styles.messageTime}>{lastMessageTime}</Text>
+                <Text style={[styles.messageTime, isDeleting && styles.textDisabled]}>
+                  {lastMessageTime}
+                </Text>
               )}
             </View>
             {item.lastMessage && (
-              <Text style={styles.lastMessage} numberOfLines={1}>
+              <Text style={[styles.lastMessage, isDeleting && styles.textDisabled]} numberOfLines={1}>
                 {item.lastMessage.text}
               </Text>
             )}
           </View>
         </TouchableOpacity>
 
-        {/* Кнопка удаления */}
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => handleDeleteChat(item)}
-          disabled={isDeleting}
-        >
-          <Ionicons
-            name="trash-outline"
-            size={22}
-            color="#FF3B30"
-          />
-        </TouchableOpacity>
+        {/* Кнопка удаления чата или индикатор удаления */}
+        {isDeleting ? (
+          <View style={styles.deleteButton}>
+            <ActivityIndicator size="small" color="#FF3B30" />
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => handleDeleteChat(item)}
+          >
+            <Ionicons name="trash-outline" size={22} color="#FF3B30" />
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
 
   return (
     <View style={styles.container}>
-      {isLoading ? (
+      {isLoading && (
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color="#770002" />
         </View>
-      ) : (
-        <FlatList
-          data={chats}
-          renderItem={renderChatItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContainer}
-          ListEmptyComponent={
+      )}
+
+      <FlatList
+        data={chats}
+        renderItem={renderChatItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.listContainer}
+        ListEmptyComponent={
+          !isLoading ? (
             <View style={styles.emptyContainer}>
               <Ionicons name="chatbubbles-outline" size={48} color="#ccc" />
               <Text style={styles.emptyText}>У вас пока нет чатов</Text>
             </View>
-          }
-        />
-      )}
+          ) : null
+        }
+      />
     </View>
   );
 });
@@ -230,9 +232,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   loaderContainer: {
-    flex: 1,
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+    zIndex: 1,
   },
   listContainer: {
     flexGrow: 1,
@@ -300,6 +308,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  textDisabled: {
+    color: '#cccccc',
   },
 });
 

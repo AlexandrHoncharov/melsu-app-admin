@@ -9,14 +9,22 @@ import {
   ScrollView,
   Linking,
   Image,
-  useWindowDimensions
+  useWindowDimensions,
+  Platform,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 
+// Добавляем расчет высоты StatusBar для Android
+const STATUSBAR_HEIGHT = StatusBar.currentHeight || 0;
+
 export default function AboutScreen() {
   const { width } = useWindowDimensions();
   const logoSize = width * 0.4;
+
+  // Получаем текущий год для копирайта
+  const currentYear = new Date().getFullYear();
 
   // Function to open links
   const openLink = (url: string) => {
@@ -26,7 +34,11 @@ export default function AboutScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[
+      styles.container,
+      // Добавляем отступ для Android
+      Platform.OS === 'android' && { paddingTop: STATUSBAR_HEIGHT }
+    ]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
@@ -125,13 +137,14 @@ export default function AboutScreen() {
             onPress={() => openLink('https://yandex.ru/maps/-/CHb4zC8~')}
           >
             <Ionicons name="location-outline" size={24} color="#555" style={styles.contactIcon} />
-            <Text style={styles.contactText}>г. Мелитополь, пр. Богдана Хмельницкого 18</Text>
+            {/* Применяем специальный стиль для адреса, чтобы он корректно переносился */}
+            <Text style={styles.addressText}>г. Мелитополь, пр. Богдана Хмельницкого 18</Text>
           </TouchableOpacity>
         </View>
 
         {/* Copyright */}
         <View style={styles.copyright}>
-          <Text style={styles.copyrightText}>© 2024 Мелитопольский государственный университет</Text>
+          <Text style={styles.copyrightText}>© {currentYear} Мелитопольский государственный университет</Text>
           <Text style={styles.copyrightText}>Все права защищены</Text>
         </View>
       </ScrollView>
@@ -266,10 +279,19 @@ const styles = StyleSheet.create({
   },
   contactIcon: {
     marginRight: 12,
+    minWidth: 24, // Фиксированная ширина для иконок
   },
   contactText: {
     fontSize: 15,
     color: '#333',
+    flex: 1, // Позволяет тексту занять все доступное пространство
+  },
+  // Специальный стиль для адреса
+  addressText: {
+    fontSize: 15,
+    color: '#333',
+    flex: 1,
+    flexWrap: 'wrap', // Разрешаем перенос текста
   },
   copyright: {
     alignItems: 'center',

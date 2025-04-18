@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Image,
@@ -20,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 
 export default function LoginScreen() {
-  const [username, setUsername] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -38,8 +37,8 @@ export default function LoginScreen() {
     setLoginError(null);
 
     // Проверяем заполненность полей
-    if (!username.trim()) {
-      setLoginError('Введите логин');
+    if (!identifier.trim()) {
+      setLoginError('Введите логин или email');
       return;
     }
 
@@ -50,7 +49,7 @@ export default function LoginScreen() {
 
     try {
       // Вызываем API для входа в систему
-      await login(username, password);
+      await login(identifier, password);
     } catch (error) {
       // Отображаем ошибку под формой, а не в алерте
       setLoginError((error as Error).message);
@@ -64,6 +63,12 @@ export default function LoginScreen() {
   // Скрытие клавиатуры при нажатии вне полей ввода
   const dismissKeyboard = () => {
     Keyboard.dismiss();
+  };
+
+  // Определяем тип иконки в зависимости от введенного значения
+  const getInputIcon = () => {
+    if (!identifier) return "person-outline";
+    return identifier.includes('@') ? "mail-outline" : "person-outline";
   };
 
   return (
@@ -87,20 +92,21 @@ export default function LoginScreen() {
           <View style={styles.formContainer}>
             <View style={[
               styles.inputContainer,
-              loginError && !username && styles.inputError
+              loginError && !identifier && styles.inputError
             ]}>
-              <Ionicons name="person-outline" size={20} color="#666" style={styles.inputIcon} />
+              <Ionicons name={getInputIcon()} size={20} color="#666" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Логин"
+                placeholder="Логин или Email"
                 placeholderTextColor="#999"
-                value={username}
+                value={identifier}
                 onChangeText={(text) => {
-                  setUsername(text);
+                  setIdentifier(text);
                   setLoginError(null); // Сбрасываем ошибку при вводе
                 }}
                 autoCapitalize="none"
-                testID="login-username"
+                keyboardType={identifier.includes('@') ? 'email-address' : 'default'}
+                testID="login-identifier"
               />
             </View>
 

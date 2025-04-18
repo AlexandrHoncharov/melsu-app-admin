@@ -9,13 +9,17 @@ import {
   TouchableOpacity,
   SafeAreaView,
   StatusBar,
-  Platform
+  Platform,
+  Dimensions
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import newsApi, { NewsDetail } from '../../src/api/newsApi';
 import { Ionicons } from '@expo/vector-icons';
 
-// Обновите интерфейс NewsDetail, добавив поддержку content_blocks
+// Получаем ширину экрана для расчета высоты изображений
+const { width } = Dimensions.get('window');
+
+// Обновленный интерфейс для блоков контента
 interface ContentBlock {
   type: 'text' | 'image' | 'list' | 'header';
   content?: string;
@@ -24,12 +28,6 @@ interface ContentBlock {
   list_type?: 'ordered' | 'unordered';
   items?: string[];
 }
-
-// Обновите интерфейс NewsDetail в подходящем месте (например, api/newsApi.ts)
-// interface NewsDetail {
-//   ...существующие поля...
-//   content_blocks?: ContentBlock[];
-// }
 
 export default function NewsDetailScreen() {
   const { id } = useLocalSearchParams();
@@ -51,11 +49,7 @@ export default function NewsDetailScreen() {
         setLoading(true);
         setError(null);
         const response = await newsApi.getNewsDetail(id.toString());
-        if (response.success) {
-          setNewsDetail(response);
-        } else {
-          setError('Failed to load news details');
-        }
+        setNewsDetail(response);
       } catch (error) {
         console.error('Error fetching news detail:', error);
         setError(error instanceof Error ? error.message : 'Failed to load news details');
@@ -121,7 +115,7 @@ export default function NewsDetailScreen() {
               <Image
                 source={{ uri: block.src }}
                 style={styles.contentImage}
-                resizeMode="contain"
+                resizeMode="cover" // Изменено на cover для лучшего отображения
                 onError={() => handleImageError(`block-img-${index}`)}
               />
               {imageErrors[`block-img-${index}`] && (
@@ -237,21 +231,20 @@ export default function NewsDetailScreen() {
         </View>
 
         <ScrollView style={styles.scrollContainer}>
-          {/* Главное изображение новости */}
+          {/* Главное изображение новости - убрана подложка */}
           {newsDetail.images && newsDetail.images.length > 0 && (
-            <View style={styles.imageContainer}>
-              <Image
-                source={{ uri: newsDetail.images[0] }}
-                style={styles.headerImage}
-                resizeMode="cover"
-                onError={() => handleImageError('main')}
-              />
-              {imageErrors['main'] && (
-                <View style={styles.imageErrorOverlay}>
-                  <Ionicons name="image-outline" size={40} color="#ccc" />
-                  <Text style={styles.imageErrorText}>Не удалось загрузить изображение</Text>
-                </View>
-              )}
+            <Image
+              source={{ uri: newsDetail.images[0] }}
+              style={styles.headerImage}
+              resizeMode="cover"
+              onError={() => handleImageError('main')}
+            />
+          )}
+          {/* Показываем ошибку загрузки изображения, если необходимо */}
+          {imageErrors['main'] && newsDetail.images && newsDetail.images.length > 0 && (
+            <View style={[styles.imageErrorContainer, { height: width * 0.6 }]}>
+              <Ionicons name="image-outline" size={40} color="#ccc" />
+              <Text style={styles.imageErrorText}>Не удалось загрузить изображение</Text>
             </View>
           )}
 
@@ -357,14 +350,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'white',
   },
-  imageContainer: {
-    width: '100%',
-    height: 250,
-    position: 'relative',
-  },
+  // Стиль для главного изображения (без дополнительного контейнера)
   headerImage: {
     width: '100%',
-    height: '100%',
+    height: width * 0.6, // Более адаптивная высота - соотношение 3:5
+    backgroundColor: '#f9f9f9', // Светлый фон для загрузки
+  },
+  // Контейнер для отображения ошибки загрузки изображения
+  imageErrorContainer: {
+    width: '100%',
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   imageErrorOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -464,21 +461,11 @@ const styles = StyleSheet.create({
   },
   imageBlock: {
     width: '100%',
-    height: 200,
+    height: width * 0.6, // Используем соотношение 3:5 для изображений в контенте
     marginBottom: 16,
     borderRadius: 8,
     overflow: 'hidden',
-    ...Platform.select({
-      ios: {
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
+    backgroundColor: '#f9f9f9', // Светлый фон для загрузки
   },
   contentImage: {
     width: '100%',

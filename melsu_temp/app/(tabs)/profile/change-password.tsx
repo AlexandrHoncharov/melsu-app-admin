@@ -11,12 +11,16 @@ import {
   ScrollView,
   SafeAreaView,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../../hooks/useAuth';
 import { router } from 'expo-router';
 import authApi from '../../../src/api/authApi';
+
+// Add the statusBarHeight calculation
+const STATUSBAR_HEIGHT = StatusBar.currentHeight || 0;
 
 export default function ChangePasswordScreen() {
   const { user } = useAuth();
@@ -88,7 +92,13 @@ export default function ChangePasswordScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            // Apply conditional padding for Android
+            Platform.OS === 'android' && styles.androidScrollContent
+          ]}
+        >
           <View style={styles.header}>
             <TouchableOpacity
               style={styles.backButton}
@@ -203,10 +213,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9F9F9',
+    // Add padding top for Android
+    paddingTop: Platform.OS === 'android' ? STATUSBAR_HEIGHT : 0,
   },
   scrollContent: {
     flexGrow: 1,
     paddingBottom: 30,
+  },
+  // New style for Android scroll content
+  androidScrollContent: {
+    paddingTop: 16,
   },
   header: {
     flexDirection: 'row',

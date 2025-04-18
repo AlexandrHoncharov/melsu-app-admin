@@ -249,7 +249,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-const login = async (username: string, password: string) => {
+const login = async (identifier: string, password: string) => {
   setIsLoading(true);
   try {
     console.log('Starting login process...');
@@ -266,7 +266,8 @@ const login = async (username: string, password: string) => {
       chatService.currentUser = null;
     }
 
-    const { token, user } = await authApi.login({ username, password });
+    // Здесь identifier может быть либо логином, либо email
+    const { token, user } = await authApi.login(identifier, password);
     console.log('Login successful, storing tokens...');
 
     // Сохраняем токен

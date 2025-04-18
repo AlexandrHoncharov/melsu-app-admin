@@ -1470,15 +1470,25 @@ def login():
     data = request.json
 
     # Проверяем обязательные поля
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({'message': 'Необходимо указать логин и пароль'}), 400
+    if not data or not data.get('password'):
+        return jsonify({'message': 'Необходимо указать пароль'}), 400
 
-    # Ищем пользователя
-    user = User.query.filter_by(username=data['username']).first()
+    # Проверяем наличие идентификатора (логин или email)
+    if not data.get('username') and not data.get('email'):
+        return jsonify({'message': 'Необходимо указать логин или email'}), 400
+
+    # Ищем пользователя по логину или email
+    user = None
+    if data.get('email'):
+        # Если указан email, ищем по нему
+        user = User.query.filter_by(email=data['email']).first()
+    else:
+        # Иначе ищем по логину (username)
+        user = User.query.filter_by(username=data['username']).first()
 
     # Проверяем пароль
     if not user or not user.check_password(data['password']):
-        return jsonify({'message': 'Неверный логин или пароль'}), 401
+        return jsonify({'message': 'Неверный логин/email или пароль'}), 401
 
     # Создаем токен
     token = create_token(user.id)
@@ -1508,13 +1518,8 @@ def login():
         'department': teacher_info['department'] if teacher_info else None,
         'position': teacher_info['position'] if teacher_info else None,
         'verificationStatus': user.verification_status or 'verified',
-        'email': None  # Устанавливаем значение email по умолчанию как None
+        'email': user.email  # Добавляем email в ответ
     }
-
-    # Проверяем наличие атрибута email в объекте и в базе данных
-    # (используем hasattr для безопасной проверки)
-    if hasattr(user, 'email'):
-        user_data['email'] = user.email
 
     # Возвращаем данные и токен
     return jsonify({

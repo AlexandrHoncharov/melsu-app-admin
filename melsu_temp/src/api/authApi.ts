@@ -1,10 +1,11 @@
 // src/api/authApi.ts
 import apiClient from './apiClient';
 
-// Типы для запросов
+// Обновленный интерфейс для запроса на вход
 interface LoginRequest {
-  username: string;
-  password: string;
+  username?: string;  // Теперь опционально
+  email?: string;     // Добавляем опциональное поле email
+  password: string;   // Пароль всегда обязателен
 }
 
 interface SpecialityData {
@@ -16,12 +17,10 @@ interface SpecialityData {
   formName: string;
 }
 
-
-// Update RegisterRequest interface to include email
 interface RegisterRequest {
   username?: string; // Может генерироваться на сервере
   fullName: string;
-  email: string;  // Add email field
+  email: string;  // Email обязателен при регистрации
   password: string;
   group?: string;
   role: 'student' | 'teacher';
@@ -39,7 +38,7 @@ interface AuthResponse {
     group?: string;
     faculty?: string;
     verificationStatus?: 'unverified' | 'pending' | 'verified' | 'rejected';
-    speciality?: SpecialityData; // Добавляем поле speciality
+    speciality?: SpecialityData;
   };
 }
 
@@ -53,12 +52,27 @@ interface DeviceTokenRequest {
 // API для работы с авторизацией
 const authApi = {
   /**
-   * Аутентификация пользователя
-   * @param credentials Учетные данные
+   * Аутентификация пользователя по логину или email
+   * @param identifier Имя пользователя или email
+   * @param password Пароль
    * @returns Результат авторизации
    */
-  login: async (credentials: LoginRequest): Promise<AuthResponse> => {
+  login: async (identifier: string, password: string): Promise<AuthResponse> => {
     try {
+      // Определяем, является ли идентификатор логином или email
+      const isEmail = identifier.includes('@');
+
+      // Формируем запрос в зависимости от типа идентификатора
+      const credentials: LoginRequest = {
+        password
+      };
+
+      if (isEmail) {
+        credentials.email = identifier;
+      } else {
+        credentials.username = identifier;
+      }
+
       const response = await apiClient.post<AuthResponse>('/auth/login', credentials);
 
       // Log response for debugging
@@ -77,30 +91,30 @@ const authApi = {
    * @returns Результат регистрации
    */
   register: async (userData: RegisterRequest): Promise<AuthResponse> => {
-  // We're not sending username anymore, it will be generated on the server
-  const requestData = {
-    fullName: userData.fullName,
-    email: userData.email,  // Include email in the request
-    password: userData.password,
-    group: userData.group,
-    role: userData.role,
-    speciality: userData.speciality
-  };
+    // We're not sending username anymore, it will be generated on the server
+    const requestData = {
+      fullName: userData.fullName,
+      email: userData.email,  // Include email in the request
+      password: userData.password,
+      group: userData.group,
+      role: userData.role,
+      speciality: userData.speciality
+    };
 
-  console.log('Register API request:', requestData);
+    console.log('Register API request:', requestData);
 
-  try {
-    const response = await apiClient.post<AuthResponse>('/auth/register', requestData);
+    try {
+      const response = await apiClient.post<AuthResponse>('/auth/register', requestData);
 
-    // Log response for debugging
-    console.log('Register API response:', response.data);
+      // Log response for debugging
+      console.log('Register API response:', response.data);
 
-    return response.data;
-  } catch (error) {
-    console.error('Register API error:', error);
-    throw error;
-  }
-},
+      return response.data;
+    } catch (error) {
+      console.error('Register API error:', error);
+      throw error;
+    }
+  },
 
   /**
    * Проверка валидности токена и получение текущего пользователя

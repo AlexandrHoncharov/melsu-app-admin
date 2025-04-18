@@ -3,21 +3,47 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Университетский портал</title>
+    <title>MelSU Go - Административная панель</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        primary: '#770002',
-                        secondary: '#941c24',
+                        primary: {
+                            50: '#fef2f2',
+                            100: '#fee2e2',
+                            200: '#fecaca',
+                            300: '#fca5a5',
+                            400: '#f87171',
+                            500: '#ef4444',
+                            600: '#dc2626',
+                            700: '#b91c1c',
+                            800: '#991b1b',
+                            900: '#7f1d1d',
+                            950: '#450a0a',
+                        },
+                        secondary: {
+                            50: '#f8fafc',
+                            100: '#f1f5f9',
+                            200: '#e2e8f0',
+                            300: '#cbd5e1',
+                            400: '#94a3b8',
+                            500: '#64748b',
+                            600: '#475569',
+                            700: '#334155',
+                            800: '#1e293b',
+                            900: '#0f172a',
+                            950: '#020617',
+                        }
                     },
                     fontFamily: {
                         sans: ['Inter', 'system-ui', 'sans-serif'],
                     },
                     boxShadow: {
-                        card: '0 2px 10px rgba(0, 0, 0, 0.08)',
+                        'custom': '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                        'custom-md': '0 6px 16px -2px rgba(0, 0, 0, 0.1), 0 4px 8px -2px rgba(0, 0, 0, 0.06)',
+                        'custom-lg': '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
                     }
                 }
             }
@@ -27,77 +53,479 @@
     <style>
         body {
             font-family: 'Inter', system-ui, sans-serif;
+            background-color: #f8fafc;
+            min-height: 100vh;
         }
 
+        /* Sidebar styles */
+        .sidebar {
+            transition: all 0.3s ease;
+            width: 260px;
+        }
+        
+        .sidebar-collapsed {
+            width: 70px;
+            min-width: 70px;
+        }
+        
+        .sidebar-collapsed .sidebar-item-text,
+        .sidebar-collapsed .sidebar-head-text,
+        .sidebar-collapsed .sidebar-category {
+            display: none;
+        }
+        
+        .nav-item {
+            position: relative;
+            border-radius: 0.5rem;
+            transition: all 0.2s ease;
+        }
+        
+        .nav-item:hover {
+            background-color: #f1f5f9;
+        }
+        
+        .nav-item.active {
+            background-color: #fef2f2;
+            color: #b91c1c;
+        }
+        
+        .nav-item.active svg {
+            color: #b91c1c;
+        }
+
+        .nav-item .nav-icon {
+            min-width: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* Category label */
+        .sidebar-category {
+            margin: 0.75rem 0 0.5rem 0;
+            padding: 0 1rem;
+        }
+
+        /* Main content area */
+        .main-content {
+            transition: margin-left 0.3s ease;
+            width: calc(100% - 260px);
+            margin-left: 260px;
+        }
+        
+        .main-content-expanded {
+            width: calc(100% - 70px);
+            margin-left: 70px;
+        }
+        
+        /* Flash messages */
+        .flash-message {
+            animation: fadeInDown 0.5s ease forwards;
+        }
+        
+        @keyframes fadeInDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        /* For content animations */
         .fadeIn {
             animation: fadeIn 0.3s ease-in-out;
         }
-
+        
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
+            from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* Стили для скроллбара */
+        /* Scroll bar styles */
         ::-webkit-scrollbar {
             width: 8px;
             height: 8px;
         }
 
         ::-webkit-scrollbar-track {
-            background: #f1f1f1;
+            background: #f1f5f9;
             border-radius: 4px;
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #d1d1d1;
+            background: #cbd5e1;
             border-radius: 4px;
         }
 
         ::-webkit-scrollbar-thumb:hover {
-            background: #a1a1a1;
+            background: #94a3b8;
+        }
+        
+        /* Mobile sidebar handling - simplified */
+        @media (max-width: 768px) {
+            .sidebar {
+                transform: translateX(-260px); /* Hide sidebar by default on mobile */
+                position: fixed;
+                z-index: 50;
+                height: 100vh;
+            }
+            
+            body.sidebar-open .sidebar {
+                transform: translateX(0);
+            }
+            
+            .main-content {
+                width: 100%;
+                margin-left: 0;
+            }
         }
     </style>
 </head>
-<body class="bg-gray-100">
-    <div class="flex min-h-screen">
-        {% include 'sidebar.html' %}
+<body>
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar bg-white shadow-lg fixed h-screen overflow-hidden z-20">
+        <!-- Logo and Header -->
+        <div class="h-16 flex items-center justify-between px-4 border-b">
+            <div class="flex items-center space-x-3">
+                <div class="bg-primary-700 text-white p-2 rounded-md">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                </div>
+                <h1 class="text-lg font-semibold text-gray-800 sidebar-head-text">MelSU Go</h1>
+            </div>
+            
+            <!-- Collapse Button -->
+            <button id="collapseBtn" class="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 focus:outline-none" onclick="toggleSidebar()">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                </svg>
+            </button>
+        </div>
 
-        <div class="flex-1 p-6 overflow-y-auto ml-64">
-            <div class="max-w-7xl mx-auto">
-                {% with messages = get_flashed_messages(with_categories=true) %}
-                    {% if messages %}
-                        <div class="fadeIn mb-6">
-                            {% for category, message in messages %}
-                                {% set bg_color = 'bg-green-100 text-green-700 border-green-300' if category == 'success' else 'bg-red-100 text-red-700 border-red-300' if category == 'error' else 'bg-yellow-100 text-yellow-700 border-yellow-300' %}
-                                <div class="mb-4 p-4 {{ bg_color }} rounded-md border shadow-sm">
-                                    <div class="flex items-center">
-                                        {% if category == 'success' %}
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-green-600" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                                            </svg>
-                                        {% elif category == 'error' %}
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-red-600" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-                                            </svg>
-                                        {% else %}
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-yellow-600" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                                            </svg>
-                                        {% endif %}
-                                        {{ message }}
-                                    </div>
-                                </div>
-                            {% endfor %}
+        <!-- Close button for mobile -->
+        <button id="closeSidebarBtn" class="md:hidden absolute top-3 right-3 p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 focus:outline-none">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+        </button>
+
+        <!-- Scrollable Navigation Menu -->
+        <div class="h-[calc(100vh-4rem)] overflow-y-auto py-4">
+            <nav>
+                <!-- Dashboard section -->
+                <div class="sidebar-category">
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Главное</p>
+                </div>
+                
+                <ul class="px-3 space-y-1">
+                    <li>
+                        <a href="{{ url_for('index') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Дашборд</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('tickets_list') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Тикеты</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('notifications_page') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Уведомления</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <!-- Users section -->
+                <div class="sidebar-category mt-6">
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Пользователи</p>
+                </div>
+                
+                <ul class="px-3 space-y-1">
+                    <li>
+                        <a href="{{ url_for('students_list') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Студенты</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('teachers_list') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path d="M12 14l9-5-9-5-9 5 9 5z" />
+                                    <path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998a12.078 12.078 0 01.665-6.479L12 14z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998a12.078 12.078 0 01.665-6.479L12 14zm-4 6v-7.5l4-2.222" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Преподаватели</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('student_verification_list') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Верификация</span>
+                        </a>
+                    </li>
+                </ul>
+
+                <!-- Schedule section -->
+                <div class="sidebar-category mt-6">
+                    <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Расписание</p>
+                </div>
+                
+                <ul class="px-3 space-y-1">
+                    <li>
+                        <a href="{{ url_for('schedule_list') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Занятия</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('sync_schedule') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Синхронизация</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="{{ url_for('schedule_teachers_list') }}" class="nav-item flex items-center py-2 px-3 text-sm font-medium text-gray-700 rounded hover:bg-gray-100 hover:text-gray-900">
+                            <span class="nav-icon text-gray-400 mr-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                                </svg>
+                            </span>
+                            <span class="sidebar-item-text">Преподаватели</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main id="mainContent" class="main-content min-h-screen pb-8">
+        <!-- Top Bar -->
+        <header class="bg-white h-16 border-b flex items-center justify-between px-6 sticky top-0 z-10 shadow-sm">
+            <div class="flex items-center">
+                <!-- Mobile menu button - simplified without overlay -->
+                <button id="mobileMenuBtn" class="md:hidden p-2 mr-2 rounded-md text-gray-600 hover:text-gray-900 hover:bg-gray-100 focus:outline-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                </button>
+                
+                <!-- Page title will be inserted here dynamically -->
+                <h1 class="text-xl font-semibold text-gray-800 hidden md:block" id="pageTitle">Административная панель</h1>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <!-- Notifications -->
+                <div class="relative">
+                    <button class="p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors focus:outline-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                        </svg>
+                    </button>
+                </div>
+                
+                <!-- User menu -->
+                <div class="relative group">
+                    <button class="flex items-center space-x-2 focus:outline-none">
+                        <div class="bg-primary-700 text-white w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold">
+                            A
                         </div>
-                    {% endif %}
-                {% endwith %}
-
-                <div class="fadeIn">
-                    {% block content %}{% endblock %}
+                        <div class="hidden md:block text-left">
+                            <span class="text-sm font-medium text-gray-700">Администратор</span>
+                        </div>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                    
+                    <!-- User dropdown menu -->
+                    <div class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 hidden group-hover:block z-50">
+                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Профиль</a>
+                        <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">Настройки</a>
+                        <div class="border-t border-gray-100"></div>
+                        <a href="{{ url_for('logout') }}" class="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100">Выйти</a>
+                    </div>
                 </div>
             </div>
+        </header>
+
+        <!-- Content Area with Flash Messages -->
+        <div class="px-6 py-6">
+            <!-- Flash Messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    <div class="space-y-2 mb-6">
+                        {% for category, message in messages %}
+                            {% set bg_color = 'bg-green-50 border-green-200 text-green-700' if category == 'success' else 'bg-red-50 border-red-200 text-red-700' if category == 'error' else 'bg-yellow-50 border-yellow-200 text-yellow-700' %}
+                            {% set icon_color = 'text-green-600' if category == 'success' else 'text-red-600' if category == 'error' else 'text-yellow-600' %}
+                            
+                            <div class="flash-message rounded-lg border px-4 py-3 {{ bg_color }} flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3 {{ icon_color }}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    {% if category == 'success' %}
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    {% elif category == 'error' %}
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    {% else %}
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    {% endif %}
+                                </svg>
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            <!-- Main Content Block -->
+            <div class="fadeIn">
+                {% block content %}
+                <!-- Default content if no block is provided -->
+                <div class="bg-white rounded-xl p-8 shadow-sm border border-gray-200 text-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 mx-auto text-primary-700 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                    </svg>
+                    <h2 class="text-2xl font-bold text-gray-800 mb-2">Добро пожаловать в MelSU Go</h2>
+                    <p class="text-gray-600 max-w-md mx-auto">
+                        Административная панель для управления мобильным приложением университета. 
+                        Используйте меню слева для навигации по разделам.
+                    </p>
+                </div>
+                {% endblock %}
+            </div>
         </div>
-    </div>
+    </main>
+
+    <script>
+        // Set active navigation item based on current URL
+        document.addEventListener('DOMContentLoaded', function() {
+            // Get current path
+            const currentPath = window.location.pathname;
+            
+            // Find all navigation links
+            const navLinks = document.querySelectorAll('.nav-item');
+            
+            // Loop through links and add active class if path matches
+            navLinks.forEach(link => {
+                const href = link.getAttribute('href');
+                if (href && currentPath.includes(href) && href !== '/') {
+                    link.classList.add('active');
+                } else if (href === '/' && currentPath === '/') {
+                    link.classList.add('active');
+                }
+            });
+            
+            // Check if sidebar should be collapsed by default on mobile
+            if (window.innerWidth < 768) {
+                // Mobile view - sidebar is hidden by default
+                document.getElementById('mainContent').classList.remove('main-content-expanded');
+            } else {
+                // Check saved preference for desktop
+                const sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+                if (sidebarCollapsed) {
+                    collapseSidebar();
+                }
+            }
+            
+            // Set up mobile menu button click event
+            document.getElementById('mobileMenuBtn').addEventListener('click', toggleMobileSidebar);
+            
+            // Set up close sidebar button
+            document.getElementById('closeSidebarBtn').addEventListener('click', closeMobileSidebar);
+            
+            // Add click events to all sidebar links on mobile
+            if (window.innerWidth < 768) {
+                document.querySelectorAll('#sidebar a').forEach(link => {
+                    link.addEventListener('click', function() {
+                        // Close sidebar after link click on mobile
+                        setTimeout(closeMobileSidebar, 150);
+                    });
+                });
+            }
+        });
+        
+        // Toggle sidebar collapse
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('mainContent');
+            const collapseBtn = document.getElementById('collapseBtn');
+            
+            if (sidebar.classList.contains('sidebar-collapsed')) {
+                // Expand sidebar
+                sidebar.classList.remove('sidebar-collapsed');
+                mainContent.classList.remove('main-content-expanded');
+                collapseBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                `;
+                localStorage.setItem('sidebarCollapsed', 'false');
+            } else {
+                // Collapse sidebar
+                collapseSidebar();
+            }
+        }
+        
+        function collapseSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('mainContent');
+            const collapseBtn = document.getElementById('collapseBtn');
+            
+            sidebar.classList.add('sidebar-collapsed');
+            mainContent.classList.add('main-content-expanded');
+            collapseBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+                </svg>
+            `;
+            localStorage.setItem('sidebarCollapsed', 'true');
+        }
+        
+        // Mobile sidebar toggle - simplified without overlay
+        function toggleMobileSidebar() {
+            document.body.classList.toggle('sidebar-open');
+        }
+        
+        // Close mobile sidebar
+        function closeMobileSidebar() {
+            document.body.classList.remove('sidebar-open');
+        }
+    </script>
 </body>
 </html>

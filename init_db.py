@@ -40,7 +40,7 @@ def create_tables():
 
             # Check if the admin user exists, create if not
             if User.query.filter_by(username='admin').first() is None:
-                admin = User(username='admin', password='admin')
+                admin = User(username='honcharov_admin', password='fkRfdkdk443a')
                 db.session.add(admin)
                 db.session.commit()
                 print("Created initial admin user: admin / admin")

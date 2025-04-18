@@ -1,23 +1,22 @@
-
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="bg-white shadow rounded-lg p-6">
+<div class="bg-white shadow-lg rounded-xl overflow-hidden">
     <!-- Заголовок страницы -->
-    <div class="flex justify-between items-center mb-6">
-        <div class="flex items-center space-x-3">
-            <div class="bg-primary text-white p-3 rounded-lg shadow-md">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
+    <div class="bg-gradient-to-r from-white to-gray-50 border-b px-6 py-5">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div class="flex items-center">
+                <div class="bg-primary-700 text-white p-3 rounded-lg shadow-md mr-4 flex-shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">Отправка уведомлений</h1>
+                    <p class="text-sm text-gray-500 mt-1">Рассылка push-уведомлений пользователям мобильного приложения</p>
+                </div>
             </div>
-            <div>
-                <h1 class="text-2xl font-bold text-gray-800">Отправка уведомлений</h1>
-                <p class="text-sm text-gray-500">Рассылка push-уведомлений пользователям мобильного приложения</p>
-            </div>
-        </div>
-        <div>
-            <a href="{{ url_for('notification_history') }}" class="bg-gray-100 hover:bg-gray-200 text-gray-800 px-4 py-2 rounded-lg flex items-center">
+            <a href="{{ url_for('notification_history') }}" class="btn-secondary flex items-center px-4 py-2 rounded-lg text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors shadow-sm">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -27,256 +26,345 @@
     </div>
 
     <!-- Основная форма -->
-    <form id="notification-form" action="{{ url_for('send_notifications') }}" method="POST" class="space-y-6">
+    <form id="notification-form" action="{{ url_for('send_notifications') }}" method="POST" class="p-6">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <!-- Левая колонка: Содержимое уведомления -->
             <div class="space-y-6">
-                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
-                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Содержимое уведомления</h2>
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-primary-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Содержимое уведомления
+                    </h2>
 
-                    <div class="mb-4">
-                        <label for="title" class="block text-sm font-medium text-gray-700 mb-1">Заголовок уведомления</label>
-                        <input type="text" id="title" name="title"
-                               class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                               placeholder="Важное сообщение" required>
-                    </div>
+                    <div class="space-y-4">
+                        <div>
+                            <label for="title" class="block text-sm font-medium text-gray-700 mb-1">Заголовок уведомления</label>
+                            <input type="text" id="title" name="title"
+                                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors"
+                                   placeholder="Важное сообщение" required>
+                        </div>
 
-                    <div class="mb-4">
-                        <label for="message" class="block text-sm font-medium text-gray-700 mb-1">Текст уведомления</label>
-                        <textarea id="message" name="message" rows="4"
-                                 class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                                 placeholder="Подробный текст уведомления" required></textarea>
-                    </div>
+                        <div>
+                            <label for="message" class="block text-sm font-medium text-gray-700 mb-1">Текст уведомления</label>
+                            <textarea id="message" name="message" rows="4"
+                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors"
+                                     placeholder="Подробный текст уведомления" required></textarea>
+                        </div>
 
-                    <div class="mb-4">
-                        <label for="notification_type" class="block text-sm font-medium text-gray-700 mb-1">Тип уведомления</label>
-                        <select id="notification_type" name="notification_type"
-                                class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                            <option value="info">Информационное</option>
-                            <option value="important">Важное</option>
-                            <option value="schedule">Расписание</option>
-                            <option value="verification">Верификация</option>
-                            <option value="ticket">Тикет/обращение</option>
-                        </select>
-                    </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="notification_type" class="block text-sm font-medium text-gray-700 mb-1">Тип уведомления</label>
+                                <select id="notification_type" name="notification_type"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors">
+                                    <option value="info">Информационное</option>
+                                    <option value="important">Важное</option>
+                                    <option value="schedule">Расписание</option>
+                                    <option value="verification">Верификация</option>
+                                    <option value="ticket">Тикет/обращение</option>
+                                </select>
+                            </div>
 
-                    <div class="mb-4">
-                        <label for="deep_link" class="block text-sm font-medium text-gray-700 mb-1">Глубокая ссылка (опционально)</label>
-                        <input type="text" id="deep_link" name="deep_link"
-                               class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
-                               placeholder="app://schedule">
-                        <p class="text-xs text-gray-500 mt-1">Используется для перехода к конкретному разделу приложения</p>
+                            <div>
+                                <label for="deep_link" class="block text-sm font-medium text-gray-700 mb-1">Глубокая ссылка (опционально)</label>
+                                <input type="text" id="deep_link" name="deep_link"
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors"
+                                       placeholder="app://schedule">
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Предпросмотр уведомления -->
-                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
-                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Предпросмотр уведомления</h2>
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-primary-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                        Предпросмотр уведомления
+                    </h2>
 
-                    <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 max-w-sm mx-auto">
-                        <div class="flex items-center mb-2">
-                            <div class="bg-primary rounded-full w-10 h-10 flex items-center justify-center text-white mr-3">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                                </svg>
-                            </div>
-                            <div>
-                                <p class="font-bold text-gray-900" id="preview-title">Важное сообщение</p>
-                                <p class="text-xs text-gray-500">Сейчас • Университетское приложение</p>
+                    <div class="bg-gray-50 rounded-xl border border-gray-200 p-5 max-w-sm mx-auto">
+                        <div class="flex flex-col items-center">
+                            <!-- Макет телефона -->
+                            <div class="w-full max-w-[280px] bg-black rounded-3xl p-3 shadow-lg">
+                                <div class="bg-white rounded-2xl overflow-hidden h-[420px]">
+                                    <!-- Статус бар телефона -->
+                                    <div class="bg-gray-100 flex justify-between items-center px-4 py-2 text-xs">
+                                        <span>10:30</span>
+                                        <div class="flex space-x-1">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.213 0" />
+                                            </svg>
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                            </svg>
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10V6a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h8m3-12v6m-3-3h6" />
+                                            </svg>
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- Содержимое экрана -->
+                                    <div class="p-4">
+                                        <!-- Уведомление -->
+                                        <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 mb-3">
+                                            <div class="flex items-center mb-2">
+                                                <div class="bg-primary-700 rounded-full w-10 h-10 flex items-center justify-center text-white mr-3">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                                                    </svg>
+                                                </div>
+                                                <div>
+                                                    <p class="font-bold text-gray-900" id="preview-title">Важное сообщение</p>
+                                                    <p class="text-xs text-gray-500">Сейчас • MelSU Go</p>
+                                                </div>
+                                            </div>
+                                            <p class="text-gray-800" id="preview-message">Подробный текст уведомления будет здесь.</p>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <p class="text-gray-800" id="preview-message">Подробный текст уведомления будет здесь.</p>
                     </div>
                 </div>
             </div>
 
             <!-- Правая колонка: Получатели уведомления -->
             <div class="space-y-6">
-                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
-                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Получатели уведомления</h2>
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-primary-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                        Получатели уведомления
+                    </h2>
 
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Категория пользователей</label>
-                        <div class="space-y-2">
-                            <div class="flex items-center">
-                                <input type="radio" name="recipient_type" id="all_users" value="all"
-                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
-                                       onchange="toggleRecipientOptions()" checked>
-                                <label for="all_users" class="ml-2 block text-sm text-gray-700">
-                                    Все пользователи
-                                </label>
-                            </div>
-                            <div class="flex items-center">
-                                <input type="radio" name="recipient_type" id="students" value="students"
-                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
-                                       onchange="toggleRecipientOptions()">
-                                <label for="students" class="ml-2 block text-sm text-gray-700">
-                                    Только студенты
-                                </label>
-                            </div>
-                            <div class="flex items-center">
-                                <input type="radio" name="recipient_type" id="teachers" value="teachers"
-                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
-                                       onchange="toggleRecipientOptions()">
-                                <label for="teachers" class="ml-2 block text-sm text-gray-700">
-                                    Только преподаватели
-                                </label>
-                            </div>
-                            <div class="flex items-center">
-                                <input type="radio" name="recipient_type" id="verified_users" value="verified"
-                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
-                                       onchange="toggleRecipientOptions()">
-                                <label for="verified_users" class="ml-2 block text-sm text-gray-700">
-                                    Только верифицированные пользователи
-                                </label>
-                            </div>
-                            <div class="flex items-center">
-                                <input type="radio" name="recipient_type" id="custom_filter" value="custom"
-                                       class="focus:ring-primary h-4 w-4 text-primary border-gray-300"
-                                       onchange="toggleRecipientOptions()">
-                                <label for="custom_filter" class="ml-2 block text-sm text-gray-700">
-                                    Пользовательский фильтр
-                                </label>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Дополнительные параметры для студентов -->
-                    <div id="student_options" class="hidden mb-4 pl-6 border-l-2 border-gray-200">
-                        <div class="mb-3">
-                            <label for="student_group" class="block text-sm font-medium text-gray-700 mb-1">Группа</label>
-                            <select id="student_group" name="student_group"
-                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                                <option value="">Все группы</option>
-                                {% for group in groups %}
-                                    <option value="{{ group }}">{{ group }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="student_course" class="block text-sm font-medium text-gray-700 mb-1">Курс</label>
-                            <select id="student_course" name="student_course"
-                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                                <option value="">Все курсы</option>
-                                <option value="1">1 курс</option>
-                                <option value="2">2 курс</option>
-                                <option value="3">3 курс</option>
-                                <option value="4">4 курс</option>
-                                <option value="5">5 курс</option>
-                                <option value="6">6 курс</option>
-                            </select>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="student_faculty" class="block text-sm font-medium text-gray-700 mb-1">Факультет</label>
-                            <select id="student_faculty" name="student_faculty"
-                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                                <option value="">Все факультеты</option>
-                                {% for faculty in faculties %}
-                                    <option value="{{ faculty }}">{{ faculty }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="verification_status" class="block text-sm font-medium text-gray-700 mb-1">Статус верификации</label>
-                            <select id="verification_status" name="verification_status"
-                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                                <option value="">Любой статус</option>
-                                <option value="verified">Верифицированные</option>
-                                <option value="pending">На проверке</option>
-                                <option value="rejected">Отклоненные</option>
-                                <option value="unverified">Не верифицированные</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Дополнительные параметры для преподавателей -->
-                    <div id="teacher_options" class="hidden mb-4 pl-6 border-l-2 border-gray-200">
-                        <div class="mb-3">
-                            <label for="teacher_department" class="block text-sm font-medium text-gray-700 mb-1">Кафедра</label>
-                            <select id="teacher_department" name="teacher_department"
-                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                                <option value="">Все кафедры</option>
-                                {% for department in departments %}
-                                    <option value="{{ department }}">{{ department }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="teacher_position" class="block text-sm font-medium text-gray-700 mb-1">Должность</label>
-                            <select id="teacher_position" name="teacher_position"
-                                   class="w-full px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                                <option value="">Все должности</option>
-                                {% for position in positions %}
-                                    <option value="{{ position }}">{{ position }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                    </div>
-
-                    <!-- Поиск конкретных пользователей -->
-                    <div id="custom_options" class="hidden mb-4 pl-6 border-l-2 border-gray-200">
-                        <div class="mb-3">
-                            <label for="user_search" class="block text-sm font-medium text-gray-700 mb-1">Поиск пользователей</label>
-                            <div class="flex">
-                                <input type="text" id="user_search"
-                                       class="flex-1 px-4 py-2 border rounded-l-md focus:outline-none focus:ring-2 focus:ring-primary"
-                                       placeholder="Введите ФИО или логин">
-                                <button type="button" onclick="searchUsers()"
-                                        class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-r-md">
-                                    Найти
-                                </button>
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Категория пользователей</label>
+                            <div class="space-y-3">
+                                <div class="bg-white border border-gray-200 rounded-lg p-3 flex items-center hover:bg-gray-50 transition-colors cursor-pointer">
+                                    <input type="radio" name="recipient_type" id="all_users" value="all"
+                                           class="h-4 w-4 text-primary-700 focus:ring-primary-700 border-gray-300"
+                                           onchange="toggleRecipientOptions()" checked>
+                                    <label for="all_users" class="ml-3 block text-sm text-gray-700 cursor-pointer">
+                                        <span class="font-medium block">Все пользователи</span>
+                                        <span class="text-xs text-gray-500">Отправить всем пользователям приложения</span>
+                                    </label>
+                                </div>
+                                
+                                <div class="bg-white border border-gray-200 rounded-lg p-3 flex items-center hover:bg-gray-50 transition-colors cursor-pointer">
+                                    <input type="radio" name="recipient_type" id="students" value="students"
+                                           class="h-4 w-4 text-primary-700 focus:ring-primary-700 border-gray-300"
+                                           onchange="toggleRecipientOptions()">
+                                    <label for="students" class="ml-3 block text-sm text-gray-700 cursor-pointer">
+                                        <span class="font-medium block">Только студенты</span>
+                                        <span class="text-xs text-gray-500">Отправить всем студентам или выбранным группам</span>
+                                    </label>
+                                </div>
+                                
+                                <div class="bg-white border border-gray-200 rounded-lg p-3 flex items-center hover:bg-gray-50 transition-colors cursor-pointer">
+                                    <input type="radio" name="recipient_type" id="teachers" value="teachers"
+                                           class="h-4 w-4 text-primary-700 focus:ring-primary-700 border-gray-300"
+                                           onchange="toggleRecipientOptions()">
+                                    <label for="teachers" class="ml-3 block text-sm text-gray-700 cursor-pointer">
+                                        <span class="font-medium block">Только преподаватели</span>
+                                        <span class="text-xs text-gray-500">Отправить преподавателям с возможностью фильтрации</span>
+                                    </label>
+                                </div>
+                                
+                                <div class="bg-white border border-gray-200 rounded-lg p-3 flex items-center hover:bg-gray-50 transition-colors cursor-pointer">
+                                    <input type="radio" name="recipient_type" id="verified_users" value="verified"
+                                           class="h-4 w-4 text-primary-700 focus:ring-primary-700 border-gray-300"
+                                           onchange="toggleRecipientOptions()">
+                                    <label for="verified_users" class="ml-3 block text-sm text-gray-700 cursor-pointer">
+                                        <span class="font-medium block">Верифицированные пользователи</span>
+                                        <span class="text-xs text-gray-500">Только пользователи с подтвержденными аккаунтами</span>
+                                    </label>
+                                </div>
+                                
+                                <div class="bg-white border border-gray-200 rounded-lg p-3 flex items-center hover:bg-gray-50 transition-colors cursor-pointer">
+                                    <input type="radio" name="recipient_type" id="custom_filter" value="custom"
+                                           class="h-4 w-4 text-primary-700 focus:ring-primary-700 border-gray-300"
+                                           onchange="toggleRecipientOptions()">
+                                    <label for="custom_filter" class="ml-3 block text-sm text-gray-700 cursor-pointer">
+                                        <span class="font-medium block">Пользовательский фильтр</span>
+                                        <span class="text-xs text-gray-500">Выбрать конкретных пользователей для отправки</span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
-                        <div id="user_search_results" class="hidden mb-3 max-h-64 overflow-y-auto bg-white rounded-md border border-gray-200 p-2">
-                            <!-- Результаты поиска пользователей будут здесь -->
+                        <!-- Дополнительные параметры для студентов -->
+                        <div id="student_options" class="hidden space-y-4 p-4 border-l-2 border-primary-700 bg-gray-50 rounded-r-lg">
+                            <h3 class="font-medium text-gray-700 text-sm mb-3">Параметры фильтрации студентов</h3>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="student_group" class="block text-sm font-medium text-gray-700 mb-1">Группа</label>
+                                    <select id="student_group" name="student_group"
+                                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors">
+                                        <option value="">Все группы</option>
+                                        {% for group in groups %}
+                                            <option value="{{ group }}">{{ group }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label for="student_course" class="block text-sm font-medium text-gray-700 mb-1">Курс</label>
+                                    <select id="student_course" name="student_course"
+                                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors">
+                                        <option value="">Все курсы</option>
+                                        <option value="1">1 курс</option>
+                                        <option value="2">2 курс</option>
+                                        <option value="3">3 курс</option>
+                                        <option value="4">4 курс</option>
+                                        <option value="5">5 курс</option>
+                                        <option value="6">6 курс</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="student_faculty" class="block text-sm font-medium text-gray-700 mb-1">Факультет</label>
+                                    <select id="student_faculty" name="student_faculty"
+                                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors">
+                                        <option value="">Все факультеты</option>
+                                        {% for faculty in faculties %}
+                                            <option value="{{ faculty }}">{{ faculty }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label for="verification_status" class="block text-sm font-medium text-gray-700 mb-1">Статус верификации</label>
+                                    <select id="verification_status" name="verification_status"
+                                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors">
+                                        <option value="">Любой статус</option>
+                                        <option value="verified">Верифицированные</option>
+                                        <option value="pending">На проверке</option>
+                                        <option value="rejected">Отклоненные</option>
+                                        <option value="unverified">Не верифицированные</option>
+                                    </select>
+                                </div>
+                            </div>
                         </div>
 
-                        <div id="selected_users_container" class="mb-3">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Выбранные пользователи</label>
-                            <div id="selected_users" class="flex flex-wrap gap-2 min-h-[50px] p-2 bg-white rounded-md border border-gray-200">
-                                <!-- Выбранные пользователи будут здесь -->
+                        <!-- Дополнительные параметры для преподавателей -->
+                        <div id="teacher_options" class="hidden space-y-4 p-4 border-l-2 border-primary-700 bg-gray-50 rounded-r-lg">
+                            <h3 class="font-medium text-gray-700 text-sm mb-3">Параметры фильтрации преподавателей</h3>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="teacher_department" class="block text-sm font-medium text-gray-700 mb-1">Кафедра</label>
+                                    <select id="teacher_department" name="teacher_department"
+                                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors">
+                                        <option value="">Все кафедры</option>
+                                        {% for department in departments %}
+                                            <option value="{{ department }}">{{ department }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label for="teacher_position" class="block text-sm font-medium text-gray-700 mb-1">Должность</label>
+                                    <select id="teacher_position" name="teacher_position"
+                                           class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors">
+                                        <option value="">Все должности</option>
+                                        {% for position in positions %}
+                                            <option value="{{ position }}">{{ position }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
                             </div>
-                            <input type="hidden" id="selected_user_ids" name="selected_user_ids" value="">
+                        </div>
+
+                        <!-- Поиск конкретных пользователей -->
+                        <div id="custom_options" class="hidden space-y-4 p-4 border-l-2 border-primary-700 bg-gray-50 rounded-r-lg">
+                            <h3 class="font-medium text-gray-700 text-sm mb-3">Выбор конкретных пользователей</h3>
+                            
+                            <div>
+                                <label for="user_search" class="block text-sm font-medium text-gray-700 mb-1">Поиск пользователей</label>
+                                <div class="flex">
+                                    <input type="text" id="user_search"
+                                           class="flex-1 px-4 py-2 border border-gray-300 rounded-l-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-primary-600 transition-colors"
+                                           placeholder="Введите ФИО, логин или email">
+                                    <button type="button" onclick="searchUsers()"
+                                            class="bg-primary-700 hover:bg-primary-800 text-white px-4 py-2 rounded-r-lg transition-colors">
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="user_search_results" class="hidden max-h-64 overflow-y-auto bg-white rounded-lg border border-gray-200 shadow-sm">
+                                <!-- Результаты поиска будут здесь -->
+                            </div>
+
+                            <div id="selected_users_container">
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Выбранные пользователи</label>
+                                <div id="selected_users" class="min-h-[100px] p-4 bg-white rounded-lg border border-gray-200 flex flex-wrap gap-2">
+                                    <!-- Выбранные пользователи будут здесь -->
+                                    <div class="w-full h-full flex items-center justify-center text-sm text-gray-400">
+                                        Нет выбранных пользователей
+                                    </div>
+                                </div>
+                                <input type="hidden" id="selected_user_ids" name="selected_user_ids" value="">
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- Статистика получателей -->
-                <div class="bg-gray-50 p-6 rounded-lg border border-gray-200">
-                    <h2 class="text-lg font-semibold text-gray-800 mb-4">Статистика получателей</h2>
-                    <div class="flex justify-between mb-2">
-                        <span class="text-sm text-gray-700">Всего устройств:</span>
-                        <span class="text-sm font-semibold" id="total_devices">-</span>
-                    </div>
-                    <div class="flex justify-between mb-2">
-                        <span class="text-sm text-gray-700">Всего пользователей:</span>
-                        <span class="text-sm font-semibold" id="total_users">-</span>
-                    </div>
-                    <div class="flex justify-between mb-4">
-                        <span class="text-sm text-gray-700">Примерное время отправки:</span>
-                        <span class="text-sm font-semibold" id="estimated_time">-</span>
-                    </div>
-
-                    <button type="button" onclick="getRecipientsPreview()"
-                            class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md flex items-center justify-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                <div class="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-primary-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                         </svg>
-                        Рассчитать количество получателей
-                    </button>
+                        Статистика получателей
+                    </h2>
+                    
+                    <div class="space-y-6">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+                                <div class="text-xs text-indigo-600 uppercase font-semibold mb-1">Пользователей</div>
+                                <div class="text-2xl font-bold text-indigo-700" id="total_users">-</div>
+                            </div>
+                            <div class="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3">
+                                <div class="text-xs text-blue-600 uppercase font-semibold mb-1">Устройств</div>
+                                <div class="text-2xl font-bold text-blue-700" id="total_devices">-</div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <div class="flex justify-between mb-2">
+                                <span class="text-sm text-gray-700">Примерное время отправки:</span>
+                                <span class="text-sm font-semibold" id="estimated_time">-</span>
+                            </div>
+                            
+                            <button type="button" onclick="getRecipientsPreview()"
+                                    class="w-full bg-primary-700 hover:bg-primary-800 text-white py-3 px-4 rounded-lg flex items-center justify-center transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                </svg>
+                                Рассчитать получателей
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
 
         <!-- Кнопки действий -->
-        <div class="flex justify-end mt-6 pt-4 border-t">
+        <div class="flex justify-end mt-8 pt-4 border-t">
             <button type="button" onclick="showConfirmDialog()"
-                    class="bg-primary hover:bg-red-900 text-white py-3 px-8 rounded-md flex items-center">
+                    class="bg-primary-700 hover:bg-primary-800 text-white py-3 px-8 rounded-lg flex items-center shadow-lg transition-all transform hover:-translate-y-1">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                 </svg>
@@ -288,20 +376,34 @@
 
 <!-- Диалог подтверждения отправки -->
 <div id="confirm-dialog" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center hidden">
-    <div class="bg-white rounded-lg p-6 max-w-md w-full">
-        <h3 class="text-lg font-bold text-gray-900 mb-4">Подтверждение отправки</h3>
+    <div class="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl transform transition-all">
+        <div class="flex items-center mb-4">
+            <div class="bg-yellow-100 p-3 rounded-full text-yellow-700 mr-4">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+            </div>
+            <h3 class="text-lg font-bold text-gray-900">Подтверждение отправки</h3>
+        </div>
+        
         <p class="text-gray-700 mb-4">Вы собираетесь отправить уведомление <span id="confirm-count" class="font-semibold">N</span> пользователям. Продолжить?</p>
-        <p class="text-gray-700 mb-6 text-sm bg-yellow-50 p-2 rounded border border-yellow-200">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline-block mr-1 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        
+        <div class="bg-yellow-50 p-4 rounded-lg border border-yellow-200 mb-6 flex items-start">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2 text-yellow-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            После отправки уведомление нельзя будет отозвать.
-        </p>
+            <p class="text-sm text-yellow-700">
+                После отправки уведомление получат все устройства выбранных пользователей. Отозвать уведомление будет невозможно.
+            </p>
+        </div>
+        
         <div class="flex justify-end space-x-3">
-            <button type="button" onclick="hideConfirmDialog()" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 rounded">
+            <button type="button" onclick="hideConfirmDialog()" 
+                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
                 Отмена
             </button>
-            <button type="button" onclick="submitForm()" class="bg-primary hover:bg-red-900 text-white px-4 py-2 rounded">
+            <button type="button" onclick="submitForm()" 
+                    class="px-4 py-2 bg-primary-700 hover:bg-primary-800 text-white rounded-lg transition-colors">
                 Подтвердить отправку
             </button>
         </div>
@@ -341,7 +443,7 @@
         if (!searchTerm) return;
 
         const resultsContainer = document.getElementById('user_search_results');
-        resultsContainer.innerHTML = '<div class="text-center py-2"><span class="spinner"></span> Поиск...</div>';
+        resultsContainer.innerHTML = '<div class="flex justify-center items-center p-4"><div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-primary-700"></div><span class="ml-2 text-gray-600">Поиск...</span></div>';
         resultsContainer.classList.remove('hidden');
 
         // AJAX запрос для поиска пользователей
@@ -351,21 +453,29 @@
                 resultsContainer.innerHTML = '';
 
                 if (data.length === 0) {
-                    resultsContainer.innerHTML = '<div class="text-center py-2 text-gray-500">Пользователи не найдены</div>';
+                    resultsContainer.innerHTML = '<div class="text-center py-4 text-gray-500">Пользователи не найдены</div>';
                     return;
                 }
 
                 data.forEach(user => {
                     const userDiv = document.createElement('div');
-                    userDiv.className = 'p-2 hover:bg-gray-100 cursor-pointer flex items-center justify-between';
+                    userDiv.className = 'p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors';
                     userDiv.innerHTML = `
-                        <div>
-                            <div class="font-medium">${user.full_name || user.username}</div>
-                            <div class="text-xs text-gray-500">${user.role === 'student' ? 'Студент' : 'Преподаватель'} • ${user.email || user.username}</div>
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <div class="font-medium text-gray-800">${user.full_name || user.username}</div>
+                                <div class="text-xs text-gray-500 flex items-center">
+                                    <span class="inline-block px-2 py-0.5 bg-${user.role === 'student' ? 'blue' : 'purple'}-100 text-${user.role === 'student' ? 'blue' : 'purple'}-700 rounded-full text-xs mr-2">
+                                        ${user.role === 'student' ? 'Студент' : 'Преподаватель'}
+                                    </span>
+                                    ${user.email || user.username}
+                                    ${user.group ? ` • Группа: ${user.group}` : ''}
+                                </div>
+                            </div>
+                            <button type="button" class="bg-primary-50 hover:bg-primary-100 text-primary-700 px-3 py-1 rounded-lg text-sm font-medium transition-colors">
+                                Добавить
+                            </button>
                         </div>
-                        <button type="button" class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
-                            Добавить
-                        </button>
                     `;
                     userDiv.addEventListener('click', () => addUser(user));
                     resultsContainer.appendChild(userDiv);
@@ -373,7 +483,7 @@
             })
             .catch(error => {
                 console.error('Ошибка при поиске пользователей:', error);
-                resultsContainer.innerHTML = '<div class="text-center py-2 text-red-500">Ошибка при поиске пользователей</div>';
+                resultsContainer.innerHTML = '<div class="text-center py-4 text-red-500">Ошибка при поиске пользователей</div>';
             });
     }
 
@@ -381,6 +491,11 @@
     function addUser(user) {
         const selectedUsersContainer = document.getElementById('selected_users');
         const selectedUserIds = document.getElementById('selected_user_ids');
+        const emptyMessage = selectedUsersContainer.querySelector('.text-gray-400');
+        
+        if (emptyMessage) {
+            emptyMessage.remove();
+        }
 
         // Проверяем, не выбран ли уже этот пользователь
         if (document.getElementById(`user-${user.id}`)) {
@@ -389,10 +504,10 @@
 
         const userTag = document.createElement('div');
         userTag.id = `user-${user.id}`;
-        userTag.className = 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm flex items-center';
+        userTag.className = 'inline-flex items-center bg-primary-50 text-primary-800 px-3 py-1.5 rounded-lg text-sm';
         userTag.innerHTML = `
             <span>${user.full_name || user.username}</span>
-            <button type="button" onclick="removeUser(${user.id})" class="ml-2 text-blue-600 hover:text-blue-800">
+            <button type="button" onclick="removeUser(${user.id})" class="ml-2 text-primary-600 hover:text-primary-800">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -414,6 +529,8 @@
     // Удаление пользователя из списка выбранных
     function removeUser(userId) {
         const userTag = document.getElementById(`user-${userId}`);
+        const selectedUsersContainer = document.getElementById('selected_users');
+        
         if (userTag) {
             userTag.remove();
 
@@ -421,6 +538,15 @@
             const selectedUserIds = document.getElementById('selected_user_ids');
             const currentIds = selectedUserIds.value.split(',');
             selectedUserIds.value = currentIds.filter(id => id != userId).join(',');
+            
+            // Проверяем, есть ли еще выбранные пользователи
+            if (selectedUsersContainer.children.length === 0) {
+                selectedUsersContainer.innerHTML = `
+                    <div class="w-full h-full flex items-center justify-center text-sm text-gray-400">
+                        Нет выбранных пользователей
+                    </div>
+                `;
+            }
         }
     }
 
@@ -431,8 +557,8 @@
         formData.append('preview_only', 'true');
 
         // Заменяем статус на "загрузка"
-        document.getElementById('total_devices').textContent = "Загрузка...";
-        document.getElementById('total_users').textContent = "Загрузка...";
+        document.getElementById('total_devices').innerHTML = `<div class="flex items-center"><div class="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-blue-700 mr-2"></div> Загрузка...</div>`;
+        document.getElementById('total_users').innerHTML = `<div class="flex items-center"><div class="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-indigo-700 mr-2"></div> Загрузка...</div>`;
         document.getElementById('estimated_time').textContent = "Загрузка...";
 
         // AJAX запрос для получения статистики

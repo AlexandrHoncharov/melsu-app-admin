@@ -16,7 +16,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import newsApi, { NewsDetail } from '../../src/api/newsApi';
 import { Ionicons } from '@expo/vector-icons';
 
-// Получаем ширину экрана для расчета высоты изображений
+// Получаем ширину экрана для расчета адаптивной ширины изображений
 const { width } = Dimensions.get('window');
 
 // Обновленный интерфейс для блоков контента
@@ -29,6 +29,13 @@ interface ContentBlock {
   items?: string[];
 }
 
+// Интерфейс для хранения размеров изображений
+interface ImageDimensions {
+  width: number;
+  height: number;
+  aspectRatio: number;
+}
+
 export default function NewsDetailScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
@@ -36,6 +43,9 @@ export default function NewsDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+
+  // Новое состояние для хранения размеров изображений
+  const [imageDimensions, setImageDimensions] = useState<Record<string, ImageDimensions>>({});
 
   useEffect(() => {
     const fetchNewsDetail = async () => {
@@ -50,6 +60,21 @@ export default function NewsDetailScreen() {
         setError(null);
         const response = await newsApi.getNewsDetail(id.toString());
         setNewsDetail(response);
+
+        // Загружаем размеры главного изображения если оно есть
+        if (response.images && response.images.length > 0) {
+          loadImageDimensions(response.images[0], 'main');
+        }
+
+        // Загружаем размеры изображений из блоков контента
+        if (response.content_blocks) {
+          response.content_blocks.forEach((block, index) => {
+            if (block.type === 'image' && block.src) {
+              loadImageDimensions(block.src, `block-img-${index}`);
+            }
+          });
+        }
+
       } catch (error) {
         console.error('Error fetching news detail:', error);
         setError(error instanceof Error ? error.message : 'Failed to load news details');
@@ -60,6 +85,24 @@ export default function NewsDetailScreen() {
 
     fetchNewsDetail();
   }, [id]);
+
+  // Функция для загрузки размеров изображения
+  const loadImageDimensions = (imageUri: string, imageId: string) => {
+    Image.getSize(
+      imageUri,
+      (width, height) => {
+        const aspectRatio = width / height;
+        setImageDimensions(prev => ({
+          ...prev,
+          [imageId]: { width, height, aspectRatio }
+        }));
+      },
+      (error) => {
+        console.error(`Error getting dimensions for image ${imageId}:`, error);
+        handleImageError(imageId);
+      }
+    );
+  };
 
   const navigateToNews = (newsId: string) => {
     // Using replace instead of push to avoid stacking navigation
@@ -95,6 +138,15 @@ export default function NewsDetailScreen() {
     );
   };
 
+  // Получение высоты изображения с сохранением пропорций
+  const getImageHeight = (imageId: string) => {
+    if (imageDimensions[imageId]) {
+      const screenWidth = width - 32; // Ширина экрана минус паддинги
+      return screenWidth / imageDimensions[imageId].aspectRatio;
+    }
+    return 200; // Значение по умолчанию, пока загружаются размеры
+  };
+
   // Рендер блоков контента
   const renderContentBlocks = (blocks?: ContentBlock[]) => {
     if (!blocks || blocks.length === 0) return null;
@@ -110,15 +162,18 @@ export default function NewsDetailScreen() {
 
         case 'image':
           if (!block.src) return null;
+          const imageId = `block-img-${index}`;
+          const imageHeight = getImageHeight(imageId);
+
           return (
-            <View key={`img-${index}`} style={styles.imageBlock}>
+            <View key={imageId} style={[styles.imageBlock, { height: imageHeight }]}>
               <Image
                 source={{ uri: block.src }}
                 style={styles.contentImage}
-                resizeMode="cover" // Изменено на cover для лучшего отображения
-                onError={() => handleImageError(`block-img-${index}`)}
+                resizeMode="contain"
+                onError={() => handleImageError(imageId)}
               />
-              {imageErrors[`block-img-${index}`] && (
+              {imageErrors[imageId] && (
                 <View style={styles.imageErrorOverlay}>
                   <Ionicons name="image-outline" size={40} color="#ccc" />
                   <Text style={styles.imageErrorText}>Не удалось загрузить изображение</Text>
@@ -212,6 +267,11 @@ export default function NewsDetailScreen() {
     );
   }
 
+  // Получаем высоту для главного изображения
+  const mainImageHeight = imageDimensions['main']
+    ? width / imageDimensions['main'].aspectRatio
+    : width * 0.6; // Значение по умолчанию
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
@@ -231,20 +291,22 @@ export default function NewsDetailScreen() {
         </View>
 
         <ScrollView style={styles.scrollContainer}>
-          {/* Главное изображение новости - убрана подложка */}
+          {/* Главное изображение новости с адаптивной высотой */}
           {newsDetail.images && newsDetail.images.length > 0 && (
-            <Image
-              source={{ uri: newsDetail.images[0] }}
-              style={styles.headerImage}
-              resizeMode="cover"
-              onError={() => handleImageError('main')}
-            />
-          )}
-          {/* Показываем ошибку загрузки изображения, если необходимо */}
-          {imageErrors['main'] && newsDetail.images && newsDetail.images.length > 0 && (
-            <View style={[styles.imageErrorContainer, { height: width * 0.6 }]}>
-              <Ionicons name="image-outline" size={40} color="#ccc" />
-              <Text style={styles.imageErrorText}>Не удалось загрузить изображение</Text>
+            <View style={[styles.headerImageContainer, { height: mainImageHeight }]}>
+              <Image
+                source={{ uri: newsDetail.images[0] }}
+                style={styles.headerImage}
+                resizeMode="contain"
+                onError={() => handleImageError('main')}
+              />
+              {/* Показываем ошибку загрузки изображения, если необходимо */}
+              {imageErrors['main'] && (
+                <View style={styles.imageErrorOverlay}>
+                  <Ionicons name="image-outline" size={40} color="#ccc" />
+                  <Text style={styles.imageErrorText}>Не удалось загрузить изображение</Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -350,11 +412,15 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'white',
   },
-  // Стиль для главного изображения (без дополнительного контейнера)
+  // Контейнер для главного изображения
+  headerImageContainer: {
+    width: '100%',
+    backgroundColor: '#f9f9f9',
+  },
+  // Стиль для главного изображения
   headerImage: {
     width: '100%',
-    height: width * 0.6, // Более адаптивная высота - соотношение 3:5
-    backgroundColor: '#f9f9f9', // Светлый фон для загрузки
+    height: '100%',
   },
   // Контейнер для отображения ошибки загрузки изображения
   imageErrorContainer: {
@@ -461,11 +527,10 @@ const styles = StyleSheet.create({
   },
   imageBlock: {
     width: '100%',
-    height: width * 0.6, // Используем соотношение 3:5 для изображений в контенте
     marginBottom: 16,
     borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: '#f9f9f9', // Светлый фон для загрузки
+    backgroundColor: '#f9f9f9',
   },
   contentImage: {
     width: '100%',

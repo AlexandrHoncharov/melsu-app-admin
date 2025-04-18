@@ -1,77 +1,218 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="bg-white shadow rounded-lg p-6">
-    <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-bold text-gray-800">Верификация студентов</h1>
-        <div class="flex gap-2">
-            <select id="statusFilter" class="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary">
-                <option value="all">Все статусы</option>
-                <option value="pending" selected>На проверке</option>
-                <option value="verified">Подтвержденные</option>
-                <option value="rejected">Отклоненные</option>
-                <option value="unverified">Не верифицированные</option>
-            </select>
-            <button id="applyFilter" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 border rounded-md">
-                Применить
+<div class="bg-white shadow-lg rounded-xl overflow-hidden">
+    <!-- Заголовок страницы -->
+    <div class="bg-gradient-to-r from-white to-gray-50 border-b px-6 py-5">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div class="flex items-center">
+                <div class="bg-primary-700 text-white p-3 rounded-lg shadow-md mr-4 flex-shrink-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">Верификация студентов</h1>
+                    <p class="text-sm text-gray-500 mt-1">Проверка и подтверждение студенческих билетов</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <select id="statusFilter" class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:border-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-transparent transition-colors shadow-sm">
+                    <option value="all">Все статусы</option>
+                    <option value="pending" selected>На проверке</option>
+                    <option value="verified">Подтвержденные</option>
+                    <option value="rejected">Отклоненные</option>
+                    <option value="unverified">Не верифицированные</option>
+                </select>
+                <button id="applyFilter" class="bg-primary-700 hover:bg-primary-800 text-white px-4 py-2 rounded-lg transition-colors shadow-sm">
+                    Применить
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Статистика верификации -->
+    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center">
+                    <div class="bg-blue-100 p-2 rounded-lg text-blue-700 mr-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Всего студентов</div>
+                        <div class="text-xl font-bold text-gray-800">{{ total_students }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center">
+                    <div class="bg-yellow-100 p-2 rounded-lg text-yellow-700 mr-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">На проверке</div>
+                        <div class="text-xl font-bold text-gray-800">{{ pending_count }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center">
+                    <div class="bg-green-100 p-2 rounded-lg text-green-700 mr-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Подтверждено</div>
+                        <div class="text-xl font-bold text-gray-800">{{ verified_count }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm p-4 border border-gray-200 hover:shadow-md transition-shadow">
+                <div class="flex items-center">
+                    <div class="bg-red-100 p-2 rounded-lg text-red-700 mr-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <div>
+                        <div class="text-sm text-gray-500">Отклонено</div>
+                        <div class="text-xl font-bold text-gray-800">{{ rejected_count }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Панель поиска -->
+    <div class="px-6 py-4 border-b border-gray-100">
+        <div class="flex flex-col sm:flex-row gap-2">
+            <div class="relative flex-grow">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                </div>
+                <input type="text" id="searchInput" placeholder="Поиск по ФИО, группе или логину"
+                       class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-600 focus:border-transparent transition-colors">
+            </div>
+            <button id="search-button" class="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg flex items-center justify-center transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-1 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                Найти
             </button>
         </div>
     </div>
 
+    <!-- Таблица студентов -->
     <div class="overflow-x-auto">
         <table class="min-w-full bg-white">
             <thead>
-                <tr class="bg-gray-100 text-gray-600 uppercase text-sm leading-normal">
-                    <th class="py-3 px-6 text-left">ID</th>
-                    <th class="py-3 px-6 text-left">Логин</th>
-                    <th class="py-3 px-6 text-left">ФИО</th>
-                    <th class="py-3 px-6 text-left">Группа</th>
-                    <th class="py-3 px-6 text-left">Дата регистрации</th>
-                    <th class="py-3 px-6 text-center">Статус</th>
-                    <th class="py-3 px-6 text-center">Действия</th>
+                <tr class="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    <th class="py-3 px-6 border-b">ID</th>
+                    <th class="py-3 px-6 border-b">Студент</th>
+                    <th class="py-3 px-6 border-b">Контакты</th>
+                    <th class="py-3 px-6 border-b">Группа</th>
+                    <th class="py-3 px-6 border-b">Дата регистрации</th>
+                    <th class="py-3 px-6 border-b text-center">Статус</th>
+                    <th class="py-3 px-6 border-b text-center">Действия</th>
                 </tr>
             </thead>
-            <tbody class="text-gray-600 text-sm">
+            <tbody class="divide-y divide-gray-100">
                 {% if students %}
                     {% for student in students %}
-                        <tr class="border-b border-gray-200 hover:bg-gray-50">
-                            <td class="py-3 px-6 text-left">{{ student.id }}</td>
-                            <td class="py-3 px-6 text-left">{{ student.username }}</td>
-                            <td class="py-3 px-6 text-left">{{ student.full_name }}</td>
-                            <td class="py-3 px-6 text-left">{{ student.group }}</td>
-                            <td class="py-3 px-6 text-left">{{ student.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        <tr class="hover:bg-gray-50 transition-colors">
+                            <td class="py-3 px-6 text-sm text-gray-500">{{ student.id }}</td>
+                            <td class="py-3 px-6">
+                                <div class="flex items-center">
+                                    <div class="w-10 h-10 bg-primary-100 text-primary-700 rounded-full flex items-center justify-center font-bold mr-3">
+                                        {{ student.full_name[0] if student.full_name else student.username[0] | upper }}
+                                    </div>
+                                    <div>
+                                        <div class="font-medium text-gray-900">{{ student.full_name }}</div>
+                                        <div class="text-xs text-gray-500">@{{ student.username }}</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="py-3 px-6">
+                                <div class="text-sm text-gray-900">{{ student.email }}</div>
+                                <div class="text-xs text-gray-500">{{ student.phone or 'Телефон не указан' }}</div>
+                            </td>
+                            <td class="py-3 px-6">
+                                <span class="px-2 py-1 bg-blue-50 text-blue-700 rounded-lg text-xs font-medium">
+                                    {{ student.group }}
+                                </span>
+                            </td>
+                            <td class="py-3 px-6 text-sm text-gray-500">
+                                {{ student.created_at.strftime('%d.%m.%Y %H:%M') }}
+                            </td>
                             <td class="py-3 px-6 text-center">
                                 {% if student.verification_status == 'verified' %}
-                                    <span class="bg-green-100 text-green-800 py-1 px-3 rounded-full text-xs">Подтвержден</span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                        <svg class="-ml-0.5 mr-1.5 h-2 w-2 text-green-500" fill="currentColor" viewBox="0 0 8 8">
+                                            <circle cx="4" cy="4" r="3" />
+                                        </svg>
+                                        Подтвержден
+                                    </span>
                                 {% elif student.verification_status == 'pending' %}
-                                    <span class="bg-yellow-100 text-yellow-800 py-1 px-3 rounded-full text-xs">На проверке</span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                                        <svg class="-ml-0.5 mr-1.5 h-2 w-2 text-yellow-500" fill="currentColor" viewBox="0 0 8 8">
+                                            <circle cx="4" cy="4" r="3" />
+                                        </svg>
+                                        На проверке
+                                    </span>
                                 {% elif student.verification_status == 'rejected' %}
-                                    <span class="bg-red-100 text-red-800 py-1 px-3 rounded-full text-xs">Отклонен</span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                        <svg class="-ml-0.5 mr-1.5 h-2 w-2 text-red-500" fill="currentColor" viewBox="0 0 8 8">
+                                            <circle cx="4" cy="4" r="3" />
+                                        </svg>
+                                        Отклонен
+                                    </span>
                                 {% else %}
-                                    <span class="bg-gray-100 text-gray-800 py-1 px-3 rounded-full text-xs">Не верифицирован</span>
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                        <svg class="-ml-0.5 mr-1.5 h-2 w-2 text-gray-500" fill="currentColor" viewBox="0 0 8 8">
+                                            <circle cx="4" cy="4" r="3" />
+                                        </svg>
+                                        Не верифицирован
+                                    </span>
                                 {% endif %}
                             </td>
                             <td class="py-3 px-6 text-center">
-                                <div class="flex item-center justify-center gap-2">
-                                    <a href="{{ url_for('view_student_details', student_id=student.id) }}" class="bg-blue-600 hover:bg-blue-700 text-white py-1 px-3 rounded text-xs">
-                                        Просмотреть
+                                <div class="flex item-center justify-center space-x-2">
+                                    <a href="{{ url_for('view_student_details', student_id=student.id) }}" 
+                                        class="bg-primary-50 hover:bg-primary-100 border border-primary-200 text-primary-700 p-1 rounded transition-colors">
+                                        <span class="sr-only">Просмотреть</span>
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                        </svg>
                                     </a>
 
                                     {% if student.verification_status == 'pending' %}
-                                        <form action="{{ url_for('verify_student') }}" method="POST" class="inline">
-                                            <input type="hidden" name="student_id" value="{{ student.id }}">
-                                            <input type="hidden" name="action" value="approve">
-                                            <button type="submit" class="bg-green-600 hover:bg-green-700 text-white py-1 px-3 rounded text-xs">
-                                                Подтвердить
-                                            </button>
-                                        </form>
-                                        <form action="{{ url_for('verify_student') }}" method="POST" class="inline">
-                                            <input type="hidden" name="student_id" value="{{ student.id }}">
-                                            <input type="hidden" name="action" value="reject">
-                                            <button type="submit" class="bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded text-xs">
-                                                Отклонить
-                                            </button>
-                                        </form>
+                                        <button type="button" onclick="showActionModal('approve', {{ student.id }}, '{{ student.full_name }}')"
+                                            class="bg-green-50 hover:bg-green-100 border border-green-200 text-green-700 p-1 rounded transition-colors">
+                                            <span class="sr-only">Подтвердить</span>
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                            </svg>
+                                        </button>
+                                        
+                                        <button type="button" onclick="showActionModal('reject', {{ student.id }}, '{{ student.full_name }}')"
+                                            class="bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 p-1 rounded transition-colors">
+                                            <span class="sr-only">Отклонить</span>
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
                                     {% endif %}
                                 </div>
                             </td>
@@ -80,7 +221,13 @@
                 {% else %}
                     <tr>
                         <td colspan="7" class="py-8 text-center text-gray-500">
-                            Нет студентов для верификации
+                            <div class="flex flex-col items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span class="font-medium">Нет студентов для верификации</span>
+                                <p class="text-sm mt-1">Попробуйте изменить параметры фильтрации</p>
+                            </div>
                         </td>
                     </tr>
                 {% endif %}
@@ -90,32 +237,182 @@
 
     <!-- Пагинация -->
     {% if pagination and pagination.pages > 1 %}
-    <div class="mt-6 flex justify-center">
-        <div class="flex space-x-2">
+    <div class="px-6 py-4 bg-gray-50 border-t flex items-center justify-between">
+        <div class="text-sm text-gray-500">
+            Показано <span class="font-medium">{{ pagination.items|length }}</span> из <span class="font-medium">{{ pagination.total }}</span> записей
+        </div>
+        <div class="flex space-x-1">
             {% if pagination.has_prev %}
-                <a href="{{ url_for('student_verification_list', page=pagination.prev_num, status=status) }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
-                    &laquo; Предыдущая
+                <a href="{{ url_for('student_verification_list', page=pagination.prev_num, status=status) }}" 
+                   class="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors">
+                    &laquo; Пред.
                 </a>
+            {% else %}
+                <button disabled class="px-4 py-2 bg-gray-100 border border-gray-200 text-gray-400 rounded-md cursor-not-allowed">
+                    &laquo; Пред.
+                </button>
             {% endif %}
 
-            <span class="px-4 py-2 bg-gray-100 rounded">
-                Страница {{ pagination.page }} из {{ pagination.pages }}
-            </span>
+            {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if page_num %}
+                    {% if page_num == pagination.page %}
+                        <span class="px-4 py-2 bg-primary-700 text-white rounded-md">
+                            {{ page_num }}
+                        </span>
+                    {% else %}
+                        <a href="{{ url_for('student_verification_list', page=page_num, status=status) }}" 
+                           class="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors">
+                            {{ page_num }}
+                        </a>
+                    {% endif %}
+                {% else %}
+                    <span class="px-4 py-2 text-gray-500">…</span>
+                {% endif %}
+            {% endfor %}
 
             {% if pagination.has_next %}
-                <a href="{{ url_for('student_verification_list', page=pagination.next_num, status=status) }}" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded">
-                    Следующая &raquo;
+                <a href="{{ url_for('student_verification_list', page=pagination.next_num, status=status) }}" 
+                   class="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 transition-colors">
+                    След. &raquo;
                 </a>
+            {% else %}
+                <button disabled class="px-4 py-2 bg-gray-100 border border-gray-200 text-gray-400 rounded-md cursor-not-allowed">
+                    След. &raquo;
+                </button>
             {% endif %}
         </div>
     </div>
     {% endif %}
 </div>
 
+<!-- Модальное окно действия (подтверждение/отклонение) -->
+<div id="action-modal" class="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl transform transition-all">
+        <div class="flex items-center mb-4" id="modal-header">
+            <!-- Динамически заполняется (одобрение/отклонение) -->
+        </div>
+        
+        <p class="text-gray-700 mb-4" id="modal-text">
+            <!-- Динамически заполняется -->
+        </p>
+        
+        <form id="action-form" action="{{ url_for('verify_student') }}" method="POST">
+            <input type="hidden" name="student_id" id="modal-student-id">
+            <input type="hidden" name="action" id="modal-action">
+            
+            <div class="mb-4">
+                <label for="comment" class="block text-sm font-medium text-gray-700 mb-2">Комментарий (необязательно)</label>
+                <textarea id="comment" name="comment" rows="3" 
+                    class="shadow-sm block w-full focus:ring-primary-600 focus:border-primary-600 sm:text-sm border border-gray-300 rounded-md p-2"></textarea>
+            </div>
+            
+            <div class="flex justify-end space-x-3">
+                <button type="button" onclick="hideActionModal()" 
+                        class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                    Отмена
+                </button>
+                <button type="submit" id="confirm-button" class="px-4 py-2 text-white rounded-lg transition-colors">
+                    <!-- Динамически заполняется -->
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
+    // Применение фильтра по статусу
     document.getElementById('applyFilter').addEventListener('click', function() {
         const status = document.getElementById('statusFilter').value;
         window.location.href = "{{ url_for('student_verification_list') }}?status=" + status;
+    });
+
+    // Установка выбранного значения в выпадающем списке на основе текущего статуса
+    document.addEventListener('DOMContentLoaded', function() {
+        const statusParam = new URLSearchParams(window.location.search).get('status');
+        if (statusParam) {
+            document.getElementById('statusFilter').value = statusParam;
+        }
+    });
+
+    // Поиск по нажатию на кнопку
+    document.getElementById('search-button').addEventListener('click', function() {
+        const searchTerm = document.getElementById('searchInput').value.trim();
+        if (searchTerm) {
+            const status = document.getElementById('statusFilter').value;
+            window.location.href = "{{ url_for('student_verification_list') }}?status=" + status + "&search=" + encodeURIComponent(searchTerm);
+        }
+    });
+
+    // Поиск по нажатию Enter
+    document.getElementById('searchInput').addEventListener('keyup', function(event) {
+        if (event.key === 'Enter') {
+            document.getElementById('search-button').click();
+        }
+    });
+
+    // Заполнение поля поиска при загрузке страницы
+    document.addEventListener('DOMContentLoaded', function() {
+        const searchParam = new URLSearchParams(window.location.search).get('search');
+        if (searchParam) {
+            document.getElementById('searchInput').value = searchParam;
+        }
+    });
+
+    // Показать модальное окно действия (подтверждение или отклонение)
+    function showActionModal(action, studentId, studentName) {
+        const modal = document.getElementById('action-modal');
+        const modalHeader = document.getElementById('modal-header');
+        const modalText = document.getElementById('modal-text');
+        const modalAction = document.getElementById('modal-action');
+        const modalStudentId = document.getElementById('modal-student-id');
+        const confirmButton = document.getElementById('confirm-button');
+
+        // Заполняем значения формы
+        modalAction.value = action;
+        modalStudentId.value = studentId;
+
+        // Настраиваем интерфейс в зависимости от действия
+        if (action === 'approve') {
+            modalHeader.innerHTML = `
+                <div class="bg-green-100 p-3 rounded-full text-green-700 mr-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                </div>
+                <h3 class="text-lg font-bold text-gray-900">Подтверждение верификации</h3>
+            `;
+            modalText.innerHTML = `Вы собираетесь <span class="font-medium text-green-700">подтвердить</span> верификацию студента <span class="font-semibold">${studentName}</span>. Подтверждаете действие?`;
+            confirmButton.className = 'px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors';
+            confirmButton.innerHTML = 'Подтвердить верификацию';
+        } else {
+            modalHeader.innerHTML = `
+                <div class="bg-red-100 p-3 rounded-full text-red-700 mr-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </div>
+                <h3 class="text-lg font-bold text-gray-900">Отклонение верификации</h3>
+            `;
+            modalText.innerHTML = `Вы собираетесь <span class="font-medium text-red-700">отклонить</span> верификацию студента <span class="font-semibold">${studentName}</span>. Укажите причину отклонения:`;
+            confirmButton.className = 'px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors';
+            confirmButton.innerHTML = 'Отклонить верификацию';
+        }
+
+        // Отображаем модальное окно
+        modal.classList.remove('hidden');
+    }
+
+    // Скрыть модальное окно
+    function hideActionModal() {
+        document.getElementById('action-modal').classList.add('hidden');
+        document.getElementById('comment').value = ''; // Очищаем поле комментария
+    }
+
+    // Закрытие модального окна при клике вне его области
+    document.getElementById('action-modal').addEventListener('click', function(e) {
+        if (e.target === this) {
+            hideActionModal();
+        }
     });
 </script>
 {% endblock %}

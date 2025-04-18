@@ -12,7 +12,8 @@ import {
   Image,
   ScrollView,
   SafeAreaView,
-  StatusBar
+  StatusBar,
+  Linking // Добавляем импорт Linking для открытия ссылок
 } from 'react-native';
 import { useAuth } from '../hooks/useAuth';
 import { router } from 'expo-router';
@@ -126,6 +127,15 @@ export default function RegisterScreen() {
     }
 
     return '';
+  };
+
+  // Функции для открытия юридических документов
+  const openPrivacyPolicy = () => {
+    Linking.openURL('https://melsu.ru/storage/documents/go/Privacy_policy.pdf');
+  };
+
+  const openTermsOfUse = () => {
+    Linking.openURL('https://melsu.ru/storage/documents/go/Terms_of_use_MelSU_Go.pdf');
   };
 
   // Handle registration
@@ -472,8 +482,8 @@ export default function RegisterScreen() {
             <View style={styles.termsContainer}>
               <Text style={styles.termsText}>
                 Нажимая на "Зарегистрироваться", вы соглашаетесь с
-                <Text style={styles.termsLink}> Условиями использования</Text> и
-                <Text style={styles.termsLink}> Политикой конфиденциальности</Text>
+                <Text style={styles.termsLink} onPress={openTermsOfUse}> Условиями использования</Text> и
+                <Text style={styles.termsLink} onPress={openPrivacyPolicy}> Политикой конфиденциальности</Text>
               </Text>
             </View>
 
@@ -662,6 +672,7 @@ const styles = StyleSheet.create({
   termsLink: {
     color: '#770002',
     fontWeight: '500',
+    textDecorationLine: 'underline', // Добавляем подчеркивание, чтобы было понятно, что это ссылка
   },
   registerButton: {
     backgroundColor: '#770002',

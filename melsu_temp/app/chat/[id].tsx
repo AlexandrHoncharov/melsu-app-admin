@@ -22,46 +22,67 @@ import { useAuth } from '../../hooks/useAuth';
 import chatService from '../../src/services/chatService';
 
 // Utility function to detect and render clickable links
+// Улучшенная функция для обнаружения и отображения кликабельных ссылок
 const renderTextWithLinks = (text, isOwnMessage) => {
   if (!text) return null;
 
-  // Regular expression to match URLs
-  // This pattern matches most common URL formats including http, https, ftp, www
-  const urlPattern = /(https?:\/\/|www\.)[^\s]+(\.[^\s]+)/g;
+  // Улучшенное регулярное выражение для URL-адресов
+  const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+\.[^\s]+)/g;
 
-  // Split the text by URLs
-  const parts = text.split(urlPattern);
+  // Найти все URL в тексте
+  const matches = [...text.matchAll(urlPattern)];
 
-  // Extract URLs from the original text
-  const urls = text.match(urlPattern) || [];
+  if (matches.length === 0) {
+    // Если ссылок нет, просто вернуть текст
+    return (
+      <Text style={isOwnMessage ? styles.ownMessageText : {}}>
+        {text}
+      </Text>
+    );
+  }
 
-  // Combine parts and URLs back together
+  // Создаем массив для хранения результатов
   const result = [];
-  for (let i = 0; i < parts.length; i++) {
-    // Add text part
-    if (parts[i]) {
+  let lastIndex = 0;
+
+  // Проходим по каждому найденному URL
+  matches.forEach((match, idx) => {
+    const url = match[0];
+    const startIndex = match.index;
+    const endIndex = startIndex + url.length;
+
+    // Добавляем текст до ссылки, если он есть
+    if (startIndex > lastIndex) {
+      const textBefore = text.substring(lastIndex, startIndex);
       result.push(
-        <Text key={`text-${i}`} style={isOwnMessage ? styles.ownMessageText : {}}>
-          {parts[i]}
+        <Text key={`text-${idx}`} style={isOwnMessage ? styles.ownMessageText : {}}>
+          {textBefore}
         </Text>
       );
     }
 
-    // Add URL part if available
-    if (urls[i - (parts.length - urls.length - 1)]) {
-      const url = urls[i - (parts.length - urls.length - 1)];
-      result.push(
-        <Text
-          key={`url-${i}`}
-          style={[
-            isOwnMessage ? styles.ownMessageLink : styles.messageLink
-          ]}
-          onPress={() => handleUrlPress(url)}
-        >
-          {url}
-        </Text>
-      );
-    }
+    // Добавляем саму ссылку
+    result.push(
+      <Text
+        key={`url-${idx}`}
+        style={isOwnMessage ? styles.ownMessageLink : styles.messageLink}
+        onPress={() => handleUrlPress(url)}
+      >
+        {url}
+      </Text>
+    );
+
+    // Обновляем lastIndex для следующей итерации
+    lastIndex = endIndex;
+  });
+
+  // Добавляем оставшийся текст после последней ссылки, если он есть
+  if (lastIndex < text.length) {
+    result.push(
+      <Text key="text-last" style={isOwnMessage ? styles.ownMessageText : {}}>
+        {text.substring(lastIndex)}
+      </Text>
+    );
   }
 
   return result;

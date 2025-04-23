@@ -1,31 +1,24 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-from werkzeug.security import generate_password_hash, check_password_hash
-import jwt
 import datetime
 import os
 import uuid
-import random
-import string
 from functools import wraps
-from db import db
-from models import User, Teacher, Schedule, VerificationLog, Schedule, ScheduleTeacher, DeviceToken
-import firebase_admin
-from firebase_admin import credentials, auth, messaging
-from flask import request
-import requests
-from bs4 import BeautifulSoup, Tag, NavigableString
-import json
-import re
-from flask import Response
-import requests
-from urllib.parse import quote, unquote
+from urllib.parse import unquote
 
-import os
-import uuid
+import firebase_admin
+import jwt
+import requests
+from bs4 import BeautifulSoup
+from firebase_admin import credentials, auth, messaging
+from flask import Flask
+from flask import Response
 from flask import request, jsonify, send_from_directory
+from flask_cors import CORS
+from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
+
+from db import db
 from models import Ticket, TicketMessage, TicketAttachment
+from models import User, Teacher, VerificationLog, Schedule, ScheduleTeacher, DeviceToken
 
 # Firebase initialization removed
 FIREBASE_AVAILABLE = False

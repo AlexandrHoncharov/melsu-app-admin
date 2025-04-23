@@ -1,8 +1,10 @@
-from db import db
-from datetime import datetime
 import random
 import string
+from datetime import datetime
+
 from werkzeug.security import generate_password_hash, check_password_hash
+
+from db import db
 
 
 class User(db.Model):
@@ -158,7 +160,8 @@ class DeviceToken(db.Model):
     token = db.Column(db.String(255), nullable=False, unique=True)
     device_name = db.Column(db.String(100))
     platform = db.Column(db.String(20))  # 'ios', 'android', 'web'
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    token_type = db.Column(db.String(20), nullable=True)
     last_used_at = db.Column(db.DateTime)
 
     def __repr__(self):

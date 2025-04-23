@@ -1,24 +1,21 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_from_directory, abort
-import os
-import requests
-import pymysql
-from functools import wraps
-from db import db
-from datetime import datetime, timedelta
-from werkzeug.utils import secure_filename
-import uuid
-from sqlalchemy import text
-import re
 import csv
-from io import StringIO
-from werkzeug.security import generate_password_hash
-from flask import jsonify, request, redirect, url_for
-from sqlalchemy import or_, and_, func
-import json
+import os
+import uuid
 from datetime import datetime
+from datetime import timedelta
+from functools import wraps
+from io import StringIO
 
+import pymysql
+import requests
+from flask import Flask, render_template, flash, session, send_from_directory, \
+    abort, make_response
+from flask import jsonify, request, redirect, url_for
+from sqlalchemy import or_
+from werkzeug.security import generate_password_hash
+from werkzeug.utils import secure_filename
 
-
+from db import db
 
 # Создание экземпляра приложения
 app = Flask(__name__)
@@ -28,12 +25,39 @@ app.config.from_object('config')
 db.init_app(app)
 
 # Импорт моделей ПОСЛЕ инициализации db
-from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog, DeviceToken, Ticket, TicketAttachment, TicketMessage, NotificationHistory
+from models import User, Teacher, Schedule, ScheduleTeacher, VerificationLog, DeviceToken, Ticket, TicketAttachment, \
+    TicketMessage
 
 # Папка для хранения загруженных изображений
 UPLOAD_FOLDER = 'uploads'
 STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
 TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
+
+FIREBASE_AVAILABLE = False
+
+# Инициализация Firebase Admin SDK
+try:
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+
+    # Проверяем, не инициализирован ли уже Firebase Admin
+    if not firebase_admin._apps:
+        # Пытаемся найти файл сервисного аккаунта
+        firebase_cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
+        if os.path.exists(firebase_cred_path):
+            cred = credentials.Certificate(firebase_cred_path)
+        else:
+            # Резервный вариант - стандартный файл конфигурации
+            cred = credentials.Certificate('firebase.json')
+
+        firebase_admin.initialize_app(cred)
+        print("Firebase Admin SDK успешно инициализирован")
+        FIREBASE_AVAILABLE = True
+    else:
+        FIREBASE_AVAILABLE = True
+except Exception as e:
+    print(f"Ошибка инициализации Firebase Admin SDK: {e}")
+    FIREBASE_AVAILABLE = False
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
@@ -77,159 +101,13 @@ def notifications_page():
                            positions=positions)
 
 
-@app.route('/notifications/history')
-@login_required
-def notification_history():
-    """История отправленных уведомлений"""
-    page = request.args.get('page', 1, type=int)
-    per_page = 20
-
-    # Получаем историю уведомлений с пагинацией
-    pagination = NotificationHistory.query.order_by(NotificationHistory.created_at.desc()).paginate(
-        page=page, per_page=per_page, error_out=False
-    )
-    notifications = pagination.items
-
-    return render_template('notifications/history.html',
-                           notifications=notifications,
-                           pagination=pagination)
 
 
-# Add these two routes to your app.py file
-
-@app.route('/notifications/view/<int:notification_id>')
-@login_required
-def view_notification_details(notification_id):
-    """View notification details including delivery status and recipients"""
-    notification = NotificationHistory.query.get_or_404(notification_id)
-
-    # Parse the recipients filter if available
-    recipient_filter = {}
-    if notification.recipient_filter:
-        try:
-            recipient_filter = json.loads(notification.recipient_filter)
-        except:
-            pass
-
-    # Parse error details if available
-    error_details = []
-    if notification.error_details:
-        try:
-            error_details = json.loads(notification.error_details)
-        except:
-            pass
-
-    return render_template('notifications/details.html',
-                           notification=notification,
-                           recipient_filter=recipient_filter,
-                           error_details=error_details)
 
 
-@app.route('/notifications/resend/<int:notification_id>')
-@login_required
-def resend_notification(notification_id):
-    """Resend a previously sent notification"""
-    try:
-        # Get the original notification
-        original = NotificationHistory.query.get_or_404(notification_id)
 
-        # Create a new notification with the same content
-        notification = NotificationHistory(
-            admin_id=session['user_id'],
-            title=original.title,
-            message=original.message,
-            notification_type=original.notification_type,
-            deep_link=original.deep_link,
-            recipient_filter=original.recipient_filter,
-            recipients_count=original.recipients_count,
-            devices_count=original.devices_count,
-            status='pending'
-        )
 
-        db.session.add(notification)
-        db.session.commit()
 
-        # Start the background task to send notifications
-        send_notifications_task(notification.id)
-
-        flash(f'Уведомление поставлено в очередь для повторной отправки', 'success')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'Ошибка при повторной отправке уведомления: {str(e)}', 'error')
-
-    return redirect(url_for('notification_history'))
-
-@app.route('/notifications/send', methods=['POST'])
-@login_required
-def send_notifications():
-    """Обработка формы отправки уведомлений"""
-    try:
-        # Получаем данные из формы
-        title = request.form.get('title')
-        message = request.form.get('message')
-        notification_type = request.form.get('notification_type', 'info')
-        deep_link = request.form.get('deep_link', '')
-
-        recipient_type = request.form.get('recipient_type')
-
-        # Создаем фильтр получателей в зависимости от типа
-        filter_data = {
-            'recipient_type': recipient_type
-        }
-
-        # Для типа "студенты" добавляем соответствующие фильтры
-        if recipient_type == 'students':
-            filter_data['student_group'] = request.form.get('student_group', '')
-            filter_data['student_course'] = request.form.get('student_course', '')
-            filter_data['student_faculty'] = request.form.get('student_faculty', '')
-            filter_data['verification_status'] = request.form.get('verification_status', '')
-
-        # Для типа "преподаватели" добавляем соответствующие фильтры
-        elif recipient_type == 'teachers':
-            filter_data['teacher_department'] = request.form.get('teacher_department', '')
-            filter_data['teacher_position'] = request.form.get('teacher_position', '')
-
-        # Для пользовательского фильтра добавляем список ID пользователей
-        elif recipient_type == 'custom':
-            selected_user_ids = request.form.get('selected_user_ids', '')
-            filter_data['selected_user_ids'] = selected_user_ids
-
-        # Получаем список получателей
-        recipients, devices = get_notification_recipients(filter_data)
-
-        # Если нет получателей, выводим ошибку
-        if not recipients:
-            flash('Нет получателей для отправки уведомления!', 'error')
-            return redirect(url_for('notifications_page'))
-
-        # Создаем запись в истории уведомлений
-        notification_history = NotificationHistory(
-            admin_id=session['user_id'],
-            title=title,
-            message=message,
-            notification_type=notification_type,
-            deep_link=deep_link,
-            recipient_filter=json.dumps(filter_data, ensure_ascii=False),
-            recipients_count=len(recipients),
-            devices_count=len(devices),
-            status='pending'
-        )
-
-        db.session.add(notification_history)
-        db.session.commit()
-
-        # Запускаем фоновую задачу для отправки уведомлений (в реальном проекте)
-        # В этом примере сразу отправляем уведомления
-        send_notifications_task(notification_history.id)
-
-        flash(f'Уведомление отправлено {len(recipients)} пользователям ({len(devices)} устройств)', 'success')
-
-        return redirect(url_for('notification_history'))
-
-    except Exception as e:
-        db.session.rollback()
-        flash(f'Ошибка при отправке уведомления: {str(e)}', 'error')
-        return redirect(url_for('notifications_page'))
 
 
 @app.route('/api/notifications/preview', methods=['POST'])
@@ -402,96 +280,6 @@ def get_notification_recipients(filter_data):
     return users, devices
 
 
-def send_notifications_task(notification_id):
-    """
-    Задача для отправки уведомлений в фоновом режиме.
-    В реальном проекте эту функцию лучше реализовать как фоновую задачу
-    с использованием Celery, RQ или другого решения для асинхронной обработки.
-
-    Args:
-        notification_id (int): ID записи в истории уведомлений
-    """
-    try:
-        # Получаем данные уведомления
-        notification = NotificationHistory.query.get(notification_id)
-        if not notification:
-            return
-
-        # Обновляем статус и время начала отправки
-        notification.status = 'processing'
-        notification.started_at = datetime.utcnow()
-        db.session.commit()
-
-        # Получаем список получателей на основе сохраненного фильтра
-        filter_data = json.loads(notification.recipient_filter)
-        _, devices = get_notification_recipients(filter_data)
-
-        # Подготавливаем данные для уведомления
-        notification_data = {
-            'type': notification.notification_type,
-            'timestamp': datetime.utcnow().isoformat(),
-            'notification_id': notification.id
-        }
-
-        # Если есть глубокая ссылка, добавляем ее
-        if notification.deep_link:
-            notification_data['deep_link'] = notification.deep_link
-
-        # Счетчики успешных и неудачных отправок
-        success_count = 0
-        error_count = 0
-        error_details = []
-
-        # Отправляем уведомления на каждое устройство
-        for device in devices:
-            try:
-                # Используем функцию send_push_message из вашего приложения
-                result = send_push_message(
-                    device.token,
-                    notification.title,
-                    notification.message,
-                    notification_data
-                )
-
-                # Проверяем успешность отправки
-                if result.get('success'):
-                    success_count += 1
-                else:
-                    error_count += 1
-                    error_details.append({
-                        'user_id': device.user_id,
-                        'token': device.token[:10] + '...',
-                        'error': result.get('error', 'Неизвестная ошибка')
-                    })
-            except Exception as e:
-                error_count += 1
-                error_details.append({
-                    'user_id': device.user_id,
-                    'token': device.token[:10] + '...',
-                    'error': str(e)
-                })
-
-        # Обновляем статус и счетчики в записи истории
-        notification.status = 'completed'
-        notification.completed_at = datetime.utcnow()
-        notification.success_count = success_count
-        notification.error_count = error_count
-        notification.error_details = json.dumps(error_details[:100],
-                                                ensure_ascii=False)  # Ограничиваем количество деталей ошибок
-
-        db.session.commit()
-
-    except Exception as e:
-        # В случае ошибки обновляем статус
-        if notification:
-            notification.status = 'failed'
-            notification.error_details = json.dumps([{'error': str(e)}], ensure_ascii=False)
-            notification.completed_at = datetime.utcnow()
-            db.session.commit()
-
-
-# Не забудьте добавить ссылку на страницу уведомлений в sidebar.html или другое меню
-
 def send_push_message(token, title, message, extra=None):
     """
     Отправляет push-уведомление через FCM или Expo Push Service
@@ -512,10 +300,10 @@ def send_push_message(token, title, message, extra=None):
             extra = {}
 
         # Определяем тип токена (Expo или FCM)
-        is_expo_token = token.startswith('ExponentPushToken')
+        is_expo_token = token.startswith('ExponentPushToken') or token.startswith('expo/')
 
         # Логируем информацию о типе токена
-        print(f"Sending notification to {token[:10]}... (Type: {'Expo' if is_expo_token else 'FCM'})")
+        print(f"Отправка уведомления на токен {token[:10]}... (Тип: {'Expo' if is_expo_token else 'FCM'})")
 
         if is_expo_token:
             # Используем Expo Push Service для токенов Expo
@@ -549,52 +337,38 @@ def send_push_message(token, title, message, extra=None):
 
             # Проверка ответа
             if response.status_code != 200:
-                error_msg = f"Expo push failed with status {response.status_code}: {response.text}"
+                error_msg = f"Ошибка отправки Expo уведомления, статус {response.status_code}: {response.text}"
                 print(error_msg)
                 return {"success": False, "error": error_msg}
 
-            print(f"Successfully sent Expo push notification")
+            print(f"Expo push-уведомление успешно отправлено")
             return {"success": True, "receipt": response.json()}
 
         else:
-            # Проверяем наличие Firebase Admin SDK
+            # Проверяем глобальную доступность Firebase
+            if not FIREBASE_AVAILABLE:
+                try:
+                    from firebase_admin import messaging
+                    firebase_module_available = True
+                except ImportError:
+                    firebase_module_available = False
+                    print("Firebase Admin SDK недоступен. FCM уведомления не будут работать.")
+                    return {"success": False, "error": "Firebase Admin SDK не установлен"}
+
+                if not firebase_module_available:
+                    return {"success": False, "error": "Firebase Admin SDK недоступен"}
+
+            # Используем Firebase Cloud Messaging для FCM токенов
+            print(f"Отправка FCM уведомления через Firebase Admin SDK")
+
+            # Преобразуем все значения в data в строки (требование FCM)
+            data_payload = {}
+            for key, value in extra.items():
+                data_payload[str(key)] = str(value)
+
             try:
-                import firebase_admin
+                # Импортируем Firebase-модули в локальной области видимости
                 from firebase_admin import messaging
-                firebase_available = True
-            except ImportError:
-                firebase_available = False
-                print("Firebase Admin SDK недоступен. FCM уведомления не будут работать.")
-                return {"success": False, "error": "Firebase Admin SDK не установлен"}
-
-            if firebase_available:
-                # Инициализируем Firebase если еще не сделано
-                if not firebase_admin._apps:
-                    try:
-                        from firebase_admin import credentials
-
-                        # Попробуем найти файл сервисного аккаунта
-                        import os
-                        firebase_cred_path = os.path.join(os.path.dirname(__file__), 'firebase-service-account.json')
-                        if os.path.exists(firebase_cred_path):
-                            cred = credentials.Certificate(firebase_cred_path)
-                        else:
-                            # Резервный вариант - стандартный файл конфигурации
-                            cred = credentials.Certificate('firebase.json')
-
-                        firebase_admin.initialize_app(cred)
-                        print("Firebase Admin SDK инициализирован успешно")
-                    except Exception as e:
-                        print(f"Ошибка инициализации Firebase: {e}")
-                        return {"success": False, "error": f"Ошибка инициализации Firebase: {e}"}
-
-                # Используем Firebase Cloud Messaging для FCM токенов
-                print(f"Sending FCM notification via Firebase Admin SDK")
-
-                # Преобразуем все значения в data в строки (требование FCM)
-                data_payload = {}
-                for key, value in extra.items():
-                    data_payload[str(key)] = str(value)
 
                 # Создаем сообщение
                 notification = messaging.Notification(
@@ -611,29 +385,35 @@ def send_push_message(token, title, message, extra=None):
                     )
                 )
 
+                # Настройки для iOS
+                apns_config = messaging.APNSConfig(
+                    payload=messaging.APNSPayload(
+                        aps=messaging.Aps(
+                            content_available=True,
+                            sound="default"
+                        )
+                    )
+                )
+
                 fcm_message = messaging.Message(
                     notification=notification,
                     data=data_payload,
                     token=token,
-                    android=android_config
+                    android=android_config,
+                    apns=apns_config
                 )
 
                 # Отправляем сообщение
-                try:
-                    response = messaging.send(fcm_message)
-                    print(f"Successfully sent FCM notification: {response}")
-                    return {"success": True, "receipt": response}
-                except Exception as fcm_error:
-                    error_msg = f"FCM message failed: {fcm_error}"
-                    print(error_msg)
-                    return {"success": False, "error": error_msg}
-            else:
-                error_msg = "FCM token received but Firebase Admin SDK is not available"
+                response = messaging.send(fcm_message)
+                print(f"FCM уведомление успешно отправлено: {response}")
+                return {"success": True, "receipt": response}
+            except Exception as fcm_error:
+                error_msg = f"Ошибка отправки FCM уведомления: {fcm_error}"
                 print(error_msg)
                 return {"success": False, "error": error_msg}
 
     except Exception as exc:
-        error_msg = f"Push message failed: {exc}"
+        error_msg = f"Ошибка отправки push-уведомления: {exc}"
         print(error_msg)
         return {"success": False, "error": error_msg}
 
@@ -1045,7 +825,7 @@ def reply_to_ticket(ticket_id):
 
                 # Отправляем уведомление на каждое устройство
                 for token_obj in device_tokens:
-                    send_push_message(
+                    result = send_push_message(
                         token_obj.token,
                         notification_title,
                         notification_body,
@@ -1055,9 +835,14 @@ def reply_to_ticket(ticket_id):
                             'timestamp': datetime.utcnow().isoformat()
                         }
                     )
+                    # Логируем результат отправки
+                    if result.get('success'):
+                        print(f"Уведомление успешно отправлено на устройство {token_obj.token[:10]}...")
+                    else:
+                        print(f"Ошибка отправки уведомления: {result.get('error')}")
         except Exception as notify_error:
             # Логируем ошибку, но не прерываем основной процесс
-            print(f"Error sending notification: {str(notify_error)}")
+            print(f"Общая ошибка при отправке уведомления: {str(notify_error)}")
 
         flash('Ответ успешно отправлен', 'success')
     except Exception as e:
@@ -1957,7 +1742,7 @@ if __name__ == '__main__':
 
             create_initial_admin()
 
-        app.run(debug=True)
+        app.run(debug=True, host='0.0.0.0', port=5000)
     except Exception as e:
         print(f"Ошибка при запуске приложения: {str(e)}")
         print("Проверьте настройки подключения к базе данных")

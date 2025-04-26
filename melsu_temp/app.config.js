@@ -3,7 +3,7 @@ module.exports = {
   "expo": {
     "name": "MelSU Go",
     "slug": "melsu",
-    "version": "1.1.80",
+    "version": "1.1.83",
     "orientation": "portrait",
     "description": "MelSU Go — официальное мобильное приложение для студентов и преподавателей Мелитопольского государственного университета.\n" +
         "            Приложение разработано для удобного доступа к расписанию занятий, общения между студентами и преподавателями,\n" +
@@ -35,6 +35,7 @@ module.exports = {
         "backgroundColor": "#ffffff"
       },
       "package": "com.melsu.app",
+      "versionCode": 2,
       "googleServicesFile": "./google-services.json",
       "permissions": [
         "CAMERA",

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Университет",
     "slug": "melsu",
-    "version": "1.1.80",
+    "version": "1.1.83",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "melsu",
@@ -40,6 +40,7 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.melsu.app",
+      "versionCode": 2,
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",

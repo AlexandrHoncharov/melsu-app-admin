@@ -1,22 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, {useEffect, useState} from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Alert,
-  ScrollView,
   ActivityIndicator,
-  SafeAreaView,
-  RefreshControl,
-  Platform,
-  StatusBar,
+  Alert,
   Dimensions,
   Linking,
+  Platform,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../../hooks/useAuth';
-import { router } from 'expo-router';
+import {Ionicons} from '@expo/vector-icons';
+import {useAuth} from '../../../hooks/useAuth';
+import {router} from 'expo-router';
 import scheduleService from '../../../src/services/scheduleService';
 import * as Clipboard from 'expo-clipboard';
 
@@ -638,7 +638,7 @@ export default function ProfileScreen() {
 
         {/* Footer Info */}
         <View style={styles.footerInfo}>
-          <Text style={styles.versionText}>Версия приложения 1.0.0</Text>
+          <Text style={styles.versionText}>Версия приложения 1.1.83</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

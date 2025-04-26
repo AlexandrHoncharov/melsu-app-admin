@@ -9,6 +9,7 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk",
+
         "gradleCommand": ":app:assembleDebug",
         "withoutCredentials": false
       }
@@ -25,6 +26,7 @@
     },
     "production": {
       "android": {
+        "autoIncrement": true,
         "buildType": "apk",
         "withoutCredentials": false
       },

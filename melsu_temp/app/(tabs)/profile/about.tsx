@@ -1,20 +1,19 @@
 // File: melsu_temp/app/(tabs)/profile/about.tsx
 import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
+  Linking,
+  Platform,
   SafeAreaView,
   ScrollView,
-  Linking,
-  Image,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
   useWindowDimensions,
-  Platform,
-  StatusBar
+  View
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import {Ionicons} from '@expo/vector-icons';
+import {router} from 'expo-router';
 
 // Добавляем расчет высоты StatusBar для Android
 const STATUSBAR_HEIGHT = StatusBar.currentHeight || 0;
@@ -58,7 +57,7 @@ export default function AboutScreen() {
             <Text style={styles.logoTextUniversity}>Go</Text>
           </View>
           <Text style={styles.appName}>MelSU Go</Text>
-          <Text style={styles.appVersion}>Версия 1.0.0</Text>
+          <Text style={styles.appVersion}>Версия 1.1.83</Text>
         </View>
 
         {/* App Description */}

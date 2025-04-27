@@ -1521,9 +1521,194 @@ def login():
     }), 200
 
 
-# Обновленный endpoint для получения профиля в api.py
+# Добавьте эти функции в api.py
 
-# Fix for get_profile function in api.py
+from models import Notification
+
+
+# Получение списка уведомлений пользователя
+@app.route('/api/notifications', methods=['GET'])
+@token_required
+def get_user_notifications(current_user):
+    """Получение списка уведомлений текущего пользователя"""
+    try:
+        # Параметры фильтрации и пагинации
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 20, type=int)
+        unread_only = request.args.get('unread_only', 'false').lower() == 'true'
+        notification_type = request.args.get('type')
+
+        # Строим запрос
+        query = Notification.query.filter_by(user_id=current_user.id)
+
+        # Фильтр по статусу прочтения
+        if unread_only:
+            query = query.filter_by(is_read=False)
+
+        # Фильтр по типу уведомления
+        if notification_type:
+            query = query.filter_by(notification_type=notification_type)
+
+        # Сортировка по времени создания (сначала новые)
+        query = query.order_by(Notification.created_at.desc())
+
+        # Выполняем запрос с пагинацией
+        notifications = query.paginate(page=page, per_page=per_page)
+
+        # Получаем количество непрочитанных уведомлений
+        unread_count = Notification.query.filter_by(
+            user_id=current_user.id,
+            is_read=False
+        ).count()
+
+        # Формируем ответ
+        return jsonify({
+            'notifications': [n.to_dict() for n in notifications.items],
+            'unread_count': unread_count,
+            'total_count': notifications.total,
+            'page': page,
+            'per_page': per_page,
+            'pages': notifications.pages,
+            'has_next': notifications.has_next,
+            'has_prev': notifications.has_prev,
+            'success': True
+        }), 200
+
+    except Exception as e:
+        print(f"Error getting notifications: {str(e)}")
+        return jsonify({
+            'message': f"Error: {str(e)}",
+            'success': False
+        }), 500
+
+
+# Отметка уведомления как прочитанного
+@app.route('/api/notifications/<int:notification_id>/read', methods=['POST'])
+@token_required
+def mark_notification_read(current_user, notification_id):
+    """Отмечает уведомление как прочитанное"""
+    try:
+        notification = Notification.query.get_or_404(notification_id)
+
+        # Проверяем, что уведомление принадлежит текущему пользователю
+        if notification.user_id != current_user.id:
+            return jsonify({
+                'message': 'Access denied',
+                'success': False
+            }), 403
+
+        # Отмечаем как прочитанное
+        was_updated = notification.mark_as_read()
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Notification marked as read',
+            'was_updated': was_updated,
+            'success': True
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error marking notification as read: {str(e)}")
+        return jsonify({
+            'message': f"Error: {str(e)}",
+            'success': False
+        }), 500
+
+
+# Отметка всех уведомлений как прочитанных
+@app.route('/api/notifications/read-all', methods=['POST'])
+@token_required
+def mark_all_notifications_read(current_user):
+    """Отмечает все уведомления пользователя как прочитанные"""
+    try:
+        # Получаем все непрочитанные уведомления пользователя
+        notifications = Notification.query.filter_by(
+            user_id=current_user.id,
+            is_read=False
+        ).all()
+
+        # Отмечаем все как прочитанные
+        now = datetime.utcnow()
+        count = 0
+
+        for notification in notifications:
+            notification.is_read = True
+            notification.read_at = now
+            count += 1
+
+        db.session.commit()
+
+        return jsonify({
+            'message': f'{count} notifications marked as read',
+            'count': count,
+            'success': True
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error marking all notifications as read: {str(e)}")
+        return jsonify({
+            'message': f"Error: {str(e)}",
+            'success': False
+        }), 500
+
+
+# Удаление уведомления
+@app.route('/api/notifications/<int:notification_id>', methods=['DELETE'])
+@token_required
+def delete_notification(current_user, notification_id):
+    """Удаляет уведомление пользователя"""
+    try:
+        notification = Notification.query.get_or_404(notification_id)
+
+        # Проверяем, что уведомление принадлежит текущему пользователю
+        if notification.user_id != current_user.id:
+            return jsonify({
+                'message': 'Access denied',
+                'success': False
+            }), 403
+
+        # Удаляем уведомление
+        db.session.delete(notification)
+        db.session.commit()
+
+        return jsonify({
+            'message': 'Notification deleted',
+            'success': True
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting notification: {str(e)}")
+        return jsonify({
+            'message': f"Error: {str(e)}",
+            'success': False
+        }), 500
+
+
+# Получение количества непрочитанных уведомлений
+@app.route('/api/notifications/unread-count', methods=['GET'])
+@token_required
+def get_unread_count(current_user):
+    """Возвращает количество непрочитанных уведомлений пользователя"""
+    try:
+        unread_count = Notification.query.filter_by(
+            user_id=current_user.id,
+            is_read=False
+        ).count()
+
+        return jsonify({
+            'unread_count': unread_count,
+            'success': True
+        }), 200
+
+    except Exception as e:
+        print(f"Error getting unread count: {str(e)}")
+        return jsonify({
+            'message': f"Error: {str(e)}",
+            'success': False
+        }), 500
 
 @app.route('/api/user/profile', methods=['GET'])
 @token_required
@@ -2456,6 +2641,112 @@ def send_push_message(token, title, message, data=None):
         return {"success": False, "error": str(e)}
 
 
+def create_and_send_notification(recipient_id, title, body, notification_type, sender_id=None, data=None,
+                                 related_type=None, related_id=None):
+    """
+    Создает запись уведомления в БД и отправляет push-уведомление на устройства пользователя
+
+    Args:
+        recipient_id (int): ID получателя уведомления
+        title (str): Заголовок уведомления
+        body (str): Текст уведомления
+        notification_type (str): Тип уведомления ('ticket', 'chat', 'system', и т.д.)
+        sender_id (int, optional): ID отправителя (None если системное уведомление)
+        data (dict, optional): Дополнительные данные для уведомления
+        related_type (str, optional): Тип связанной сущности ('ticket', 'schedule', и т.д.)
+        related_id (int, optional): ID связанной сущности
+
+    Returns:
+        dict: Словарь с результатами {'db_success': bool, 'push_success': bool, 'notification_id': int}
+    """
+    result = {
+        'db_success': False,
+        'push_success': False,
+        'notification_id': None,
+        'push_receipts': []
+    }
+
+    try:
+        # Создаем запись в БД
+        notification = Notification.create_notification(
+            user_id=recipient_id,
+            title=title,
+            body=body,
+            notification_type=notification_type,
+            sender_id=sender_id,
+            data=data,
+            related_type=related_type,
+            related_id=related_id
+        )
+
+        db.session.add(notification)
+        db.session.commit()
+
+        result['db_success'] = True
+        result['notification_id'] = notification.id
+
+        # Получаем токены устройств получателя
+        device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
+
+        if device_tokens:
+            # Подготавливаем данные для push-уведомления
+            push_data = data.copy() if data else {}
+
+            # Добавляем дополнительные поля для push-уведомления
+            push_data.update({
+                'notification_id': notification.id,
+                'type': notification_type,
+                'sender_id': sender_id,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+
+            # Добавляем информацию о связанной сущности, если есть
+            if related_type and related_id:
+                push_data.update({
+                    'related_type': related_type,
+                    'related_id': related_id
+                })
+
+            # Отправляем push-уведомление на каждое устройство пользователя
+            successful_deliveries = 0
+
+            for token_obj in device_tokens:
+                push_result = send_push_message(
+                    token_obj.token,
+                    title,
+                    body,
+                    push_data
+                )
+
+                result['push_receipts'].append({
+                    'device_id': token_obj.id,
+                    'success': push_result.get('success', False),
+                    'error': push_result.get('error')
+                })
+
+                if push_result.get('success'):
+                    successful_deliveries += 1
+
+            if successful_deliveries > 0:
+                result['push_success'] = True
+
+        return result
+
+    except Exception as e:
+        if 'notification_id' in result and result['notification_id']:
+            # Если запись в БД была создана, но возникла ошибка при отправке push,
+            # оставляем запись в БД и логируем ошибку
+            db.session.commit()
+            print(f"Error sending push notification, but DB record was created: {str(e)}")
+        else:
+            # Если ошибка возникла до создания записи в БД, откатываем транзакцию
+            db.session.rollback()
+            print(f"Error creating notification record: {str(e)}")
+
+        result['error'] = str(e)
+        return result
+
+
 @app.route('/api/device/send-notification', methods=['POST'])
 @token_required
 def send_push_notification(current_user):
@@ -2666,6 +2957,71 @@ def send_push_notification(current_user):
         print(f"Общая ошибка при отправке уведомления: {str(e)}")
         return jsonify({
             'message': f'Ошибка: {str(e)}',
+            'success': False
+        }), 500
+
+
+@app.route('/api/notifications/send-personal', methods=['POST'])
+@login_required
+def send_personal_notification():
+    """Отправляет персональное уведомление конкретному пользователю"""
+    try:
+        data = request.json
+
+        # Проверяем обязательные поля
+        required_fields = ['user_id', 'title', 'message']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'message': f'Missing required field: {field}',
+                    'success': False
+                }), 400
+
+        # Получаем данные
+        user_id = data.get('user_id')
+        title = data.get('title')
+        message = data.get('message')
+
+        # Проверяем, что пользователь существует
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({
+                'message': 'User not found',
+                'success': False
+            }), 404
+
+        # Отправляем уведомление
+        admin_id = session.get('user_id')
+        result = create_and_send_notification(
+            recipient_id=user_id,
+            title=title,
+            body=message,
+            notification_type='personal',
+            sender_id=admin_id,
+            data={
+                'admin_id': admin_id,
+                'custom_data': data.get('custom_data')
+            }
+        )
+
+        if result.get('db_success'):
+            return jsonify({
+                'message': 'Notification sent successfully',
+                'notification_id': result.get('notification_id'),
+                'push_success': result.get('push_success'),
+                'success': True
+            }), 200
+        else:
+            return jsonify({
+                'message': 'Failed to send notification',
+                'error': result.get('error'),
+                'success': False
+            }), 500
+
+    except Exception as e:
+        print(f"Error sending personal notification: {str(e)}")
+        return jsonify({
+            'message': f'Error: {str(e)}',
             'success': False
         }), 500
 

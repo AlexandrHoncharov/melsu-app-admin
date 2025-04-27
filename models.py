@@ -1,3 +1,4 @@
+import json
 import random
 import string
 from datetime import datetime
@@ -278,3 +279,95 @@ class TicketAttachment(db.Model):
 
     def __repr__(self):
         return f'<TicketAttachment {self.id} {self.filename}>'
+
+
+class Notification(db.Model):
+    """Модель для хранения отправленных уведомлений"""
+    __tablename__ = 'notification'
+    __table_args__ = {'mysql_charset': 'utf8mb4', 'mysql_collate': 'utf8mb4_unicode_ci'}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Получатель уведомления
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False, index=True)
+    user = db.relationship('User', foreign_keys=[user_id],
+                           backref=db.backref('notifications', lazy=True, order_by='Notification.created_at.desc()'))
+
+    # Отправитель уведомления (может быть null, если системное)
+    sender_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    sender = db.relationship('User', foreign_keys=[sender_id], backref=db.backref('sent_notifications', lazy=True))
+
+    # Основное содержимое уведомления
+    title = db.Column(db.String(255, collation='utf8mb4_unicode_ci'), nullable=False)
+    body = db.Column(db.Text(collation='utf8mb4_unicode_ci'), nullable=False)
+    notification_type = db.Column(db.String(50, collation='utf8mb4_unicode_ci'), nullable=False,
+                                  index=True)  # 'ticket', 'chat', 'system', 'schedule', etc.
+
+    # Статус прочтения
+    is_read = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    read_at = db.Column(db.DateTime, nullable=True)
+
+    # Дополнительные данные в JSON формате
+    data = db.Column(db.Text(collation='utf8mb4_unicode_ci'), nullable=True)
+
+    # Связанные сущности (id и тип)
+    related_type = db.Column(db.String(50, collation='utf8mb4_unicode_ci'), nullable=True)  # 'ticket', 'schedule', etc.
+    related_id = db.Column(db.Integer, nullable=True)
+
+    def __repr__(self):
+        return f'<Notification {self.id} to:{self.user_id} type:{self.notification_type}>'
+
+    def to_dict(self):
+        """Преобразует уведомление в словарь для API"""
+        data_dict = {}
+        if self.data:
+            try:
+                data_dict = json.loads(self.data)
+            except:
+                pass
+
+        return {
+            'id': self.id,
+            'title': self.title,
+            'body': self.body,
+            'type': self.notification_type,
+            'is_read': self.is_read,
+            'created_at': self.created_at.isoformat(),
+            'read_at': self.read_at.isoformat() if self.read_at else None,
+            'data': data_dict,
+            'related_type': self.related_type,
+            'related_id': self.related_id,
+            'sender': {
+                'id': self.sender.id,
+                'name': self.sender.full_name or self.sender.username
+            } if self.sender else None
+        }
+
+    def mark_as_read(self):
+        """Отмечает уведомление как прочитанное"""
+        if not self.is_read:
+            self.is_read = True
+            self.read_at = datetime.utcnow()
+            return True
+        return False
+
+    @classmethod
+    def create_notification(cls, user_id, title, body, notification_type, sender_id=None, data=None, related_type=None,
+                            related_id=None):
+        """Создает новое уведомление"""
+        notification = cls(
+            user_id=user_id,
+            sender_id=sender_id,
+            title=title,
+            body=body,
+            notification_type=notification_type,
+            related_type=related_type,
+            related_id=related_id
+        )
+
+        # Сохраняем дополнительные данные в JSON
+        if data:
+            notification.data = json.dumps(data)
+
+        return notification

@@ -1,6 +1,7 @@
 // src/api/apiClient.ts
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
+import {router} from 'expo-router';
 
 // Special debug function for API operations
 const debugLog = (message) => {
@@ -89,6 +90,9 @@ apiClient.interceptors.request.use(
 // Flag to track token warning
 let tokenWarningShown = false;
 
+// Add this flag to prevent multiple redirects
+let authRedirectInProgress = false;
+
 // Response interceptor to handle errors
 apiClient.interceptors.response.use(
   (response) => {
@@ -142,10 +146,25 @@ apiClient.interceptors.response.use(
         }
       }
 
-      // On 401, delete token (unless it's a safe endpoint)
-      debugLog('Deleting authorization token due to 401 Unauthorized');
-      await SecureStore.deleteItemAsync('userToken');
+      // Only proceed with token deletion and redirect if not already in progress
+      if (!authRedirectInProgress) {
+        authRedirectInProgress = true;
 
+        // On 401, delete token (unless it's a safe endpoint)
+        debugLog('Deleting authorization token due to 401 Unauthorized');
+        await SecureStore.deleteItemAsync('userToken');
+
+        // Silent redirect to login without showing an alert
+        setTimeout(() => {
+          debugLog('Redirecting to login screen after auth error');
+          router.replace('/login');
+
+          // Reset the flag after a delay to prevent redirect loops
+          setTimeout(() => {
+            authRedirectInProgress = false;
+          }, 2000);
+        }, 100);
+      }
     }
     // For "safe" endpoints with 401 error, don't delete the token
     else if (isSafe && error.response?.status === 401) {

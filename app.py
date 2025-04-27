@@ -16,6 +16,7 @@ from werkzeug.security import generate_password_hash
 from werkzeug.utils import secure_filename
 
 from db import db
+from models import Notification
 
 # Создание экземпляра приложения
 app = Flask(__name__)
@@ -101,13 +102,82 @@ def notifications_page():
                            positions=positions)
 
 
+@app.route('/notifications/view')
+@login_required
+def view_notifications():
+    """Страница просмотра всех уведомлений в административной панели"""
+    # Получаем параметры фильтрации
+    notification_type = request.args.get('type', '')
+    user_id = request.args.get('user_id', type=int)
+    sender_id = request.args.get('sender_id', type=int)
+    is_read = request.args.get('is_read', '')
+    search_query = request.args.get('search', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = 30
 
+    # Строим запрос
+    query = Notification.query
 
+    # Применяем фильтры
+    if notification_type:
+        query = query.filter_by(notification_type=notification_type)
 
+    if user_id:
+        query = query.filter_by(user_id=user_id)
 
+    if sender_id:
+        query = query.filter_by(sender_id=sender_id)
 
+    if is_read == 'read':
+        query = query.filter_by(is_read=True)
+    elif is_read == 'unread':
+        query = query.filter_by(is_read=False)
 
+    if search_query:
+        query = query.filter(
+            db.or_(
+                Notification.title.ilike(f'%{search_query}%'),
+                Notification.body.ilike(f'%{search_query}%')
+            )
+        )
 
+    # Получаем пользователей для фильтра
+    users = User.query.order_by(User.username).all()
+
+    # Получаем типы уведомлений для фильтра
+    notification_types = db.session.query(
+        Notification.notification_type,
+        db.func.count(Notification.id)
+    ).group_by(
+        Notification.notification_type
+    ).all()
+
+    # Выполняем запрос с пагинацией
+    pagination = query.order_by(Notification.created_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    notifications = pagination.items
+
+    # Статистика по уведомлениям
+    total_count = Notification.query.count()
+    read_count = Notification.query.filter_by(is_read=True).count()
+    unread_count = Notification.query.filter_by(is_read=False).count()
+
+    return render_template(
+        'notifications/view.html',
+        notifications=notifications,
+        pagination=pagination,
+        users=users,
+        notification_types=notification_types,
+        total_count=total_count,
+        read_count=read_count,
+        unread_count=unread_count,
+        current_type=notification_type,
+        current_user_id=user_id,
+        current_sender_id=sender_id,
+        current_is_read=is_read,
+        search_query=search_query
+    )
 
 
 @app.route('/api/notifications/preview', methods=['POST'])
@@ -418,6 +488,112 @@ def send_push_message(token, title, message, extra=None):
         return {"success": False, "error": error_msg}
 
 
+def create_and_send_notification(recipient_id, title, body, notification_type, sender_id=None, data=None,
+                                 related_type=None, related_id=None):
+    """
+    Создает запись уведомления в БД и отправляет push-уведомление на устройства пользователя
+
+    Args:
+        recipient_id (int): ID получателя уведомления
+        title (str): Заголовок уведомления
+        body (str): Текст уведомления
+        notification_type (str): Тип уведомления ('ticket', 'chat', 'system', и т.д.)
+        sender_id (int, optional): ID отправителя (None если системное уведомление)
+        data (dict, optional): Дополнительные данные для уведомления
+        related_type (str, optional): Тип связанной сущности ('ticket', 'schedule', и т.д.)
+        related_id (int, optional): ID связанной сущности
+
+    Returns:
+        dict: Словарь с результатами {'db_success': bool, 'push_success': bool, 'notification_id': int}
+    """
+    result = {
+        'db_success': False,
+        'push_success': False,
+        'notification_id': None,
+        'push_receipts': []
+    }
+
+    try:
+        # Создаем запись в БД
+        notification = Notification.create_notification(
+            user_id=recipient_id,
+            title=title,
+            body=body,
+            notification_type=notification_type,
+            sender_id=sender_id,
+            data=data,
+            related_type=related_type,
+            related_id=related_id
+        )
+
+        db.session.add(notification)
+        db.session.commit()
+
+        result['db_success'] = True
+        result['notification_id'] = notification.id
+
+        # Получаем токены устройств получателя
+        device_tokens = DeviceToken.query.filter_by(user_id=recipient_id).all()
+
+        if device_tokens:
+            # Подготавливаем данные для push-уведомления
+            push_data = data.copy() if data else {}
+
+            # Добавляем дополнительные поля для push-уведомления
+            push_data.update({
+                'notification_id': notification.id,
+                'type': notification_type,
+                'sender_id': sender_id,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+
+            # Добавляем информацию о связанной сущности, если есть
+            if related_type and related_id:
+                push_data.update({
+                    'related_type': related_type,
+                    'related_id': related_id
+                })
+
+            # Отправляем push-уведомление на каждое устройство пользователя
+            successful_deliveries = 0
+
+            for token_obj in device_tokens:
+                push_result = send_push_message(
+                    token_obj.token,
+                    title,
+                    body,
+                    push_data
+                )
+
+                result['push_receipts'].append({
+                    'device_id': token_obj.id,
+                    'success': push_result.get('success', False),
+                    'error': push_result.get('error')
+                })
+
+                if push_result.get('success'):
+                    successful_deliveries += 1
+
+            if successful_deliveries > 0:
+                result['push_success'] = True
+
+        return result
+
+    except Exception as e:
+        if 'notification_id' in result and result['notification_id']:
+            # Если запись в БД была создана, но возникла ошибка при отправке push,
+            # оставляем запись в БД и логируем ошибку
+            db.session.commit()
+            print(f"Error sending push notification, but DB record was created: {str(e)}")
+        else:
+            # Если ошибка возникла до создания записи в БД, откатываем транзакцию
+            db.session.rollback()
+            print(f"Error creating notification record: {str(e)}")
+
+        result['error'] = str(e)
+        return result
+
+
 
 
 # Создание первого администратора
@@ -589,6 +765,19 @@ def create_teacher_account(teacher_id):
         teacher.user_id = new_user.id
 
         db.session.commit()
+
+        # Создаем уведомление для нового пользователя
+        create_and_send_notification(
+            recipient_id=new_user.id,
+            title="Добро пожаловать в MelSU Go!",
+            body=f"Для Вас создана учетная запись в приложении MelSU Go. Логин: {username}, пароль: {password}",
+            notification_type='system',
+            sender_id=session.get('user_id'),
+            data={
+                'username': username,
+                'is_welcome_message': True
+            }
+        )
 
         flash(f'Создана учетная запись для {teacher.name}. Логин: {username}, Пароль: {password}', 'success')
     except Exception as e:
@@ -804,7 +993,9 @@ def reply_to_ticket(ticket_id):
             db.session.add(message)
 
         # Обновляем статус тикета, если он изменился
-        if new_status != ticket.status:
+        status_changed = new_status != ticket.status
+        old_status = ticket.status
+        if status_changed:
             ticket.status = new_status
 
         # Обновляем флаги чтения и время обновления
@@ -813,33 +1004,53 @@ def reply_to_ticket(ticket_id):
 
         db.session.commit()
 
-        # Отправляем уведомление пользователю
+        # Отправляем уведомление пользователю и сохраняем его в БД
         try:
-            # Получаем токены устройств пользователя
-            device_tokens = DeviceToken.query.filter_by(user_id=ticket.user_id).all()
+            # Формируем данные уведомления
+            notification_title = "Новый ответ в обращении"
+            notification_body = f"Получен ответ на ваше обращение: {ticket.title}"
 
-            if device_tokens:
-                # Формируем данные уведомления
-                notification_title = "Новый ответ в обращении"
-                notification_body = f"Получен ответ на ваше обращение: {ticket.title}"
+            # Если статус изменился, добавляем это в текст уведомления
+            if status_changed:
+                status_names = {
+                    'new': 'Новый',
+                    'in_progress': 'В обработке',
+                    'waiting': 'Требует уточнения',
+                    'resolved': 'Решен',
+                    'closed': 'Закрыт'
+                }
+                new_status_name = status_names.get(new_status, new_status)
+                notification_body += f". Статус изменен на: {new_status_name}"
 
-                # Отправляем уведомление на каждое устройство
-                for token_obj in device_tokens:
-                    result = send_push_message(
-                        token_obj.token,
-                        notification_title,
-                        notification_body,
-                        {
-                            'type': 'ticket_message',
-                            'ticket_id': int(ticket.id) if ticket.id is not None else None,
-                            'timestamp': datetime.utcnow().isoformat()
-                        }
-                    )
-                    # Логируем результат отправки
-                    if result.get('success'):
-                        print(f"Уведомление успешно отправлено на устройство {token_obj.token[:10]}...")
-                    else:
-                        print(f"Ошибка отправки уведомления: {result.get('error')}")
+            # Дополнительные данные для уведомления
+            notification_data = {
+                'ticket_id': ticket.id,
+                'message_id': message.id,
+                'status': ticket.status,
+                'status_changed': status_changed,
+                'old_status': old_status if status_changed else None
+            }
+
+            # Отправляем уведомление и сохраняем его в базе данных
+            result = create_and_send_notification(
+                recipient_id=ticket.user_id,
+                title=notification_title,
+                body=notification_body,
+                notification_type='ticket',
+                sender_id=session['user_id'],
+                data=notification_data,
+                related_type='ticket',
+                related_id=ticket.id
+            )
+
+            if result.get('db_success'):
+                print(f"Уведомление успешно сохранено в БД: {result.get('notification_id')}")
+
+            if result.get('push_success'):
+                print(f"Push-уведомление успешно отправлено")
+            else:
+                print(f"Не удалось отправить push-уведомление: {result.get('error', 'Unknown error')}")
+
         except Exception as notify_error:
             # Логируем ошибку, но не прерываем основной процесс
             print(f"Общая ошибка при отправке уведомления: {str(notify_error)}")
@@ -1061,14 +1272,31 @@ def schedule_list():
                            subgroup_values=subgroup_values)
 
 
+# Update the existing sync_schedule route in app.py
+
 @app.route('/schedule/sync', methods=['GET', 'POST'])
 @login_required
 def sync_schedule():
+    sync_success = False  # Flag to control notification button visibility
+    changes_detected = False  # Flag to indicate if changes were detected
+    changes_by_group = {}  # Store changes for notification
+
     if request.method == 'POST':
         try:
             # Получаем выбранные фильтры из формы
             semester = request.form.get('semester', '')
             group = request.form.get('group', '')
+
+            # Сохраняем текущее расписание для сравнения
+            current_schedules = {}
+            if group:
+                # Получаем текущее расписание только для указанной группы
+                existing_schedules = Schedule.query.filter_by(group_name=group).all()
+
+                # Создаем словарь текущего расписания для последующего сравнения
+                for sch in existing_schedules:
+                    key = f"{sch.date}_{sch.time_start}_{sch.subject}_{sch.group_name}"
+                    current_schedules[key] = sch
 
             # Подключение к внешней MySQL базе данных
             connection = pymysql.connect(
@@ -1153,27 +1381,99 @@ def sync_schedule():
                         )
                         db.session.add(new_schedule)
 
+                        # Проверяем изменения в расписании для уведомлений
+                        if group:  # Только если синхронизируем конкретную группу
+                            key = f"{record['date']}_{record['time_start']}_{record['subject']}_{record['group_name']}"
+                            old_schedule = current_schedules.get(key)
+
+                            # Если найдено изменение в расписании
+                            if old_schedule:
+                                changed = False
+                                changes = {}
+
+                                # Проверяем изменения в основных полях
+                                if old_schedule.teacher_name != record['teacher_name']:
+                                    changed = True
+                                    changes['teacher'] = {
+                                        'old': old_schedule.teacher_name,
+                                        'new': record['teacher_name']
+                                    }
+
+                                if old_schedule.auditory != record['auditory']:
+                                    changed = True
+                                    changes['auditory'] = {
+                                        'old': old_schedule.auditory,
+                                        'new': record['auditory']
+                                    }
+
+                                if old_schedule.time_start != record['time_start'] or old_schedule.time_end != record[
+                                    'time_end']:
+                                    changed = True
+                                    changes['time'] = {
+                                        'old': f"{old_schedule.time_start}-{old_schedule.time_end}",
+                                        'new': f"{record['time_start']}-{record['time_end']}"
+                                    }
+
+                                # Если есть изменения, сохраняем для уведомления
+                                if changed:
+                                    changes_detected = True
+                                    group_name = record['group_name']
+                                    if group_name not in changes_by_group:
+                                        changes_by_group[group_name] = []
+
+                                    changes_by_group[group_name].append({
+                                        'date': record['date'].strftime('%d.%m.%Y') if hasattr(record['date'],
+                                                                                               'strftime') else str(
+                                            record['date']),
+                                        'subject': record['subject'],
+                                        'changes': changes,
+                                        'schedule_id': old_schedule.id
+                                    })
+
                     # Сохраняем пакет и очищаем сессию для освобождения памяти
                     db.session.commit()
                     db.session.expire_all()
                     total_records += len(records)
 
             flash(f'Расписание успешно синхронизировано. Обработано {total_records} записей.', 'success')
+            sync_success = True  # Set flag to show notification button
+
+            # Set session variable to pass detected changes for notification form
+            if changes_detected:
+                session['schedule_changes'] = True
+                session['changes_by_group'] = changes_by_group
+                flash(f'Обнаружены изменения в расписании для {len(changes_by_group)} групп', 'warning')
+            else:
+                session['schedule_changes'] = False
 
         except Exception as e:
             db.session.rollback()
             flash(f'Ошибка при синхронизации расписания: {str(e)}', 'error')
             print(f"Ошибка при синхронизации расписания: {str(e)}")
 
-        return redirect(url_for('schedule_list'))
+        return render_template('schedule/sync.html',
+                               semesters=get_semesters(),
+                               groups=get_groups(),
+                               sync_success=sync_success,
+                               changes_detected=changes_detected,
+                               changes_by_group=changes_by_group)
 
     # Получение списка семестров и групп для формы
-    semesters = db.session.query(db.distinct(Schedule.semester)).order_by(Schedule.semester).all()
-    groups = db.session.query(db.distinct(Schedule.group_name)).order_by(Schedule.group_name).all()
-
     return render_template('schedule/sync.html',
-                           semesters=[s[0] for s in semesters if s[0] is not None],
-                           groups=[g[0] for g in groups if g[0] is not None])
+                           semesters=get_semesters(),
+                           groups=get_groups(),
+                           sync_success=sync_success)
+
+
+# Helper functions to get semesters and groups
+def get_semesters():
+    semesters = db.session.query(db.distinct(Schedule.semester)).order_by(Schedule.semester).all()
+    return [s[0] for s in semesters if s[0] is not None]
+
+
+def get_groups():
+    groups = db.session.query(db.distinct(Schedule.group_name)).order_by(Schedule.group_name).all()
+    return [g[0] for g in groups if g[0] is not None]
 
 
 @app.route('/schedule/teachers')
@@ -1234,6 +1534,26 @@ def generate_schedule_teachers():
         flash(f'Ошибка при создании списка преподавателей: {str(e)}', 'error')
 
     return redirect(url_for('schedule_teachers_list'))
+
+
+@app.route('/api/notifications/<int:notification_id>/delete', methods=['POST'])
+@login_required
+def delete_notification_admin(notification_id):
+    """Удаляет уведомление из админской панели"""
+    try:
+        notification = Notification.query.get_or_404(notification_id)
+
+        # Удаляем уведомление
+        db.session.delete(notification)
+        db.session.commit()
+
+        flash('Уведомление успешно удалено', 'success')
+        return redirect(url_for('view_notifications'))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при удалении уведомления: {str(e)}', 'error')
+        return redirect(url_for('view_notifications'))
 
 
 @app.route('/schedule/teachers/delete/<int:teacher_id>', methods=['POST'])
@@ -1468,8 +1788,6 @@ def view_student_details(student_id):
     return render_template('verification/student_details.html', student=student)
 
 
-# Обновите функцию verify_student в app.py
-
 @app.route('/verification/students/verify', methods=['POST'])
 @login_required
 def verify_student():
@@ -1525,30 +1843,20 @@ def verify_student():
     db.session.add(log_entry)
     db.session.commit()
 
-    # Отправляем push-уведомление на все устройства студента
-    try:
-        # Получаем все токены устройств студента
-        tokens = DeviceToken.query.filter_by(user_id=student_id).all()
-
-        # Доп. данные для push-уведомления
-        extra_data = {
-            'type': 'verification',
+    # Отправляем и сохраняем уведомление
+    create_and_send_notification(
+        recipient_id=student_id,
+        title=notification_title,
+        body=notification_body,
+        notification_type='verification',
+        sender_id=admin_id,
+        data={
             'status': student.verification_status,
-            'timestamp': datetime.now().isoformat()  # Correct if imported as: from datetime import datetime
-        }
-
-        # Отправляем уведомления на все устройства
-        for token_obj in tokens:
-            send_push_message(
-                token_obj.token,
-                notification_title,
-                notification_body,
-                extra_data
-            )
-
-        print(f"Отправлено уведомление на {len(tokens)} устройств пользователя {student_id}")
-    except Exception as e:
-        print(f"Ошибка при отправке push-уведомления: {str(e)}")
+            'comment': comment
+        },
+        related_type='verification',
+        related_id=log_entry.id
+    )
 
     # Redirect back to the detail page if coming from there
     referrer = request.referrer
@@ -1556,7 +1864,6 @@ def verify_student():
         return redirect(url_for('view_student_details', student_id=student_id))
 
     return redirect(url_for('student_verification_list'))
-# Add this route to your app.py file
 
 @app.route('/students/edit/<int:student_id>', methods=['GET', 'POST'])
 @login_required
@@ -1714,6 +2021,154 @@ def students_list():
         pending_count=pending_count,
         rejected_count=rejected_count
     )
+
+
+@app.route('/schedule/send-notification', methods=['POST'])
+@login_required
+def send_schedule_notification():
+    """Send notifications about schedule changes"""
+    try:
+        # Get form data
+        week_number = request.form.get('week_number')
+        recipient_type = request.form.get('recipient_type')
+        notification_group = request.form.get('notification_group')
+        title = request.form.get('title')
+        message = request.form.get('message')
+        sync_semester = request.form.get('sync_semester')
+        sync_group = request.form.get('sync_group')
+
+        # Prepare deep link to schedule in the app
+        deep_link = "app://schedule"
+
+        # Add semester and week to deep link if specified
+        if sync_semester:
+            deep_link += f"?semester={sync_semester}"
+            if week_number and week_number not in ['current', 'next', 'all']:
+                deep_link += f"&week={week_number}"
+
+        # Create filter data for recipients
+        filter_data = {}
+
+        if recipient_type == 'all_students':
+            filter_data['recipient_type'] = 'students'
+        elif recipient_type == 'specific_group' and notification_group:
+            filter_data['recipient_type'] = 'students'
+            filter_data['student_group'] = notification_group
+        else:
+            # Default to all students
+            filter_data['recipient_type'] = 'students'
+
+        # Get recipients based on filter
+        recipients, devices = get_notification_recipients(filter_data)
+
+        # Check if we have any recipients
+        if not recipients:
+            flash('Не найдено получателей для отправки уведомления', 'error')
+            return redirect(url_for('sync_schedule'))
+
+        # Получаем ID текущего администратора
+        admin_id = session.get('user_id')
+
+        # Send notifications to each recipient
+        success_count = 0
+        error_count = 0
+
+        # Дополнительные данные для уведомления
+        notification_data = {
+            'deep_link': deep_link,
+            'semester': sync_semester,
+            'week': week_number,
+            'group': sync_group or notification_group,
+            'timestamp': datetime.utcnow().isoformat()
+        }
+
+        # Отправляем уведомления каждому получателю
+        for user in recipients:
+            result = create_and_send_notification(
+                recipient_id=user.id,
+                title=title,
+                body=message,
+                notification_type='schedule',
+                sender_id=admin_id,
+                data=notification_data
+            )
+
+            if result.get('db_success'):
+                success_count += 1
+            else:
+                error_count += 1
+
+        flash(f'Уведомление об изменении расписания отправлено {success_count} пользователям', 'success')
+
+        # If there were errors, add an additional flash message
+        if error_count > 0:
+            flash(f'Не удалось отправить уведомление {error_count} пользователям', 'warning')
+
+        return redirect(url_for('schedule_list'))
+
+    except Exception as e:
+        flash(f'Ошибка при отправке уведомления: {str(e)}', 'error')
+        return redirect(url_for('sync_schedule'))
+
+
+@app.route('/teachers/create_account/<int:teacher_id>')
+@login_required
+def create_teacher_account(teacher_id):
+    try:
+        teacher = Teacher.query.get_or_404(teacher_id)
+
+        if teacher.has_account:
+            flash('У этого преподавателя уже есть учетная запись', 'warning')
+            return redirect(url_for('teachers_list'))
+
+        # Генерируем логин и пароль
+        username, password = Teacher.generate_credentials()
+
+        # Создаем нового пользователя
+        new_user = User(
+            username=username,
+            password=password,
+            is_admin=False
+        )
+
+        # Устанавливаем роль 'teacher' и другие важные поля
+        new_user.role = 'teacher'
+        new_user.full_name = teacher.name
+        new_user.verification_status = 'verified'  # Преподаватели не требуют верификации
+
+        # Если у преподавателя есть отдел, добавляем его в department поле в метаданных
+        if teacher.department:
+            new_user.faculty = teacher.department
+
+        db.session.add(new_user)
+        db.session.flush()  # чтобы получить ID пользователя
+
+        # Обновляем информацию о преподавателе
+        teacher.has_account = True
+        teacher.user_id = new_user.id
+
+        db.session.commit()
+
+        # Создаем уведомление для нового пользователя
+        create_and_send_notification(
+            recipient_id=new_user.id,
+            title="Добро пожаловать в MelSU Go!",
+            body=f"Для Вас создана учетная запись в приложении MelSU Go. Логин: {username}, пароль: {password}",
+            notification_type='system',
+            sender_id=session.get('user_id'),
+            data={
+                'username': username,
+                'is_welcome_message': True
+            }
+        )
+
+        flash(f'Создана учетная запись для {teacher.name}. Логин: {username}, Пароль: {password}', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при создании учетной записи: {str(e)}', 'error')
+        print(f"Ошибка при создании учетной записи: {str(e)}")
+
+    return redirect(url_for('teachers_list'))
 
 @app.route('/uploads/student_cards/admin/<filename>')
 @login_required

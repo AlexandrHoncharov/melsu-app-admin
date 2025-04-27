@@ -1,18 +1,18 @@
 import React, {useEffect, useState} from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  Linking,
-  Platform,
-  RefreshControl,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    Linking,
+    Platform,
+    RefreshControl,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useAuth} from '../../../hooks/useAuth';
@@ -638,7 +638,7 @@ export default function ProfileScreen() {
 
         {/* Footer Info */}
         <View style={styles.footerInfo}>
-          <Text style={styles.versionText}>Версия приложения 1.1.83</Text>
+            <Text style={styles.versionText}>Версия приложения 1.2</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

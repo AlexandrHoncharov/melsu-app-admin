@@ -1,27 +1,27 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  RefreshControl,
-  Alert,
-  SafeAreaView,
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
-  StatusBar,
   Platform,
-  ScrollView
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../hooks/useAuth';
-import { format, startOfWeek, endOfWeek, isToday, isSameDay, addDays } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { router, useFocusEffect } from 'expo-router';
+import {Ionicons} from '@expo/vector-icons';
+import {useAuth} from '../../hooks/useAuth';
+import {addDays, format, isSameDay, isToday, startOfWeek} from 'date-fns';
+import {ru} from 'date-fns/locale';
+import {router, useFocusEffect} from 'expo-router';
 import LessonDetailsModal from '../../components/LessonDetailsModal';
-import scheduleService, { ScheduleItem } from '../../src/services/scheduleService';
-import { GestureHandlerRootView, PanGestureHandler } from 'react-native-gesture-handler';
+import scheduleService, {ScheduleItem} from '../../src/services/scheduleService';
+import {GestureHandlerRootView, PanGestureHandler} from 'react-native-gesture-handler';
 
 // Get screen dimensions
 const { width } = Dimensions.get('window');
@@ -254,19 +254,13 @@ export default function ScheduleScreen() {
     } catch (error: any) {
       console.error('Error loading week schedule:', error);
 
-      // Handle authentication errors
+      // Handle authentication errors - silently allow redirect
       if (error.message && (
-        error.message.includes('Authentication required') ||
-        error.message.includes('session has expired')
+          error.message.includes('Authentication required') ||
+          error.message.includes('session has expired')
       )) {
-        Alert.alert(
-          'Authentication Error',
-          'Your session has expired. Please log in again.',
-          [{
-            text: 'OK',
-            onPress: () => router.replace('/login')
-          }]
-        );
+        console.log('Authentication issue detected in schedule screen');
+        // Do NOT show alert or call router.replace - the API interceptor will handle it
         return;
       }
 
@@ -310,18 +304,13 @@ export default function ScheduleScreen() {
         console.error('Error loading schedule from API:', error);
 
         // Handle authentication errors
+        // Handle authentication errors
         if (error.message && (
-          error.message.includes('Authentication required') ||
-          error.message.includes('session has expired')
+            error.message.includes('Authentication required') ||
+            error.message.includes('session has expired')
         )) {
-          Alert.alert(
-            'Authentication Error',
-            'Your session has expired. Please log in again.',
-            [{
-              text: 'OK',
-              onPress: () => router.replace('/login')
-            }]
-          );
+          console.log('Authentication issue detected in screen');
+          // Do NOT show alert - the API interceptor will handle redirection
           return;
         }
 
@@ -813,118 +802,122 @@ export default function ScheduleScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Schedule content with swipe support */}
-        <PanGestureHandler
-          onEnded={onSwipeHandler}
-          enabled={isSwipingAllowed && !isLoading && !refreshing}
-        >
-          <View style={styles.scheduleContainer}>
-            {isLoading ? (
+        {/* Schedule content with swipe support - FIXED FOR ANDROID SCROLLING */}
+        <View style={styles.scheduleContainer}>
+          {isLoading ? (
               renderLoading()
-            ) : schedule.length === 0 ? (
+          ) : schedule.length === 0 ? (
               renderEmptyList()
-            ) : (
-              <ScrollView
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onRefresh}
-                    colors={[COLORS.primary]}
-                    tintColor={COLORS.primary}
-                  />
-                }
+          ) : (
+              <PanGestureHandler
+                  onEnded={onSwipeHandler}
+                  enabled={isSwipingAllowed && !isLoading && !refreshing}
+                  activeOffsetX={[-20, 20]} // Only activate after moving 20px horizontally
+                  failOffsetY={[-20, 20]}   // Fail if moving 20px vertically first
               >
-                {schedule.map((timeSlot, index) => {
-                  // Check if class is active now
-                  const today = format(new Date(), 'yyyy-MM-dd');
-                  const isActive =
-                    timeSlot.lessons.some(l => l.isCurrentLesson) ||
-                    isLessonActive(timeSlot.timeStart, timeSlot.timeEnd, today);
+                <Animated.View>
+                  <ScrollView
+                      contentContainerStyle={styles.listContent}
+                      showsVerticalScrollIndicator={false}
+                      refreshControl={
+                        <RefreshControl
+                            refreshing={refreshing}
+                            onRefresh={onRefresh}
+                            colors={[COLORS.primary]}
+                            tintColor={COLORS.primary}
+                        />
+                      }
+                  >
+                    {schedule.map((timeSlot, index) => {
+                      // Check if class is active now
+                      const today = format(new Date(), 'yyyy-MM-dd');
+                      const isActive =
+                          timeSlot.lessons.some(l => l.isCurrentLesson) ||
+                          isLessonActive(timeSlot.timeStart, timeSlot.timeEnd, today);
 
-                  return (
-                    <Animated.View
-                      key={timeSlot.id || `time-${index}`}
-                      style={[
-                        styles.lessonCard,
-                        isActive && styles.activeLesson,
-                        {
-                          transform: [{ translateX: slideAnim }],
-                          opacity: fadeAnim
-                        }
-                      ]}
-                    >
-                      <View style={styles.timeContainer}>
-                        <Text style={[styles.timeText, isActive && styles.activeTimeText]}>
-                          {formatTime(timeSlot.timeStart)}
-                        </Text>
-                        <View style={styles.timeConnector}>
-                          <View style={[styles.timeLine, isActive && styles.activeTimeLine]} />
-                          <View style={[styles.timeCircle, isActive && styles.activeTimeCircle]} />
-                          <View style={[styles.timeLine, isActive && styles.activeTimeLine]} />
-                        </View>
-                        <Text style={[styles.timeText, isActive && styles.activeTimeText]}>
-                          {formatTime(timeSlot.timeEnd)}
-                        </Text>
-                        {isActive && <View style={styles.activeIndicator} />}
-                      </View>
-                      <View style={styles.lessonsContainer}>
-                        {timeSlot.lessons.map((lesson, lessonIndex) => (
-                          <View key={`${lesson.id || lessonIndex}-${lessonIndex}`}>
-                            {lessonIndex > 0 && <View style={styles.divider} />}
-                            <TouchableOpacity
-                              style={styles.lessonInfo}
-                              onPress={() => handleLessonSelect(lesson)}
-                              activeOpacity={0.7}
-                            >
-                              <View style={styles.lessonHeader}>
-                                <Text
-                                  style={[styles.subjectText, isActive && styles.activeSubjectText]}
-                                  numberOfLines={1}
-                                  ellipsizeMode="tail"
-                                >
-                                  {lesson.subject}
-                                </Text>
-                                <View
-                                  style={[
-                                    styles.lessonTypeBadge,
-                                    { backgroundColor: getLessonTypeColor(lesson.lessonType) }
-                                  ]}
-                                >
-                                  <Text style={styles.lessonTypeText}>{lesson.lessonType}</Text>
-                                </View>
-                              </View>
-                              <Text style={styles.detailsText}>
-                                {lesson.auditory}
-                                {lesson.subgroup > 0 && ` • Подгруппа ${lesson.subgroup}`}
+                      return (
+                          <Animated.View
+                              key={timeSlot.id || `time-${index}`}
+                              style={[
+                                styles.lessonCard,
+                                isActive && styles.activeLesson,
+                                {
+                                  transform: [{translateX: slideAnim}],
+                                  opacity: fadeAnim
+                                }
+                              ]}
+                          >
+                            <View style={styles.timeContainer}>
+                              <Text style={[styles.timeText, isActive && styles.activeTimeText]}>
+                                {formatTime(timeSlot.timeStart)}
                               </Text>
-                              {user?.role === 'student' ? (
-                                <Text style={styles.teacherText}>
-                                  {lesson.teacherName}
-                                </Text>
-                              ) : (
-                                <Text
-                                  style={styles.groupsText}
-                                  numberOfLines={2}
-                                  ellipsizeMode="tail"
-                                >
-                                  {lesson.groups && lesson.groups.length > 1
-                                    ? `Группы: ${lesson.groupName}`
-                                    : `Группа: ${lesson.groupName}`}
-                                </Text>
-                              )}
-                            </TouchableOpacity>
-                          </View>
-                        ))}
-                      </View>
-                    </Animated.View>
-                  );
-                })}
-              </ScrollView>
-            )}
-          </View>
-        </PanGestureHandler>
+                              <View style={styles.timeConnector}>
+                                <View style={[styles.timeLine, isActive && styles.activeTimeLine]}/>
+                                <View style={[styles.timeCircle, isActive && styles.activeTimeCircle]}/>
+                                <View style={[styles.timeLine, isActive && styles.activeTimeLine]}/>
+                              </View>
+                              <Text style={[styles.timeText, isActive && styles.activeTimeText]}>
+                                {formatTime(timeSlot.timeEnd)}
+                              </Text>
+                              {isActive && <View style={styles.activeIndicator}/>}
+                            </View>
+                            <View style={styles.lessonsContainer}>
+                              {timeSlot.lessons.map((lesson, lessonIndex) => (
+                                  <View key={`${lesson.id || lessonIndex}-${lessonIndex}`}>
+                                    {lessonIndex > 0 && <View style={styles.divider}/>}
+                                    <TouchableOpacity
+                                        style={styles.lessonInfo}
+                                        onPress={() => handleLessonSelect(lesson)}
+                                        activeOpacity={0.7}
+                                    >
+                                      <View style={styles.lessonHeader}>
+                                        <Text
+                                            style={[styles.subjectText, isActive && styles.activeSubjectText]}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                          {lesson.subject}
+                                        </Text>
+                                        <View
+                                            style={[
+                                              styles.lessonTypeBadge,
+                                              {backgroundColor: getLessonTypeColor(lesson.lessonType)}
+                                            ]}
+                                        >
+                                          <Text style={styles.lessonTypeText}>{lesson.lessonType}</Text>
+                                        </View>
+                                      </View>
+                                      <Text style={styles.detailsText}>
+                                        {lesson.auditory}
+                                        {lesson.subgroup > 0 && ` • Подгруппа ${lesson.subgroup}`}
+                                      </Text>
+                                      {user?.role === 'student' ? (
+                                          <Text style={styles.teacherText}>
+                                            {lesson.teacherName}
+                                          </Text>
+                                      ) : (
+                                          <Text
+                                              style={styles.groupsText}
+                                              numberOfLines={2}
+                                              ellipsizeMode="tail"
+                                          >
+                                            {lesson.groups && lesson.groups.length > 1
+                                                ? `Группы: ${lesson.groupName}`
+                                                : `Группа: ${lesson.groupName}`}
+                                          </Text>
+                                      )}
+                                    </TouchableOpacity>
+                                  </View>
+                              ))}
+                            </View>
+                          </Animated.View>
+                      );
+                    })}
+                  </ScrollView>
+                </Animated.View>
+              </PanGestureHandler>
+          )}
+        </View>
 
         {/* Banner for unverified students */}
         {user?.role === 'student' && user?.verificationStatus !== 'verified' && (

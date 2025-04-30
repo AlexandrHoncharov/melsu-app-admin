@@ -3,7 +3,7 @@ module.exports = {
   "expo": {
     "name": "MelSU Go",
     "slug": "melsu",
-    "version": "1.2",
+    "version": "1.2.1",
     "orientation": "portrait",
     "description": "MelSU Go — официальное мобильное приложение для студентов и преподавателей Мелитопольского государственного университета.\n" +
         "            Приложение разработано для удобного доступа к расписанию занятий, общения между студентами и преподавателями,\n" +
@@ -27,7 +27,15 @@ module.exports = {
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.melsu.app"
+      "bundleIdentifier": "com.melsu.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"],
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Приложению требуется доступ к камере для съемки фото и загрузки студенческого билета",
+        "NSPhotoLibraryUsageDescription": "Приложению требуется доступ к галерее для выбора фото студенческого билета"
+      },
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -45,17 +53,29 @@ module.exports = {
       ]
     },
     "plugins": [
-  "expo-router",
-  [
-    "expo-notifications",
-    {
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/notification-icon.png",
+          "color": "#770002",
+          "sounds": ["./assets/sounds/notification.wav"]
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ]
+    ],
+    "notification": {
       "icon": "./assets/images/notification-icon.png",
       "color": "#770002",
-      "sounds": ["./assets/sounds/notification.wav"]
-    }
-  ]
-],
-
+      "iosDisplayInForeground": true
+    },
     "experiments": {
       "typedRoutes": true
     }

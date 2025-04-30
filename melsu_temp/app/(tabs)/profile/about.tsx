@@ -57,7 +57,7 @@ export default function AboutScreen() {
             <Text style={styles.logoTextUniversity}>Go</Text>
           </View>
           <Text style={styles.appName}>MelSU Go</Text>
-            <Text style={styles.appVersion}>Версия 1.2</Text>
+            <Text style={styles.appVersion}>Версия 1.2.1</Text>
         </View>
 
         {/* App Description */}

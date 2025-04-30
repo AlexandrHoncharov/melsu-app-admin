@@ -728,64 +728,7 @@ def utility_processor():
         'hasattr': hasattr,  # Make hasattr available in templates
     }
 
-@app.route('/teachers/create_account/<int:teacher_id>')
-@login_required
-def create_teacher_account(teacher_id):
-    try:
-        teacher = Teacher.query.get_or_404(teacher_id)
 
-        if teacher.has_account:
-            flash('У этого преподавателя уже есть учетная запись', 'warning')
-            return redirect(url_for('teachers_list'))
-
-        # Генерируем логин и пароль
-        username, password = Teacher.generate_credentials()
-
-        # Создаем нового пользователя
-        new_user = User(
-            username=username,
-            password=password,
-            is_admin=False
-        )
-
-        # Устанавливаем роль 'teacher' и другие важные поля
-        new_user.role = 'teacher'
-        new_user.full_name = teacher.name
-        new_user.verification_status = 'verified'  # Преподаватели не требуют верификации
-
-        # Если у преподавателя есть отдел, добавляем его в department поле в метаданных
-        if teacher.department:
-            new_user.faculty = teacher.department
-
-        db.session.add(new_user)
-        db.session.flush()  # чтобы получить ID пользователя
-
-        # Обновляем информацию о преподавателе
-        teacher.has_account = True
-        teacher.user_id = new_user.id
-
-        db.session.commit()
-
-        # Создаем уведомление для нового пользователя
-        create_and_send_notification(
-            recipient_id=new_user.id,
-            title="Добро пожаловать в MelSU Go!",
-            body=f"Для Вас создана учетная запись в приложении MelSU Go. Логин: {username}, пароль: {password}",
-            notification_type='system',
-            sender_id=session.get('user_id'),
-            data={
-                'username': username,
-                'is_welcome_message': True
-            }
-        )
-
-        flash(f'Создана учетная запись для {teacher.name}. Логин: {username}, Пароль: {password}', 'success')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'Ошибка при создании учетной записи: {str(e)}', 'error')
-        print(f"Ошибка при создании учетной записи: {str(e)}")
-
-    return redirect(url_for('teachers_list'))
 
 
 # Добавьте следующие маршруты в файл app.py
@@ -1191,6 +1134,71 @@ def get_ticket_attachment_admin(filename):
     except Exception as e:
         flash(f'Ошибка при получении файла: {str(e)}', 'error')
         return redirect(url_for('tickets_list'))
+
+
+@app.route('/api/notifications/send-personal', methods=['POST'])
+@login_required
+def send_personal_notification():
+    """Отправляет персональное уведомление конкретному пользователю"""
+    try:
+        data = request.json
+
+        # Проверяем обязательные поля
+        required_fields = ['user_id', 'title', 'message']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    'message': f'Missing required field: {field}',
+                    'success': False
+                }), 400
+
+        # Получаем данные
+        user_id = data.get('user_id')
+        title = data.get('title')
+        message = data.get('message')
+
+        # Проверяем, что пользователь существует
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({
+                'message': 'User not found',
+                'success': False
+            }), 404
+
+        # Отправляем уведомление
+        admin_id = session.get('user_id')
+        result = create_and_send_notification(
+            recipient_id=user_id,
+            title=title,
+            body=message,
+            notification_type='personal',
+            sender_id=admin_id,
+            data={
+                'admin_id': admin_id,
+                'custom_data': data.get('custom_data')
+            }
+        )
+
+        if result.get('db_success'):
+            return jsonify({
+                'message': 'Notification sent successfully',
+                'notification_id': result.get('notification_id'),
+                'push_success': result.get('push_success'),
+                'success': True
+            }), 200
+        else:
+            return jsonify({
+                'message': 'Failed to send notification',
+                'error': result.get('error'),
+                'success': False
+            }), 500
+
+    except Exception as e:
+        print(f"Error sending personal notification: {str(e)}")
+        return jsonify({
+            'message': f'Error: {str(e)}',
+            'success': False
+        }), 500
 
 @app.route('/teachers/view_credentials/<int:teacher_id>')
 @login_required

@@ -638,7 +638,7 @@ export default function ProfileScreen() {
 
         {/* Footer Info */}
         <View style={styles.footerInfo}>
-            <Text style={styles.versionText}>Версия приложения 1.2</Text>
+            <Text style={styles.versionText}>Версия приложения 1.2.1</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

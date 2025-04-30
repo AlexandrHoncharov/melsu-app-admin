@@ -2,7 +2,7 @@
   "expo": {
     "name": "Университет",
     "slug": "melsu",
-    "version": "1.2",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "melsu",
@@ -30,8 +30,14 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.melsu.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "buildNumber": "1",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ],
+        "NSCameraUsageDescription": "Приложению требуется доступ к камере для съемки фото и загрузки студенческого билета",
+        "NSPhotoLibraryUsageDescription": "Приложению требуется доступ к галерее для выбора фото студенческого билета"
       }
     },
     "android": {
@@ -94,7 +100,15 @@
         }
       ],
       "expo-device",
-      "expo-media-library"
+      "expo-media-library",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ]
     ],
     "notification": {
       "icon": "./assets/images/notification-icon.png",

@@ -5,19 +5,25 @@ import { useAuth } from '../../hooks/useAuth';
 import { useUnreadMessages } from '../../hooks/useUnreadMessages';
 import { StyleSheet, View, Text, AppState } from 'react-native';
 import chatService from '../../src/services/chatService';
+import apiClient from '../../src/api/apiClient';
 
 export default function TabLayout() {
   const { isAuthenticated, isLoading } = useAuth();
   const { unreadCount, refreshUnreadCount } = useUnreadMessages();
   const [localUnreadCount, setLocalUnreadCount] = useState(unreadCount || 0);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const appState = useRef(AppState.currentState);
   const isMountedRef = useRef(true);
   const lastUpdateRef = useRef(0);
   const updateTimeoutRef = useRef(null); // Для таймаута обновления
+  const notificationCheckIntervalRef = useRef(null); // Для интервала проверки уведомлений
   const currentPath = usePathname();
 
   // Определение, находимся ли мы на экране чатов
   const isOnChatsScreen = currentPath?.includes('/chats');
+
+  // Определение, находимся ли мы на экране уведомлений
+  const isOnNotificationsScreen = currentPath?.includes('/notifications');
 
   // Проверяем, авторизован ли пользователь
   useEffect(() => {
@@ -98,6 +104,26 @@ export default function TabLayout() {
     }
   };
 
+  // Функция для получения количества непрочитанных уведомлений
+  const fetchUnreadNotifications = async (force = false) => {
+    if (!isAuthenticated || isLoading) return;
+
+    try {
+      // Защита от слишком частых вызовов
+      const now = Date.now();
+      if (!force && now - lastUpdateRef.current < 10000) {
+        return;
+      }
+
+      const response = await apiClient.get('/notifications/unread-count');
+      if (response.data && response.data.success) {
+        setUnreadNotifications(response.data.unread_count);
+      }
+    } catch (error) {
+      console.error('Ошибка при получении непрочитанных уведомлений:', error);
+    }
+  };
+
   // Эффект для отслеживания изменения пути и немедленного обновления при переходе на экран чатов
   useEffect(() => {
     // Если путь изменился и теперь это экран чатов, сразу обновляем счетчик
@@ -105,7 +131,16 @@ export default function TabLayout() {
       console.log('Переход на экран чатов, немедленно обновляем счетчик');
       updateUnreadCount(true);
     }
-  }, [isOnChatsScreen, isAuthenticated, isLoading]);
+
+    // Если путь изменился и теперь это экран уведомлений, обнуляем счетчик
+    if (isOnNotificationsScreen && isAuthenticated && !isLoading) {
+      console.log('Переход на экран уведомлений, сбрасываем счетчик');
+      setUnreadNotifications(0);
+    } else if (!isOnNotificationsScreen && isAuthenticated && !isLoading) {
+      // Если мы ушли с экрана уведомлений, обновляем счетчик
+      fetchUnreadNotifications(true);
+    }
+  }, [isOnChatsScreen, isOnNotificationsScreen, isAuthenticated, isLoading]);
 
   // Эффект для управления интервалом обновления с учетом активного экрана
   useEffect(() => {
@@ -118,6 +153,7 @@ export default function TabLayout() {
     const initialUpdateTimeout = setTimeout(() => {
       if (isMountedRef.current) {
         updateUnreadCount(true);
+        fetchUnreadNotifications(true);
       }
     }, 1000); // Даем 1 секунду для загрузки UI и других компонентов
 
@@ -134,6 +170,15 @@ export default function TabLayout() {
       }
     }, intervalTime);
 
+    // Устанавливаем интервал для проверки уведомлений
+    const notificationInterval = setInterval(() => {
+      if (isMountedRef.current && !isOnNotificationsScreen) {
+        fetchUnreadNotifications();
+      }
+    }, 60000); // Проверяем раз в минуту
+
+    notificationCheckIntervalRef.current = notificationInterval;
+
     // Обработчик изменения состояния приложения
     const handleAppStateChange = (nextAppState) => {
       if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
@@ -142,6 +187,7 @@ export default function TabLayout() {
         setTimeout(() => {
           if (isMountedRef.current) {
             updateUnreadCount(true);
+            fetchUnreadNotifications(true);
           }
         }, 500);
       }
@@ -156,6 +202,10 @@ export default function TabLayout() {
       isMountedRef.current = false;
       clearTimeout(initialUpdateTimeout);
       clearInterval(intervalId);
+      if (notificationCheckIntervalRef.current) {
+        clearInterval(notificationCheckIntervalRef.current);
+        notificationCheckIntervalRef.current = null;
+      }
       appStateSubscription.remove();
 
       // Очищаем таймаут обновления, если он был установлен
@@ -164,7 +214,7 @@ export default function TabLayout() {
         updateTimeoutRef.current = null;
       }
     };
-  }, [isAuthenticated, isLoading, isOnChatsScreen]);
+  }, [isAuthenticated, isLoading, isOnChatsScreen, isOnNotificationsScreen]);
 
   // Синхронизация со значением из хука useUnreadMessages
   useEffect(() => {
@@ -178,7 +228,7 @@ export default function TabLayout() {
     return null;
   }
 
-  // Custom badge component
+  // Custom badge component for Chat tab
   const ChatTabIcon = ({ color, size, focused }) => (
     <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
       <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} color={color} size={size} />
@@ -192,6 +242,22 @@ export default function TabLayout() {
         </View>
       )}
     </View>
+  );
+
+  // Custom badge component for Notifications tab
+  const NotificationsTabIcon = ({color, size, focused}) => (
+      <View style={{width: size, height: size, justifyContent: 'center', alignItems: 'center'}}>
+        <Ionicons name={focused ? "notifications" : "notifications-outline"} color={color} size={size}/>
+        {unreadNotifications > 0 && (
+            <View style={styles.badgeContainer}>
+              {unreadNotifications > 99 ? (
+                  <Text style={styles.badgeText}>99+</Text>
+              ) : (
+                  <Text style={styles.badgeText}>{unreadNotifications}</Text>
+              )}
+            </View>
+        )}
+      </View>
   );
 
   return (
@@ -237,6 +303,20 @@ export default function TabLayout() {
             <Ionicons name="tennisball-outline" color={color} size={size} />
           ),
         }}
+      />
+
+      {/* Notifications tab */}
+      <Tabs.Screen
+          name="notifications"
+          options={{
+            title: 'Уведомления',
+            tabBarIcon: (props) => <NotificationsTabIcon {...props} />,
+            tabBarOnPress: ({navigation, defaultHandler}) => {
+              // Reset unread count when pressing the tab
+              setUnreadNotifications(0);
+              defaultHandler();
+            }
+          }}
       />
 
       <Tabs.Screen

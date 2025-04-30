@@ -2961,69 +2961,7 @@ def send_push_notification(current_user):
         }), 500
 
 
-@app.route('/api/notifications/send-personal', methods=['POST'])
-@login_required
-def send_personal_notification():
-    """Отправляет персональное уведомление конкретному пользователю"""
-    try:
-        data = request.json
 
-        # Проверяем обязательные поля
-        required_fields = ['user_id', 'title', 'message']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({
-                    'message': f'Missing required field: {field}',
-                    'success': False
-                }), 400
-
-        # Получаем данные
-        user_id = data.get('user_id')
-        title = data.get('title')
-        message = data.get('message')
-
-        # Проверяем, что пользователь существует
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({
-                'message': 'User not found',
-                'success': False
-            }), 404
-
-        # Отправляем уведомление
-        admin_id = session.get('user_id')
-        result = create_and_send_notification(
-            recipient_id=user_id,
-            title=title,
-            body=message,
-            notification_type='personal',
-            sender_id=admin_id,
-            data={
-                'admin_id': admin_id,
-                'custom_data': data.get('custom_data')
-            }
-        )
-
-        if result.get('db_success'):
-            return jsonify({
-                'message': 'Notification sent successfully',
-                'notification_id': result.get('notification_id'),
-                'push_success': result.get('push_success'),
-                'success': True
-            }), 200
-        else:
-            return jsonify({
-                'message': 'Failed to send notification',
-                'error': result.get('error'),
-                'success': False
-            }), 500
-
-    except Exception as e:
-        print(f"Error sending personal notification: {str(e)}")
-        return jsonify({
-            'message': f'Error: {str(e)}',
-            'success': False
-        }), 500
 
 
 # Enhanced device registration endpoint for api.py

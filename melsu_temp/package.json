@@ -64,7 +64,8 @@
     "react-native-webview": "13.12.5",
     "expo-network": "~7.0.5",
     "expo-clipboard": "~7.0.1",
-    "expo-dev-client": "~5.0.20"
+    "expo-dev-client": "~5.0.20",
+    "expo-build-properties": "~0.13.2"
   },
   "devDependencies": {
     "@babel/core": "^7.26.10",

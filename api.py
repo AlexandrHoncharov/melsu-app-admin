@@ -3,8 +3,7 @@ import os
 import uuid
 from functools import wraps
 from urllib.parse import unquote
-import os
-import re
+
 import firebase_admin
 import jwt
 import requests
@@ -84,7 +83,7 @@ def token_required(f):
 
 
 def validate_fcm_token(token):
-    """Проверяет формат и тип токена для уведомлений"""
+    """Проверяет формат и тип токена для уведомлений с поддержкой iOS токенов"""
     if not token:
         return False
 
@@ -99,41 +98,82 @@ def validate_fcm_token(token):
     is_expo = token.startswith('ExponentPushToken[')
     is_fcm_format = bool(re.match(r'^[a-zA-Z0-9:_-]+$', token))
 
+    # Проверяем характерные признаки APNs токена (начинается с определенных символов)
+    is_apns_format = len(token) > 64 and any([
+        token.startswith('APNS_'),  # Старый формат
+        token.startswith('apns_'),  # Старый формат (нижний регистр)
+        re.match(r'^[a-f0-9]{64,}$', token)  # Новый формат (hex-строка)
+    ])
+
     print(f"💫 ПРОВЕРКА ТОКЕНА: {token_preview}")
     print(f"   - Длина токена: {len(token)} символов")
     print(f"   - Похож на JWT: {is_jwt}")
     print(f"   - Похож на Expo token: {is_expo}")
+    print(f"   - Похож на APNs token: {is_apns_format}")
     print(f"   - Соответствует формату FCM: {is_fcm_format}")
 
     if is_jwt:
-        print(f"   ❌ ОШИБКА: Получен JWT-токен аутентификации вместо FCM-токена")
+        print(f"   ❌ ОШИБКА: Получен JWT-токен аутентификации вместо токена уведомлений")
         return False
     elif is_expo:
-        print(f"   ⚠️ ВНИМАНИЕ: Получен Expo token, может не работать с Firebase Admin SDK")
-        # Для Expo токенов требуется другой сервис отправки
-        return False
+        # ИСПРАВЛЕНИЕ: Принимаем Expo токены как валидные
+        print(f"   ✅ Expo токен принят как валидный")
+        return True
+    elif is_apns_format:
+        # ИСПРАВЛЕНИЕ: Принимаем APNs токены, если они будут обрабатываться через API Expo
+        print(f"   ✅ APNs токен принят как валидный (будет обрабатываться через Expo API)")
+        return True
     elif not is_fcm_format:
-        print(f"   ❌ ОШИБКА: Токен не соответствует формату FCM")
+        print(f"   ❌ ОШИБКА: Токен не соответствует ни одному из известных форматов")
         return False
 
     return True
 
 
-# Замените или модифицируйте блок инициализации Firebase (найдите этот код в вашем файле)
+def find_firebase_config():
+    """Ищет файл конфигурации Firebase в разных путях"""
+    possible_paths = [
+        'firebase.json',  # Текущая директория
+        '../firebase.json',  # Родительская директория
+        os.path.join(os.path.dirname(__file__), 'firebase.json'),  # Директория скрипта
+        '/app/firebase.json',  # Типичное расположение в Docker
+        os.path.expanduser('~/firebase.json')  # Домашняя директория
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            print(f"   ✅ Найден файл конфигурации Firebase: {path}")
+            return path
+
+    return None
+
+
+# Замените или модифицируйте блок инициализации Firebase
 try:
     print(f"📱 Попытка инициализации Firebase Admin SDK")
-    print(f"   - Текущая директория: {os.getcwd()}")
-    print(f"   - Путь к файлу: {os.path.abspath('firebase.json')}")
-    print(f"   - Файл существует: {os.path.exists('firebase.json')}")
 
-    if not os.path.exists('firebase.json'):
-        print(f"   ❌ ОШИБКА: Файл firebase.json не найден!")
-        raise FileNotFoundError("Файл firebase.json не найден")
+    # Поиск файла конфигурации
+    firebase_config_path = find_firebase_config()
 
-    cred = credentials.Certificate('firebase.json')
-    firebase_admin.initialize_app(cred)
-    print(f"   ✅ Firebase Admin SDK успешно инициализирован")
-    FIREBASE_AVAILABLE = True
+    if firebase_config_path:
+        print(f"   - Использую файл конфигурации: {firebase_config_path}")
+        cred = credentials.Certificate(firebase_config_path)
+        firebase_admin.initialize_app(cred)
+        print(f"   ✅ Firebase Admin SDK успешно инициализирован через файл конфигурации")
+        FIREBASE_AVAILABLE = True
+    else:
+        print(f"   ⚠️ Файл firebase.json не найден, попытка использования переменных окружения")
+
+        # Попытка инициализации через переменные окружения
+        # Это может работать в некоторых средах, где учетные данные предоставляются иначе
+        try:
+            firebase_admin.initialize_app()
+            print(f"   ✅ Firebase Admin SDK успешно инициализирован через переменные окружения")
+            FIREBASE_AVAILABLE = True
+        except Exception as env_error:
+            print(f"   ❌ Не удалось инициализировать через переменные окружения: {str(env_error)}")
+            raise  # Пробрасываем ошибку дальше
+
 except Exception as e:
     print(f"   ❌ ОШИБКА инициализации Firebase Admin SDK: {str(e)}")
     print(f"   - Тип ошибки: {type(e).__name__}")
@@ -142,6 +182,7 @@ except Exception as e:
     traceback.print_exc()
     FIREBASE_AVAILABLE = False
     print(f"   ⚠️ Уведомления FCM отключены из-за ошибки")
+    print(f"   ℹ️ Уведомления Expo будут работать независимо от Firebase")
 
 @app.route('/api/news', methods=['GET'])
 def get_news():
@@ -2637,7 +2678,7 @@ def internal_error(error):
 
 
 def send_push_message(token, title, message, data=None):
-    """Send push notification using Firebase Cloud Messaging or Expo Push service"""
+    """Отправка push-уведомления через Firebase Cloud Messaging или Expo Push service с улучшенной поддержкой iOS"""
     # Создаем безопасную копию data для вывода в логи
     safe_data = {**data} if data else {}
     if 'token' in safe_data:
@@ -2648,17 +2689,22 @@ def send_push_message(token, title, message, data=None):
     print(f"   - Сообщение: {message}")
     print(f"   - Данные: {safe_data}")
 
-    # Получаем тип токена из данных, если он есть
+    # Получаем тип токена и платформу из данных
     token_type = safe_data.get('tokenType', 'unknown')
+    platform = safe_data.get('platform', 'unknown')
+    is_ios = platform.lower() == 'ios'
+
     print(f"   - Тип токена: {token_type}")
+    print(f"   - Платформа: {platform}")
 
     # Проверяем тип токена напрямую по его формату
     is_expo_token = token.startswith('ExponentPushToken[')
     is_jwt_token = token.count('.') == 2 and token.startswith('ey')
 
-    # Если токен - Expo токен или тип указан явно как 'expo'
-    if is_expo_token or token_type == 'expo':
-        print(f"   📱 Обнаружен Expo токен, используем Expo Push API")
+    # ВАЖНОЕ ИЗМЕНЕНИЕ: Всегда отправляем iOS-уведомления через Expo Push API
+    # Это более надежный способ для iOS, даже если токен выглядит как FCM
+    if is_expo_token or token_type == 'expo' or (is_ios and not is_jwt_token):
+        print(f"   📱 {'Обнаружен Expo токен' if is_expo_token else 'iOS устройство'}, используем Expo Push API")
         try:
             # Импортируем необходимые модули
             import uuid
@@ -2666,7 +2712,7 @@ def send_push_message(token, title, message, data=None):
             import json
             from datetime import datetime
 
-            # Формируем запрос для Expo Push API
+            # Создаем улучшенный запрос для iOS
             expo_message = {
                 'to': token,
                 'title': title,
@@ -2675,13 +2721,22 @@ def send_push_message(token, title, message, data=None):
                 'sound': 'default'
             }
 
-            # Для iOS добавляем дополнительные параметры
-            if data and data.get('platform') == 'ios':
+            # Добавляем специальные параметры для iOS, которые решают проблемы с отображением
+            if is_ios:
+                print(f"   ℹ️ Добавляем специальные параметры для iOS")
                 expo_message.update({
-                    'badge': 1,
-                    'priority': 'high',
-                    '_displayInForeground': True
+                    'subtitle': data.get('subtitle', ''),  # Подзаголовок для iOS
+                    'badge': 1,  # Значок с числом
+                    'priority': 'high',  # Высокий приоритет
+                    '_displayInForeground': True,  # Показывать, даже если приложение активно
+                    'mutableContent': True,  # Разрешать модификацию уведомления
+                    'categoryId': data.get('type', 'default'),  # Категория уведомления
+                    'channelId': data.get('type', 'default')  # Android channel для совместимости
                 })
+
+                # Добавляем параметр content-available для пробуждения приложения
+                if "content_available" not in expo_message:
+                    expo_message['contentAvailable'] = True
 
             print(f"   📤 Отправка Expo уведомления: {json.dumps(expo_message)[:100]}...")
 
@@ -2694,32 +2749,41 @@ def send_push_message(token, title, message, data=None):
                     'Accept-encoding': 'gzip, deflate',
                     'Content-Type': 'application/json',
                 },
-                timeout=10
+                timeout=15  # Увеличиваем таймаут до 15 секунд
             )
 
-            # Проверяем ответ
+            # Улучшенная проверка ответа
             if response.status_code == 200:
                 response_data = response.json()
-                print(f"   ✅ Expo Push уведомление отправлено: {response_data}")
+                print(f"   ✅ Expo Push API ответ: {response_data}")
 
-                # ИСПРАВЛЕНИЕ: Проверка структуры ответа от Expo API
-                if (response_data.get('data') and
-                        isinstance(response_data['data'], dict) and
-                        response_data['data'].get('status') == 'ok'):
-                    # Успешный ответ в новом формате (одиночное сообщение)
-                    ticket_id = response_data['data'].get('id', str(uuid.uuid4()))
-                    return {"success": True, "message_id": f"expo_{ticket_id}"}
-                elif (response_data.get('data') and
-                      isinstance(response_data['data'], list) and
-                      len(response_data['data']) > 0 and
-                      response_data['data'][0].get('status') == 'ok'):
-                    # Успешный ответ в старом формате (список сообщений)
-                    ticket_id = response_data['data'][0].get('id', str(uuid.uuid4()))
-                    return {"success": True, "message_id": f"expo_{ticket_id}"}
+                # Улучшенная проверка структуры ответа
+                if 'data' in response_data:
+                    # Проверка на разные версии API
+                    if isinstance(response_data['data'], list) and len(response_data['data']) > 0:
+                        # Формат списка
+                        success = response_data['data'][0].get('status') == 'ok'
+                        ticket_id = response_data['data'][0].get('id', str(uuid.uuid4()))
+                    elif isinstance(response_data['data'], dict) and response_data['data'].get('status') == 'ok':
+                        # Формат объекта
+                        success = True
+                        ticket_id = response_data['data'].get('id', str(uuid.uuid4()))
+                    else:
+                        success = False
+                        ticket_id = str(uuid.uuid4())
+                        print(f"   ⚠️ Неожиданный формат ответа: {response_data}")
                 else:
-                    # Если мы не можем определить статус, но получили 200 OK
+                    # Нельзя определить успех, но статус 200
+                    success = True
+                    ticket_id = str(uuid.uuid4())
                     print(f"   ⚠️ Необычный формат ответа Expo API, но статус 200. Считаем успехом.")
-                    return {"success": True, "message_id": f"expo_{str(uuid.uuid4())}"}
+
+                if success:
+                    print(f"   ✅ Expo Push уведомление успешно отправлено, ticket_id={ticket_id}")
+                else:
+                    print(f"   ⚠️ Expo Push API вернул статус 200, но сообщение может быть не доставлено")
+
+                return {"success": success, "message_id": f"expo_{ticket_id}"}
             else:
                 print(f"   ❌ Ошибка отправки через Expo: {response.status_code}, {response.text}")
                 return {"success": False, "error": f"Expo API error: {response.status_code}"}
@@ -2732,18 +2796,86 @@ def send_push_message(token, title, message, data=None):
     # Проверяем, что это не JWT токен аутентификации
     elif is_jwt_token:
         print(f"   ❌ Ошибка: Получен JWT токен аутентификации вместо push-токена")
-        return {"success": False, "error": "The token is a JWT authentication token, not a push token"}
+        return {"success": False, "error": "Токен является токеном аутентификации JWT, а не push-токеном"}
 
     # Проверяем, доступен ли Firebase для FCM токенов
     elif not FIREBASE_AVAILABLE:
-        print(f"   ❌ Firebase Admin SDK не доступен. Уведомление не отправлено.")
-        return {"success": False, "message": "Firebase недоступен"}
+        print(f"   ❌ Firebase Admin SDK не доступен. Попытка отправки через Expo API.")
+        # Пробуем отправить через Expo API как запасной вариант
+        try:
+            import requests
+            import json
+            import uuid
+
+            # Создаем простой запрос для Expo Push API
+            expo_fallback_message = {
+                'to': token,
+                'title': title,
+                'body': message,
+                'data': data or {},
+                'sound': 'default'
+            }
+
+            response = requests.post(
+                'https://exp.host/--/api/v2/push/send',
+                json=expo_fallback_message,
+                headers={
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                print(f"   ✅ Запасной вариант через Expo API сработал!")
+                return {"success": True, "message_id": f"expo_fallback_{str(uuid.uuid4())}"}
+            else:
+                print(f"   ❌ Запасной вариант через Expo API не сработал: {response.status_code}")
+                return {"success": False, "message": "Firebase недоступен и запасной вариант не сработал"}
+        except Exception as fallback_error:
+            print(f"   ❌ Ошибка при использовании запасного варианта: {str(fallback_error)}")
+            return {"success": False, "message": "Firebase недоступен"}
 
     # Для токенов APNs нужна специальная обработка
     elif token_type == 'apns':
-        print(f"   ⚠️ Получен нативный APNs токен, который не может быть использован Firebase напрямую")
-        print(f"   ℹ️ Рекомендуется использовать Expo токены для iOS устройств")
-        return {"success": False, "error": "APNs tokens not supported directly. Use Expo tokens for iOS"}
+        print(f"   ⚠️ Получен нативный APNs токен, пробуем отправить через Expo API")
+        try:
+            import requests
+            import json
+
+            # Попытка отправки APNs токена через Expo
+            response = requests.post(
+                'https://exp.host/--/api/v2/push/send',
+                json={
+                    'to': token,
+                    'title': title,
+                    'body': message,
+                    'data': data or {},
+                    '_apnsToken': token,  # Специальный параметр для прямого APNs токена
+                    'sound': 'default'
+                },
+                headers={
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                print(f"   ✅ Отправка APNs токена через Expo API успешна!")
+                return {"success": True, "message": "APNs token sent via Expo API"}
+            else:
+                print(f"   ❌ Ошибка отправки APNs токена: {response.status_code}")
+                return {
+                    "success": False,
+                    "error": "APNs tokens not supported directly. Use Expo tokens for iOS"
+                }
+        except Exception as apns_error:
+            print(f"   ❌ Ошибка при отправке APNs токена: {str(apns_error)}")
+            return {
+                "success": False,
+                "error": "Error sending APNs token: " + str(apns_error)
+            }
 
     # Для остальных типов используем Firebase FCM
     else:
@@ -2766,6 +2898,7 @@ def send_push_message(token, title, message, data=None):
             )
 
             # Настройки для iOS (через FCM)
+            # УЛУЧШЕННАЯ КОНФИГУРАЦИЯ для iOS
             apns_config = messaging.APNSConfig(
                 payload=messaging.APNSPayload(
                     aps=messaging.Aps(
@@ -2814,8 +2947,47 @@ def send_push_message(token, title, message, data=None):
             print(f"   - Тип ошибки: {type(e).__name__}")
             import traceback
             traceback.print_exc()
-            return {"success": False, "error": str(e)}
 
+            # Если FCM не сработал для iOS, пробуем через Expo API как запасной вариант
+            if is_ios:
+                print(f"   🔄 Попытка отправки iOS уведомления через Expo API в качестве запасного варианта")
+                try:
+                    import requests
+                    import json
+
+                    # Создаем запрос для Expo Push API
+                    expo_backup_message = {
+                        'to': token,
+                        'title': title,
+                        'body': message,
+                        'data': data or {},
+                        'sound': 'default',
+                        'badge': 1,
+                        '_displayInForeground': True,
+                        'priority': 'high'
+                    }
+
+                    response = requests.post(
+                        'https://exp.host/--/api/v2/push/send',
+                        json=expo_backup_message,
+                        headers={
+                            'Accept': 'application/json',
+                            'Content-Type': 'application/json',
+                        },
+                        timeout=10
+                    )
+
+                    if response.status_code == 200:
+                        print(f"   ✅ Запасная отправка через Expo успешна!")
+                        return {"success": True, "message_id": "expo_backup_" + str(uuid.uuid4())}
+                    else:
+                        # Если и этот метод не сработал, возвращаем исходную ошибку
+                        return {"success": False, "error": str(e)}
+                except Exception as backup_error:
+                    print(f"   ❌ Ошибка при отправке запасного уведомления: {str(backup_error)}")
+                    return {"success": False, "error": str(e)}
+
+            return {"success": False, "error": str(e)}
 
 
 def create_and_send_notification(recipient_id, title, body, notification_type, sender_id=None, data=None,
@@ -3138,48 +3310,60 @@ def send_push_notification(current_user):
         }), 500
 
 
-
-
-
-# Enhanced device registration endpoint for api.py
-# Add or replace this function in your api.py file
-
 @app.route('/api/device/register', methods=['POST'])
 @token_required
 def register_device(current_user):
-    """Enhanced device token registration with better logging and error handling"""
+    """Улучшенная регистрация токена устройства для iOS"""
     try:
-        print(f"📱 Device registration attempt for user_id={current_user.id}")
+        print(f"📱 Попытка регистрации устройства для user_id={current_user.id}")
 
-        # Get request data with thorough validation
+        # Получаем данные запроса
         data = request.json
         if not data:
-            print(f"📱 Missing request data for user_id={current_user.id}")
-            return jsonify({'message': 'No data provided', 'success': False}), 400
+            print(f"📱 Отсутствуют данные в запросе для user_id={current_user.id}")
+            return jsonify({'message': 'Не предоставлены данные', 'success': False}), 400
 
-        # Log all incoming data (sensitive parts obscured)
+        # Логируем все данные (скрывая чувствительные части)
         token_preview = data.get('token', '')[:15] + '...' if data.get('token') else 'None'
-        print(f"📱 Received token data: token={token_preview}, "
+        print(f"📱 Получены данные токена: token={token_preview}, "
               f"platform={data.get('platform', 'unknown')}, "
               f"device={data.get('device', 'unknown')}, "
-              f"token_type={data.get('tokenType', 'unknown')}")
+              f"tokenType={data.get('tokenType', 'unknown')}")
 
-        # Validate token
+        # Проверяем наличие токена
         token = data.get('token')
         if not token:
-            print(f"📱 Token not provided for user_id={current_user.id}")
-            return jsonify({'message': 'Token not provided', 'success': False}), 400
+            print(f"📱 Токен не предоставлен для user_id={current_user.id}")
+            return jsonify({'message': 'Не предоставлен токен', 'success': False}), 400
 
-        device = data.get('device', 'Unknown device')
+        # Подготавливаем данные устройства
+        device = data.get('device', 'Неизвестное устройство')
         platform = data.get('platform', 'unknown')
         token_type = data.get('tokenType', 'unknown')
 
-        # Check if token already exists
+        # Определяем тип токена на основе его формата, если тип не указан
+        if token_type == 'unknown':
+            if token.startswith('ExponentPushToken['):
+                token_type = 'expo'
+                print(f"📱 Определен тип токена 'expo' на основе формата")
+            elif platform.lower() == 'ios':
+                # Для iOS устройств предпочтительнее использовать Expo
+                token_type = 'expo'
+                print(f"📱 Для iOS устройств используем тип токена 'expo'")
+
+        print(f"📱 Итоговый тип токена для регистрации: {token_type}")
+
+        # Проверяем существующий токен
         existing_token = DeviceToken.query.filter_by(token=token).first()
 
         if existing_token:
-            # Update existing token
-            print(f"📱 Updating existing token for user_id={current_user.id}")
+            # Обновляем существующий токен
+            print(f"📱 Обновление существующего токена для user_id={current_user.id}")
+
+            # Если токен принадлежит другому пользователю, переназначаем его
+            if existing_token.user_id != current_user.id:
+                print(f"📱 Переназначение токена с user_id={existing_token.user_id} на user_id={current_user.id}")
+
             existing_token.user_id = current_user.id
             existing_token.device_name = device
             existing_token.platform = platform
@@ -3187,8 +3371,8 @@ def register_device(current_user):
             existing_token.last_used_at = datetime.datetime.utcnow()
             action = 'updated'
         else:
-            # Create new token record
-            print(f"📱 Creating new token for user_id={current_user.id}")
+            # Создаем новую запись токена
+            print(f"📱 Создание нового токена для user_id={current_user.id}")
             new_token = DeviceToken(
                 user_id=current_user.id,
                 token=token,
@@ -3201,28 +3385,38 @@ def register_device(current_user):
             db.session.add(new_token)
             action = 'registered'
 
-        # Commit changes with error handling
+        # Записываем изменения
         try:
             db.session.commit()
-            print(f"📱 Successfully {action} token for user_id={current_user.id}")
+            print(f"📱 Успешно {action} токен для user_id={current_user.id}")
+
+            # Дополнительная информация для iOS устройств
+            ios_info = {}
+            if platform.lower() == 'ios':
+                ios_info = {
+                    'ios_notes': 'Для iOS используйте тип tokenType=expo для лучшей надежности',
+                    'token_format': 'expo' if token.startswith('ExponentPushToken[') else 'unknown'
+                }
+
             return jsonify({
-                'message': f'Device token {action}',
+                'message': f'Токен устройства {action}',
                 'success': True,
-                'action': action
+                'action': action,
+                **ios_info
             }), 200
         except Exception as db_error:
             db.session.rollback()
-            print(f"📱 Database error during token {action}: {str(db_error)}")
+            print(f"📱 Ошибка базы данных при {action} токена: {str(db_error)}")
             return jsonify({
-                'message': f'Database error: {str(db_error)}',
+                'message': f'Ошибка базы данных: {str(db_error)}',
                 'success': False,
                 'error': 'database_error'
             }), 500
 
     except Exception as e:
-        print(f"📱 Unexpected error registering token for user_id={current_user.id}: {str(e)}")
+        print(f"📱 Неожиданная ошибка при регистрации токена для user_id={current_user.id}: {str(e)}")
         return jsonify({
-            'message': f'Error: {str(e)}',
+            'message': f'Ошибка: {str(e)}',
             'success': False,
             'error': 'unexpected_error'
         }), 500
@@ -3231,69 +3425,127 @@ def register_device(current_user):
 @app.route('/api/device/unregister', methods=['POST'])
 @token_required
 def unregister_device(current_user):
-    """Improved device token unregistration with better logging and error handling"""
+    """Улучшенная функция отмены регистрации устройства с поддержкой iOS"""
     try:
-        print(f"📱 Device unregistration attempt for user_id={current_user.id}")
+        print(f"📱 Запрос на отмену регистрации устройства для user_id={current_user.id}")
 
         data = request.json
 
         if not data:
-            print(f"📱 Missing request data for unregistration, user_id={current_user.id}")
-            return jsonify({'message': 'No data provided', 'success': False}), 400
+            print(f"📱 Отсутствуют данные в запросе для отмены регистрации, user_id={current_user.id}")
+            return jsonify({'message': 'Не предоставлены данные', 'success': False}), 400
 
         token = data.get('token')
-        if not token:
-            print(f"📱 Token not provided for unregistration, user_id={current_user.id}")
+        platform = data.get('platform', 'unknown')
+        unregister_all = data.get('unregister_all', False)
 
-            # Special case: unregister all tokens for this user
-            if data.get('unregister_all'):
-                print(f"📱 Unregistering ALL tokens for user_id={current_user.id}")
-                deleted = DeviceToken.query.filter_by(user_id=current_user.id).delete()
-                db.session.commit()
-                return jsonify({
-                    'message': f'Removed all device tokens ({deleted} tokens)',
-                    'success': True,
-                    'deleted_count': deleted
-                }), 200
+        # Специальный случай: удаляем все токены для этого пользователя
+        if unregister_all or not token:
+            if not token:
+                print(f"📱 Токен не предоставлен для отмены регистрации, user_id={current_user.id}")
+                print(f"📱 Отменяем регистрацию ВСЕХ токенов для user_id={current_user.id}")
+            else:
+                print(f"📱 Запрошена отмена регистрации ВСЕХ токенов для user_id={current_user.id}")
 
-            return jsonify({'message': 'Token not provided', 'success': False}), 400
+            # Получаем все токены пользователя
+            user_tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
 
-        # Find and delete the token
+            # Информация для логирования
+            if user_tokens:
+                print(f"📱 Найдено {len(user_tokens)} токенов пользователя")
+                for token_obj in user_tokens:
+                    token_preview = token_obj.token[:15] + '...' if len(token_obj.token) > 15 else token_obj.token
+                    print(
+                        f"   - Удаление токена: {token_preview} (платформа: {token_obj.platform}, устройство: {token_obj.device_name})")
+            else:
+                print(f"📱 Токены не найдены для user_id={current_user.id}")
+
+            # Удаляем все токены пользователя
+            deleted = DeviceToken.query.filter_by(user_id=current_user.id).delete()
+            db.session.commit()
+
+            # Информация для iOS устройств
+            ios_info = {}
+            if platform.lower() == 'ios':
+                ios_info = {
+                    'ios_notes': 'Все токены iOS устройств успешно удалены'
+                }
+
+            return jsonify({
+                'message': f'Удалены все токены устройств ({deleted} токенов)',
+                'success': True,
+                'deleted_count': deleted,
+                **ios_info
+            }), 200
+
+        # Находим и удаляем конкретный токен
         token_preview = token[:15] + '...' if len(token) > 15 else token
-        print(f"📱 Unregistering token: {token_preview} for user_id={current_user.id}")
+        print(f"📱 Отмена регистрации токена: {token_preview} для user_id={current_user.id}")
 
         device_token = DeviceToken.query.filter_by(token=token).first()
         if device_token:
-            # Extra security: Only allow deletion if token belongs to current user
+            # Дополнительная проверка безопасности: только разрешаем удаление, если токен принадлежит текущему пользователю
             if device_token.user_id != current_user.id:
-                print(f"📱 Token belongs to user_id={device_token.user_id}, not current user={current_user.id}")
+                print(
+                    f"📱 Токен принадлежит user_id={device_token.user_id}, а не текущему пользователю={current_user.id}")
                 return jsonify({
-                    'message': 'You are not authorized to unregister this token',
+                    'message': 'У вас нет прав на отмену регистрации этого токена',
                     'success': False
                 }), 403
 
-            # Delete the token
+            # Удаляем токен
             db.session.delete(device_token)
             db.session.commit()
-            print(f"📱 Successfully unregistered token for user_id={current_user.id}")
+            print(f"📱 Успешно отменена регистрация токена для user_id={current_user.id}")
+
+            # iOS-специфичная информация
+            ios_info = {}
+            if platform.lower() == 'ios' or device_token.platform.lower() == 'ios':
+                ios_info = {
+                    'ios_notes': 'Токен iOS устройства успешно удален'
+                }
 
             return jsonify({
-                'message': 'Device token unregistered',
+                'message': 'Регистрация токена устройства отменена',
                 'success': True,
-                'deleted_count': 1
+                'deleted_count': 1,
+                **ios_info
             }), 200
         else:
-            print(f"📱 Token not found for unregistration, user_id={current_user.id}")
+            print(f"📱 Токен не найден для отмены регистрации, user_id={current_user.id}")
+
+            # Специальный случай: если токен не найден, но это iOS устройство,
+            # попробуем найти другие токены устройств iOS этого пользователя и удалить их
+            if platform.lower() == 'ios':
+                print(f"📱 Попытка найти другие iOS токены для user_id={current_user.id}")
+                ios_tokens = DeviceToken.query.filter_by(
+                    user_id=current_user.id,
+                    platform='ios'
+                ).all()
+
+                if ios_tokens:
+                    print(f"📱 Найдено {len(ios_tokens)} других iOS токенов, удаляем их")
+                    for ios_token in ios_tokens:
+                        db.session.delete(ios_token)
+
+                    db.session.commit()
+                    return jsonify({
+                        'message': f'Удалены альтернативные iOS токены ({len(ios_tokens)} токенов)',
+                        'success': True,
+                        'deleted_count': len(ios_tokens),
+                        'note': 'Запрошенный токен не был найден, но были удалены другие iOS токены'
+                    }), 200
+
             return jsonify({
-                'message': 'Token not found',
+                'message': 'Токен не найден',
                 'success': False
             }), 404
 
     except Exception as e:
         db.session.rollback()
-        print(f"📱 Error unregistering device token for user_id={current_user.id}: {str(e)}")
+        print(f"📱 Ошибка при отмене регистрации токена устройства для user_id={current_user.id}: {str(e)}")
         return jsonify({
-            'message': f'Error: {str(e)}',
+            'message': f'Ошибка: {str(e)}',
             'success': False
         }), 500
 
@@ -3301,7 +3553,7 @@ def unregister_device(current_user):
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
-    """Improved test notification endpoint with better support for different token types"""
+    """Улучшенная функция тестирования push-уведомлений с поддержкой iOS"""
     try:
         print(f"🧪 Запрос на тестовое уведомление от user_id={current_user.id}")
         print(f"   - Данные запроса: {request.json}")
@@ -3311,11 +3563,12 @@ def test_notification(current_user):
         token_type = data.get('tokenType', 'unknown')
         device = data.get('device', 'Unknown device')
         platform = data.get('platform', 'unknown')
+        is_ios = platform.lower() == 'ios'
 
         if not token:
             print(f"   ❌ Отсутствует токен в запросе")
             return jsonify({
-                'message': 'Token not provided',
+                'message': 'Не предоставлен токен',
                 'success': False
             }), 400
 
@@ -3326,6 +3579,20 @@ def test_notification(current_user):
         print(f"   - Тип: {token_type}")
         print(f"   - Платформа: {platform}")
         print(f"   - Устройство: {device}")
+        print(f"   - iOS: {is_ios}")
+
+        # Добавляем информацию о типе токена
+        if token.startswith('ExponentPushToken['):
+            actual_token_type = 'expo'
+            print(f"   ℹ️ Определен тип 'expo' на основе формата токена")
+        elif token_type == 'expo':
+            actual_token_type = 'expo'
+        elif is_ios:
+            # Для iOS рекомендуем использовать Expo
+            actual_token_type = 'expo'
+            print(f"   ℹ️ Рекомендуется использовать тип 'expo' для iOS устройств")
+        else:
+            actual_token_type = token_type
 
         # Добавляем тип токена в данные для send_push_message
         test_data = {
@@ -3333,48 +3600,100 @@ def test_notification(current_user):
             'timestamp': str(datetime.datetime.now().timestamp()),
             'device': device,
             'platform': platform,
-            'tokenType': token_type  # Важно передать тип токена!
+            'tokenType': actual_token_type,  # Используем определенный тип
+            'sender_id': current_user.id,  # Добавляем ID отправителя
+            'test_mode': True  # Флаг тестового режима
         }
 
         # Для iOS добавляем специфичные данные
-        if platform.lower() == 'ios':
+        if is_ios:
+            print(f"   ℹ️ Добавление специфичных параметров для iOS")
             test_data.update({
                 'sound': 'default',
                 'badge': '1',
                 'priority': 'high',
-                'content_available': '1'
+                'content_available': '1',
+                '_displayInForeground': True,
+                'subtitle': 'Тестовое iOS уведомление',
+                'mutable_content': '1'
             })
 
-        # Отправляем уведомление через обновленную функцию (без проверки через validate_fcm_token)
+            # Добавляем категорию для iOS
+            test_data['categoryId'] = 'test_notification'
+
+        # Формируем заголовок и текст уведомления
+        notification_title = f"Тестовое уведомление"
+        notification_body = f"Это тестовое уведомление для платформы {platform}."
+
+        if is_ios:
+            notification_body += " Ура Ура ура"
+
+        # Улучшенная отправка через нашу функцию send_push_message
         result = send_push_message(
             token,
-            'Тестовое уведомление',
-            f'Это тестовое уведомление для {platform} устройства',
+            notification_title,
+            notification_body,
             test_data
         )
 
         print(f"   🔚 Результат отправки тестового уведомления: {result}")
 
         if result.get('success'):
+            # Включаем дополнительную информацию для iOS
+            ios_info = {}
+            if is_ios:
+                ios_info = {
+                    'ios_notes': 'На iOS уведомления отображаются только когда приложение в фоновом режиме или экран заблокирован',
+                    'delivery_time': 'На iOS доставка может занять до 30 секунд',
+                    'token_type_used': actual_token_type
+                }
+
             return jsonify({
                 'message': 'Тестовое уведомление отправлено успешно',
                 'success': True,
-                'message_id': result.get('message_id')
+                'message_id': result.get('message_id'),
+                **ios_info
             }), 200
         else:
+            error_info = {}
+            if is_ios and 'error' in result:
+                error_info = {
+                    'ios_troubleshooting': 'Проблемы с iOS уведомлениями часто вызваны отсутствием разрешений или конфигурации APNS',
+                    'suggestions': [
+                        'Убедитесь, что приложение имеет разрешение на отправку уведомлений',
+                        'Проверьте, что токен Expo действителен',
+                        'Устройство должно быть подключено к интернету',
+                        'Режим "Не беспокоить" должен быть отключен'
+                    ]
+                }
+
             return jsonify({
                 'message': f"Ошибка отправки уведомления: {result.get('error')}",
                 'success': False,
-                'error': result.get('error')
+                'error': result.get('error'),
+                **error_info
             }), 500
 
     except Exception as e:
         print(f"   ❌ Неожиданная ошибка при обработке тестового уведомления: {str(e)}")
         import traceback
         traceback.print_exc()
+
+        error_info = {}
+        if platform == 'ios':
+            error_info = {
+                'ios_troubleshooting': 'Возникла ошибка при обработке iOS-уведомления',
+                'suggestions': [
+                    'Убедитесь, что токен устройства корректен',
+                    'Проверьте сетевое соединение',
+                    'Попробуйте использовать тип токена "expo" для iOS'
+                ]
+            }
+
         return jsonify({
             'message': f'Ошибка: {str(e)}',
-            'success': False
+            'success': False,
+            **error_info
         }), 500
 
 

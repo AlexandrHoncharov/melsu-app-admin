@@ -1682,7 +1682,7 @@ def mark_notification_read(current_user, notification_id):
                 'success': False
             }), 403
 
-        # Отмечаем как прочитанное
+        # Отмечаем как прочитанноеа
         was_updated = notification.mark_as_read()
         db.session.commit()
 
@@ -1714,7 +1714,7 @@ def mark_all_notifications_read(current_user):
         ).all()
 
         # Отмечаем все как прочитанные
-        now = datetime.utcnow()
+        now = datetime.datetime.utcnow()
         count = 0
 
         for notification in notifications:

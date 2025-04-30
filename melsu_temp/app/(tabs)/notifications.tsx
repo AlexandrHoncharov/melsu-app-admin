@@ -1,16 +1,18 @@
 // File: app/(tabs)/notifications.tsx
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
+// Add ScrollView import at the top
 import {
-    StyleSheet,
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
     ActivityIndicator,
+    Alert,
+    FlatList,
     RefreshControl,
     SafeAreaView,
+    ScrollView,
     StatusBar,
-    Alert
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {router, useFocusEffect} from 'expo-router';
@@ -222,8 +224,7 @@ export default function NotificationsScreen() {
             // Reset unread count
             setUnreadCount(0);
 
-            // Show confirmation
-            Alert.alert('Success', 'All notifications have been marked as read');
+
         } catch (err) {
             console.error('Error marking all notifications as read:', err);
             Alert.alert('Error', 'Failed to mark all notifications as read');
@@ -576,9 +577,6 @@ export default function NotificationsScreen() {
         </SafeAreaView>
     );
 }
-
-// Add ScrollView import at the top
-import {ScrollView} from 'react-native';
 
 const styles = StyleSheet.create({
     container: {

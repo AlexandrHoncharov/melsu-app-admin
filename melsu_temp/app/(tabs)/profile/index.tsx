@@ -295,6 +295,17 @@ export default function ProfileScreen() {
         route: '/profile/change-password'
       },
 
+    {
+        id: 'notification-test',
+        title: 'test',
+        subtitle: 'test',
+        icon: 'ticket-outline',
+        iconBgColor: '#EDE7F6',
+        iconColor: '#673AB7',
+        route: '/profile/notification-test',
+        badge: ticketsLoaded ? unreadTickets : undefined
+      },
+
       // Notifications item removed as requested
       {
         id: 'tickets',

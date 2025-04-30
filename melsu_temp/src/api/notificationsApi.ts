@@ -13,7 +13,7 @@ export interface DeviceTokenRequest {
   token: string;
   device: string;
   platform: string;
-  tokenType?: 'fcm' | 'expo' | 'unknown';
+  tokenType?: 'fcm' | 'expo' | 'apns' | 'unknown';
 }
 
 export interface NotificationResponse {
@@ -34,7 +34,7 @@ const notificationsApi = {
     token: string,
     deviceInfo?: {
       deviceName?: string;
-      tokenType?: 'fcm' | 'expo' | 'unknown';
+      tokenType?: 'fcm' | 'expo' | 'apns' | 'unknown';
     }
   ): Promise<NotificationResponse> => {
     try {
@@ -174,16 +174,25 @@ const notificationsApi = {
   /**
    * Send test push notification
    * @param token Device token
-   * @param tokenType Token type (fcm or expo)
+   * @param tokenType Token type (fcm, expo, apns or unknown)
    * @returns Notification sending result
    */
   sendTestNotification: async (
     token: string,
-    tokenType: 'fcm' | 'expo' | 'unknown' = 'unknown'
+    tokenType: 'fcm' | 'expo' | 'apns' | 'unknown' = 'unknown'
   ): Promise<NotificationResponse> => {
     try {
       debugLog(`Sending test notification to token: ${token.substring(0, 10)}...`);
       debugLog(`Token type: ${tokenType}`);
+
+      // Проверяем тип токена и выводим предупреждения
+      if (Platform.OS === 'ios' && tokenType === 'fcm') {
+        debugLog(`⚠️ Warning: Using FCM token type on iOS device might not work. Consider using 'expo' token.`);
+      }
+
+      if (tokenType === 'apns') {
+        debugLog(`⚠️ Warning: Using native APNS token directly. Server needs special handling for this.`);
+      }
 
       // Add extra device information
       const requestData = {

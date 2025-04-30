@@ -7,15 +7,23 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "ios": {
+        "autoIncrement": true
+      },
       "android": {
         "buildType": "apk",
-
         "gradleCommand": ":app:assembleDebug",
         "withoutCredentials": false
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://app.melsu.ru/api"
       }
     },
     "preview": {
       "distribution": "internal",
+      "ios": {
+        "autoIncrement": true
+      },
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleRelease"
@@ -25,13 +33,23 @@
       }
     },
     "production": {
+      "distribution": "store",
+      "ios": {
+        "autoIncrement": true
+      },
       "android": {
-        "autoIncrement": true,
         "buildType": "apk",
         "withoutCredentials": false
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://app.melsu.ru/api"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+
       }
     }
   }

@@ -3,7 +3,8 @@ import os
 import uuid
 from functools import wraps
 from urllib.parse import unquote
-
+import os
+import re
 import firebase_admin
 import jwt
 import requests
@@ -46,24 +47,7 @@ os.makedirs(TICKET_ATTACHMENTS_FOLDER, exist_ok=True)
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
-try:
-    cred = credentials.Certificate('firebase.json')
-    firebase_admin.initialize_app(cred)
-    print("Firebase Admin SDK успешно инициализирован")
-    FIREBASE_AVAILABLE = True
-except Exception as e:
-    print(f"Ошибка инициализации Firebase Admin SDK: {e}")
-    FIREBASE_AVAILABLE = False
 
-# Firebase Admin SDK initialization removed
-if not firebase_admin._apps:
-    try:
-        # Initialize with minimal permissions for auth only (no messaging)
-        cred = credentials.Certificate('firebase.json')
-        firebase_admin.initialize_app(cred)
-        print("Firebase Admin SDK initialized for authentication only")
-    except Exception as e:
-        print(f"Error initializing Firebase Admin SDK: {e}")
 
 
 def token_required(f):
@@ -98,6 +82,66 @@ def token_required(f):
 
     return decorated
 
+
+def validate_fcm_token(token):
+    """Проверяет формат и тип токена для уведомлений"""
+    if not token:
+        return False
+
+    # Преобразуем в строку на всякий случай
+    token = str(token)
+
+    # Обрезаем токен для логирования
+    token_preview = token[:15] + "..." if len(token) > 15 else token
+
+    # Проверяем по шаблонам
+    is_jwt = token.count('.') == 2 and token.startswith('ey')
+    is_expo = token.startswith('ExponentPushToken[')
+    is_fcm_format = bool(re.match(r'^[a-zA-Z0-9:_-]+$', token))
+
+    print(f"💫 ПРОВЕРКА ТОКЕНА: {token_preview}")
+    print(f"   - Длина токена: {len(token)} символов")
+    print(f"   - Похож на JWT: {is_jwt}")
+    print(f"   - Похож на Expo token: {is_expo}")
+    print(f"   - Соответствует формату FCM: {is_fcm_format}")
+
+    if is_jwt:
+        print(f"   ❌ ОШИБКА: Получен JWT-токен аутентификации вместо FCM-токена")
+        return False
+    elif is_expo:
+        print(f"   ⚠️ ВНИМАНИЕ: Получен Expo token, может не работать с Firebase Admin SDK")
+        # Для Expo токенов требуется другой сервис отправки
+        return False
+    elif not is_fcm_format:
+        print(f"   ❌ ОШИБКА: Токен не соответствует формату FCM")
+        return False
+
+    return True
+
+
+# Замените или модифицируйте блок инициализации Firebase (найдите этот код в вашем файле)
+try:
+    print(f"📱 Попытка инициализации Firebase Admin SDK")
+    print(f"   - Текущая директория: {os.getcwd()}")
+    print(f"   - Путь к файлу: {os.path.abspath('firebase.json')}")
+    print(f"   - Файл существует: {os.path.exists('firebase.json')}")
+
+    if not os.path.exists('firebase.json'):
+        print(f"   ❌ ОШИБКА: Файл firebase.json не найден!")
+        raise FileNotFoundError("Файл firebase.json не найден")
+
+    cred = credentials.Certificate('firebase.json')
+    firebase_admin.initialize_app(cred)
+    print(f"   ✅ Firebase Admin SDK успешно инициализирован")
+    FIREBASE_AVAILABLE = True
+except Exception as e:
+    print(f"   ❌ ОШИБКА инициализации Firebase Admin SDK: {str(e)}")
+    print(f"   - Тип ошибки: {type(e).__name__}")
+    import traceback
+
+    traceback.print_exc()
+    FIREBASE_AVAILABLE = False
+    print(f"   ⚠️ Уведомления FCM отключены из-за ошибки")
 
 @app.route('/api/news', methods=['GET'])
 def get_news():
@@ -2593,52 +2637,185 @@ def internal_error(error):
 
 
 def send_push_message(token, title, message, data=None):
-    """Send push notification using Firebase Cloud Messaging"""
-    if not FIREBASE_AVAILABLE:
-        print("Firebase Admin SDK не доступен. Уведомление не отправлено.")
+    """Send push notification using Firebase Cloud Messaging or Expo Push service"""
+    # Создаем безопасную копию data для вывода в логи
+    safe_data = {**data} if data else {}
+    if 'token' in safe_data:
+        safe_data['token'] = safe_data['token'][:10] + '...' if safe_data['token'] else None
+
+    print(f"🔔 Запрос на отправку push-уведомления:")
+    print(f"   - Заголовок: {title}")
+    print(f"   - Сообщение: {message}")
+    print(f"   - Данные: {safe_data}")
+
+    # Получаем тип токена из данных, если он есть
+    token_type = safe_data.get('tokenType', 'unknown')
+    print(f"   - Тип токена: {token_type}")
+
+    # Проверяем тип токена напрямую по его формату
+    is_expo_token = token.startswith('ExponentPushToken[')
+    is_jwt_token = token.count('.') == 2 and token.startswith('ey')
+
+    # Если токен - Expo токен или тип указан явно как 'expo'
+    if is_expo_token or token_type == 'expo':
+        print(f"   📱 Обнаружен Expo токен, используем Expo Push API")
+        try:
+            # Импортируем необходимые модули
+            import uuid
+            import requests
+            import json
+            from datetime import datetime
+
+            # Формируем запрос для Expo Push API
+            expo_message = {
+                'to': token,
+                'title': title,
+                'body': message,
+                'data': data or {},
+                'sound': 'default'
+            }
+
+            # Для iOS добавляем дополнительные параметры
+            if data and data.get('platform') == 'ios':
+                expo_message.update({
+                    'badge': 1,
+                    'priority': 'high',
+                    '_displayInForeground': True
+                })
+
+            print(f"   📤 Отправка Expo уведомления: {json.dumps(expo_message)[:100]}...")
+
+            # Отправляем уведомление через Expo Push API
+            response = requests.post(
+                'https://exp.host/--/api/v2/push/send',
+                json=expo_message,
+                headers={
+                    'Accept': 'application/json',
+                    'Accept-encoding': 'gzip, deflate',
+                    'Content-Type': 'application/json',
+                },
+                timeout=10
+            )
+
+            # Проверяем ответ
+            if response.status_code == 200:
+                response_data = response.json()
+                print(f"   ✅ Expo Push уведомление отправлено: {response_data}")
+
+                # ИСПРАВЛЕНИЕ: Проверка структуры ответа от Expo API
+                if (response_data.get('data') and
+                        isinstance(response_data['data'], dict) and
+                        response_data['data'].get('status') == 'ok'):
+                    # Успешный ответ в новом формате (одиночное сообщение)
+                    ticket_id = response_data['data'].get('id', str(uuid.uuid4()))
+                    return {"success": True, "message_id": f"expo_{ticket_id}"}
+                elif (response_data.get('data') and
+                      isinstance(response_data['data'], list) and
+                      len(response_data['data']) > 0 and
+                      response_data['data'][0].get('status') == 'ok'):
+                    # Успешный ответ в старом формате (список сообщений)
+                    ticket_id = response_data['data'][0].get('id', str(uuid.uuid4()))
+                    return {"success": True, "message_id": f"expo_{ticket_id}"}
+                else:
+                    # Если мы не можем определить статус, но получили 200 OK
+                    print(f"   ⚠️ Необычный формат ответа Expo API, но статус 200. Считаем успехом.")
+                    return {"success": True, "message_id": f"expo_{str(uuid.uuid4())}"}
+            else:
+                print(f"   ❌ Ошибка отправки через Expo: {response.status_code}, {response.text}")
+                return {"success": False, "error": f"Expo API error: {response.status_code}"}
+        except Exception as e:
+            print(f"   ❌ Ошибка при отправке через Expo: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
+
+    # Проверяем, что это не JWT токен аутентификации
+    elif is_jwt_token:
+        print(f"   ❌ Ошибка: Получен JWT токен аутентификации вместо push-токена")
+        return {"success": False, "error": "The token is a JWT authentication token, not a push token"}
+
+    # Проверяем, доступен ли Firebase для FCM токенов
+    elif not FIREBASE_AVAILABLE:
+        print(f"   ❌ Firebase Admin SDK не доступен. Уведомление не отправлено.")
         return {"success": False, "message": "Firebase недоступен"}
 
-    try:
-        # Создаем объект уведомления
-        notification = messaging.Notification(
-            title=title,
-            body=message
-        )
+    # Для токенов APNs нужна специальная обработка
+    elif token_type == 'apns':
+        print(f"   ⚠️ Получен нативный APNs токен, который не может быть использован Firebase напрямую")
+        print(f"   ℹ️ Рекомендуется использовать Expo токены для iOS устройств")
+        return {"success": False, "error": "APNs tokens not supported directly. Use Expo tokens for iOS"}
 
-        # Настройки для Android
-        android_config = messaging.AndroidConfig(
-            priority='high',
-            notification=messaging.AndroidNotification(
-                icon='notification_icon',
-                color='#770002'
+    # Для остальных типов используем Firebase FCM
+    else:
+        try:
+            print(f"   📤 Отправка уведомления через Firebase Admin SDK")
+
+            # Создаем объект уведомления
+            notification = messaging.Notification(
+                title=title,
+                body=message
             )
-        )
 
-        # Настройки для iOS
-        apns_config = messaging.APNSConfig(
-            payload=messaging.APNSPayload(
-                aps=messaging.Aps(
-                    content_available=True
+            # Настройки для Android
+            android_config = messaging.AndroidConfig(
+                priority='high',
+                notification=messaging.AndroidNotification(
+                    icon='notification_icon',
+                    color='#770002'
                 )
             )
-        )
 
-        # Создаем объект Message правильно
-        message_obj = messaging.Message(
-            token=token,
-            notification=notification,
-            android=android_config,
-            apns=apns_config,
-            data=data or {}
-        )
+            # Настройки для iOS (через FCM)
+            apns_config = messaging.APNSConfig(
+                payload=messaging.APNSPayload(
+                    aps=messaging.Aps(
+                        content_available=True,
+                        sound='default',
+                        badge=1,
+                        mutable_content=True,
+                        alert=messaging.ApsAlert(
+                            title=title,
+                            body=message
+                        )
+                    )
+                ),
+                headers={
+                    'apns-priority': '10',
+                    'apns-push-type': 'alert'
+                }
+            )
 
-        # Отправляем сообщение
-        response = messaging.send(message_obj)
-        print(f"Уведомление успешно отправлено: {response}")
-        return {"success": True, "message_id": response}
-    except Exception as e:
-        print(f"Ошибка при отправке push-уведомления: {e}")
-        return {"success": False, "error": str(e)}
+            # Подготовка data
+            if data is None:
+                data = {}
+
+            # FCM требует строковые значения
+            fcm_data = {}
+            for key, value in data.items():
+                fcm_data[str(key)] = str(value) if value is not None else ""
+
+            # Создаем объект Message
+            message_obj = messaging.Message(
+                token=token,
+                notification=notification,
+                android=android_config,
+                apns=apns_config,
+                data=fcm_data
+            )
+
+            print(f"   📝 Сформирован объект сообщения для FCM")
+
+            # Отправляем сообщение
+            response = messaging.send(message_obj)
+            print(f"   ✅ FCM уведомление успешно отправлено: {response}")
+            return {"success": True, "message_id": response}
+        except Exception as e:
+            print(f"   ❌ Ошибка при отправке push-уведомления: {str(e)}")
+            print(f"   - Тип ошибки: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
+            return {"success": False, "error": str(e)}
+
 
 
 def create_and_send_notification(recipient_id, title, body, notification_type, sender_id=None, data=None,
@@ -3124,9 +3301,10 @@ def unregister_device(current_user):
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required
 def test_notification(current_user):
-    """Improved test notification endpoint with better logging and error handling"""
+    """Improved test notification endpoint with better support for different token types"""
     try:
-        print(f"📱 Test notification request from user_id={current_user.id}")
+        print(f"🧪 Запрос на тестовое уведомление от user_id={current_user.id}")
+        print(f"   - Данные запроса: {request.json}")
 
         data = request.json
         token = data.get('token')
@@ -3135,138 +3313,67 @@ def test_notification(current_user):
         platform = data.get('platform', 'unknown')
 
         if not token:
-            print(f"📱 Token not provided for test notification, user_id={current_user.id}")
+            print(f"   ❌ Отсутствует токен в запросе")
             return jsonify({
                 'message': 'Token not provided',
                 'success': False
             }), 400
 
-        # Log token details
+        # Детальный вывод информации о токене
         token_preview = token[:15] + '...' if len(token) > 15 else token
-        print(f"📱 Testing notification for token: {token_preview}, type: {token_type}, platform: {platform}")
+        print(f"   📱 Тест уведомления для:")
+        print(f"   - Токен: {token_preview}")
+        print(f"   - Тип: {token_type}")
+        print(f"   - Платформа: {platform}")
+        print(f"   - Устройство: {device}")
 
-        # Check if Firebase is available
-        if not FIREBASE_AVAILABLE:
-            print(f"📱 Firebase not available, using fallback for user_id={current_user.id}")
-            # Try sending through Expo if it's an Expo token
-            if token_type == 'expo' or token.startswith('ExponentPushToken['):
-                try:
-                    print(f"📱 Sending Expo test notification for user_id={current_user.id}")
-                    response = requests.post(
-                        'https://exp.host/--/api/v2/push/send',
-                        json={
-                            'to': token,
-                            'title': 'Test Notification',
-                            'body': 'This is a test push notification from MelSU Go app',
-                            'data': {
-                                'type': 'test',
-                                'timestamp': datetime.datetime.now().isoformat()
-                            }
-                        },
-                        headers={
-                            'Accept': 'application/json',
-                            'Accept-encoding': 'gzip, deflate',
-                            'Content-Type': 'application/json',
-                        }
-                    )
+        # Добавляем тип токена в данные для send_push_message
+        test_data = {
+            'type': 'test',
+            'timestamp': str(datetime.datetime.now().timestamp()),
+            'device': device,
+            'platform': platform,
+            'tokenType': token_type  # Важно передать тип токена!
+        }
 
-                    if response.status_code == 200:
-                        print(f"📱 Expo notification sent successfully for user_id={current_user.id}")
-                        return jsonify({
-                            'message': 'Test notification sent through Expo',
-                            'success': True,
-                            'response': response.json()
-                        }), 200
-                    else:
-                        print(f"📱 Expo notification failed: {response.text}, user_id={current_user.id}")
-                        return jsonify({
-                            'message': f'Failed to send Expo notification: {response.text}',
-                            'success': False
-                        }), 500
-                except Exception as expo_error:
-                    print(f"📱 Error sending Expo notification: {str(expo_error)}, user_id={current_user.id}")
-                    return jsonify({
-                        'message': f'Error sending Expo notification: {str(expo_error)}',
-                        'success': False
-                    }), 500
-            else:
-                return jsonify({
-                    'message': 'Firebase is not available and token is not an Expo token',
-                    'success': False
-                }), 503
+        # Для iOS добавляем специфичные данные
+        if platform.lower() == 'ios':
+            test_data.update({
+                'sound': 'default',
+                'badge': '1',
+                'priority': 'high',
+                'content_available': '1'
+            })
 
-        # Create notification for Firebase
-        try:
-            # Create notification with proper platform-specific configuration
-            print(f"📱 Creating notification for {platform} device, user_id={current_user.id}")
+        # Отправляем уведомление через обновленную функцию (без проверки через validate_fcm_token)
+        result = send_push_message(
+            token,
+            'Тестовое уведомление',
+            f'Это тестовое уведомление для {platform} устройства',
+            test_data
+        )
 
-            notification = messaging.Notification(
-                title='Test Notification',
-                body='This is a test push notification from MelSU Go app'
-            )
+        print(f"   🔚 Результат отправки тестового уведомления: {result}")
 
-            # Configure for Android
-            android_config = None
-            if platform.lower() == 'android':
-                android_config = messaging.AndroidConfig(
-                    priority='high',
-                    notification=messaging.AndroidNotification(
-                        icon='notification_icon',
-                        color='#770002',
-                        channel_id='default'
-                    )
-                )
-                print(f"📱 Added Android configuration for user_id={current_user.id}")
-
-            # Configure for iOS
-            apns_config = None
-            if platform.lower() == 'ios':
-                apns_config = messaging.APNSConfig(
-                    payload=messaging.APNSPayload(
-                        aps=messaging.Aps(
-                            content_available=True,
-                            sound='default'
-                        )
-                    )
-                )
-                print(f"📱 Added iOS configuration for user_id={current_user.id}")
-
-            # Add test data
-            data_payload = {
-                'type': 'test',
-                'timestamp': datetime.datetime.now().isoformat(),
-                'user_id': str(current_user.id)
-            }
-
-            # Create message object
-            message_obj = messaging.Message(
-                token=token,
-                notification=notification,
-                android=android_config,
-                apns=apns_config,
-                data=data_payload
-            )
-
-            # Send message
-            print(f"📱 Sending FCM notification for user_id={current_user.id}")
-            response = messaging.send(message_obj)
-            print(f"📱 FCM notification sent successfully: {response}, user_id={current_user.id}")
-
+        if result.get('success'):
             return jsonify({
-                'message': 'Test notification sent through Firebase',
+                'message': 'Тестовое уведомление отправлено успешно',
                 'success': True,
-                'message_id': response
+                'message_id': result.get('message_id')
             }), 200
-        except Exception as fcm_error:
-            print(f"📱 Error sending FCM notification: {str(fcm_error)}, user_id={current_user.id}")
+        else:
             return jsonify({
-                'message': f'Error sending Firebase notification: {str(fcm_error)}',
-                'success': False
+                'message': f"Ошибка отправки уведомления: {result.get('error')}",
+                'success': False,
+                'error': result.get('error')
             }), 500
+
     except Exception as e:
-        print(f"📱 Unexpected error in test notification for user_id={current_user.id}: {str(e)}")
+        print(f"   ❌ Неожиданная ошибка при обработке тестового уведомления: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({
-            'message': f'Error: {str(e)}',
+            'message': f'Ошибка: {str(e)}',
             'success': False
         }), 500
 

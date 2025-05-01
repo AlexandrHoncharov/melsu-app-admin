@@ -1,17 +1,19 @@
 import React, {useEffect, useState} from 'react';
 import {
-  ActivityIndicator,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    Keyboard,
+    KeyboardAvoidingView,
+    Platform,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View
 } from 'react-native';
 import {useAuth} from '../hooks/useAuth';
 import {Link, router, useLocalSearchParams} from 'expo-router';
@@ -23,7 +25,9 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
-  const { login, isLoading, isAuthenticated } = useAuth();
+    const {login, isLoading, isAuthenticated, savedAccounts, switchAccount, removeSavedAccount} = useAuth();
+    const [switchingAccount, setSwitchingAccount] = useState<number | null>(null);
+    const [deletingAccount, setDeletingAccount] = useState<number | null>(null);
 
   // Get the parameter that indicates if we're adding a new account
   const params = useLocalSearchParams();
@@ -55,15 +59,54 @@ export default function LoginScreen() {
       // Вызываем API для входа в систему, passing the addAccount flag if needed
       await login(identifier, password, isAddingAccount);
 
-      // If we're adding an account, navigate back to the account switching screen
+        // If we're adding an account, navigate back to the profile screen
       if (isAddingAccount) {
-        router.replace('/profile/switch-account');
+          router.replace('/(tabs)/profile');
       }
     } catch (error) {
       // Отображаем ошибку под формой, а не в алерте
       setLoginError((error as Error).message);
     }
   };
+
+    // Handle account selection
+    const handleAccountSelect = async (accountId: number) => {
+        try {
+            setSwitchingAccount(accountId);
+            await switchAccount(accountId);
+            // Navigate to main screen after switching
+            router.replace('/(tabs)');
+        } catch (error) {
+            setLoginError(`Не удалось войти в выбранный аккаунт: ${(error as Error).message}`);
+            setSwitchingAccount(null);
+        }
+    };
+
+    // Handle account deletion
+    const handleDeleteAccount = (accountId: number) => {
+        Alert.alert(
+            'Удаление аккаунта',
+            'Вы уверены, что хотите удалить этот аккаунт из сохраненных? Вы сможете войти в него снова, но потребуется ввести пароль.',
+            [
+                {text: 'Отмена', style: 'cancel'},
+                {
+                    text: 'Удалить',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            setDeletingAccount(accountId);
+                            await removeSavedAccount(accountId);
+                            setDeletingAccount(null);
+                        } catch (error) {
+                            console.error('Error removing account:', error);
+                            setLoginError('Не удалось удалить аккаунт');
+                            setDeletingAccount(null);
+                        }
+                    }
+                }
+            ]
+        );
+    };
 
   const toggleSecureTextEntry = () => {
     setSecureTextEntry(!secureTextEntry);
@@ -79,6 +122,50 @@ export default function LoginScreen() {
     if (!identifier) return "person-outline";
     return identifier.includes('@') ? "mail-outline" : "person-outline";
   };
+
+    // Render single account item
+    const renderAccountItem = (account) => {
+        // Get first letter for avatar
+        const avatarLetter = account.fullName
+            ? account.fullName.charAt(0).toUpperCase()
+            : account.username.charAt(0).toUpperCase();
+
+        const isProcessing = switchingAccount === account.id || deletingAccount === account.id;
+
+        return (
+            <View style={styles.accountItemWrapper}>
+                <TouchableOpacity
+                    style={styles.accountItem}
+                    onPress={() => handleAccountSelect(account.id)}
+                    disabled={isLoading || isProcessing}
+                >
+                    <View style={styles.accountAvatar}>
+                        <Text style={styles.avatarText}>{avatarLetter}</Text>
+                    </View>
+                    <View style={styles.accountInfo}>
+                        <Text style={styles.accountName}>{account.fullName || account.username}</Text>
+                        <Text style={styles.accountUsername}>{account.username}</Text>
+                        {account.role === 'student' && account.group && (
+                            <Text style={styles.accountDetails}>Группа {account.group}</Text>
+                        )}
+                    </View>
+                    {isProcessing ? (
+                        <ActivityIndicator size="small" color="#770002" style={styles.accountSwitch}/>
+                    ) : (
+                        <Ionicons name="chevron-forward" size={20} color="#999" style={styles.accountSwitch}/>
+                    )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    style={styles.deleteButton}
+                    onPress={() => handleDeleteAccount(account.id)}
+                    disabled={isLoading || isProcessing}
+                >
+                    <Ionicons name="trash-outline" size={20} color="#d32f2f"/>
+                </TouchableOpacity>
+            </View>
+        );
+    };
 
   return (
     <TouchableWithoutFeedback onPress={dismissKeyboard}>
@@ -104,6 +191,26 @@ export default function LoginScreen() {
                 </Text>
             )}
           </View>
+
+            {/* Saved Accounts Section */}
+            {!isAddingAccount && savedAccounts && savedAccounts.length > 0 && (
+                <View style={styles.savedAccountsContainer}>
+                    <Text style={styles.savedAccountsTitle}>Сохраненные аккаунты</Text>
+                    <FlatList
+                        data={savedAccounts}
+                        renderItem={({item}) => renderAccountItem(item)}
+                        keyExtractor={(item) => item.id.toString()}
+                        style={styles.accountsList}
+                        scrollEnabled={savedAccounts.length > 3}
+                        maxHeight={savedAccounts.length > 3 ? 200 : undefined}
+                    />
+                    <View style={styles.divider}>
+                        <View style={styles.dividerLine}/>
+                        <Text style={styles.dividerText}>или</Text>
+                        <View style={styles.dividerLine}/>
+                    </View>
+                </View>
+            )}
 
           <View style={styles.formContainer}>
             <View style={[
@@ -212,7 +319,7 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: 40,
+      marginBottom: 24,
   },
   logo: {
     width: 100,
@@ -230,6 +337,90 @@ const styles = StyleSheet.create({
     marginTop: 8,
     textAlign: 'center',
   },
+    // Saved Accounts Styles
+    savedAccountsContainer: {
+        marginBottom: 20,
+    },
+    savedAccountsTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 12,
+    },
+    accountsList: {
+        width: '100%',
+    },
+    accountItemWrapper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
+    accountItem: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f8f8f8',
+        borderRadius: 8,
+        padding: 10,
+        marginRight: 8,
+    },
+    accountAvatar: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#bb0000',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 12,
+    },
+    avatarText: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: 'white',
+    },
+    accountInfo: {
+        flex: 1,
+    },
+    accountName: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#333',
+    },
+    accountUsername: {
+        fontSize: 12,
+        color: '#777',
+    },
+    accountDetails: {
+        fontSize: 12,
+        color: '#666',
+        marginTop: 2,
+    },
+    accountSwitch: {
+        marginLeft: 8,
+    },
+    deleteButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 8,
+        backgroundColor: '#ffebee',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    divider: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginVertical: 15,
+    },
+    dividerLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: '#eee',
+    },
+    dividerText: {
+        marginHorizontal: 10,
+        color: '#999',
+        fontSize: 14,
+    },
   formContainer: {
     marginBottom: 30,
   },

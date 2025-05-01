@@ -51,13 +51,6 @@ export default function ProfileLayout() {
           presentation: 'card'
         }}
       />
-        <Stack.Screen
-            name="switch-account"
-            options={{
-                headerShown: false,
-                title: 'Переключение аккаунта'
-        }}
-      />
       <Stack.Screen
         name="verification"
         options={{

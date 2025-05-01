@@ -224,11 +224,6 @@ export default function ProfileScreen() {
     }
   };
 
-  // Handler for switching accounts
-  const handleSwitchAccount = () => {
-    router.push('/profile/switch-account');
-  };
-
   // Logout handler with confirmation
   const handleLogout = () => {
     Alert.alert(
@@ -343,16 +338,6 @@ export default function ProfileScreen() {
       },
 
       {
-        id: 'switch-account',
-        title: 'Сменить аккаунт',
-        subtitle: 'Переключение между аккаунтами',
-        icon: 'people-outline',
-        iconBgColor: '#E0F2F1',
-        iconColor: '#00796B',
-        route: '/profile/switch-account'
-      },
-
-      {
         id: 'notification-test',
         title: 'test',
         subtitle: 'test',
@@ -398,7 +383,7 @@ export default function ProfileScreen() {
     if (user?.role === 'student') {
       const verificationInfo = getVerificationInfo(user.verificationStatus);
 
-      commonItems.splice(2, 0, {
+        commonItems.splice(1, 0, {
         id: 'verification',
         title: 'Верификация студента',
         subtitle: verificationInfo.text,
@@ -701,7 +686,7 @@ export default function ProfileScreen() {
           })}
         </View>
 
-        {/* Account Buttons Section - Logout and Switch Account */}
+          {/* Account Buttons Section - Only logout and quick switch */}
         <View style={styles.accountButtonsContainer}>
           <TouchableOpacity
               style={styles.switchAccountButton}

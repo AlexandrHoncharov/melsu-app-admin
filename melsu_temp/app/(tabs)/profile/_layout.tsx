@@ -1,7 +1,7 @@
-// File: melsu_temp/app/(tabs)/profile/_layout.tsx
+// File: app/(tabs)/profile/_layout.tsx
 import React from 'react';
-import { Stack } from 'expo-router';
-import { useColorScheme } from '../../../hooks/useColorScheme';
+import {Stack} from 'expo-router';
+import {useColorScheme} from '../../../hooks/useColorScheme';
 
 export default function ProfileLayout() {
   const colorScheme = useColorScheme();
@@ -49,6 +49,13 @@ export default function ProfileLayout() {
           headerShown: false,
           title: 'Изменение пароля',
           presentation: 'card'
+        }}
+      />
+        <Stack.Screen
+            name="switch-account"
+            options={{
+                headerShown: false,
+                title: 'Переключение аккаунта'
         }}
       />
       <Stack.Screen

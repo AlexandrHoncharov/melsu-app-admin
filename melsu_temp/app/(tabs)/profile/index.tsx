@@ -19,6 +19,7 @@ import {useAuth} from '../../../hooks/useAuth';
 import {router} from 'expo-router';
 import scheduleService from '../../../src/services/scheduleService';
 import * as Clipboard from 'expo-clipboard';
+import QuickAccountSwitch from '../../../components/QuickAccountSwitch';
 
 const { width } = Dimensions.get('window');
 
@@ -38,7 +39,7 @@ interface MenuItem {
 }
 
 export default function ProfileScreen() {
-  const { user: originalUser, isLoading, logout, refreshUserProfile } = useAuth();
+  const {user: originalUser, savedAccounts, isLoading, logout, refreshUserProfile, switchAccount} = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   // Состояние для хранения информации о курсе
   const [course, setCourse] = useState<number | null>(null);
@@ -47,6 +48,34 @@ export default function ProfileScreen() {
   const [unreadTickets, setUnreadTickets] = useState<number>(0);
   // Состояние для отслеживания, загружены ли непрочитанные тикеты
   const [ticketsLoaded, setTicketsLoaded] = useState<boolean>(false);
+  // Состояние для модального окна быстрого переключения аккаунтов
+  const [quickSwitchVisible, setQuickSwitchVisible] = useState(false);
+
+  // Handle opening the quick switch modal
+  const handleOpenQuickSwitch = () => {
+    // Only show quick switch if there are saved accounts
+    if (savedAccounts && savedAccounts.length > 0) {
+      setQuickSwitchVisible(true);
+    } else {
+      // If no saved accounts, show option to add an account
+      Alert.alert(
+          'Нет сохраненных аккаунтов',
+          'У вас нет других сохраненных аккаунтов. Хотите добавить новый аккаунт?',
+          [
+            {text: 'Отмена', style: 'cancel'},
+            {
+              text: 'Добавить аккаунт',
+              onPress: () => {
+                router.push({
+                  pathname: '/login',
+                  params: {addAccount: 'true'}
+                });
+              }
+            }
+          ]
+      );
+    }
+  };
 
   // Функция для загрузки информации о курсе
   const loadCourseInfo = async (groupName: string, forceRefresh: boolean = false) => {
@@ -195,8 +224,12 @@ export default function ProfileScreen() {
     }
   };
 
+  // Handler for switching accounts
+  const handleSwitchAccount = () => {
+    router.push('/profile/switch-account');
+  };
+
   // Logout handler with confirmation
-  // Исправленная функция handleLogout
   const handleLogout = () => {
     Alert.alert(
         'Выход из аккаунта',
@@ -309,7 +342,17 @@ export default function ProfileScreen() {
         route: '/profile/change-password'
       },
 
-    {
+      {
+        id: 'switch-account',
+        title: 'Сменить аккаунт',
+        subtitle: 'Переключение между аккаунтами',
+        icon: 'people-outline',
+        iconBgColor: '#E0F2F1',
+        iconColor: '#00796B',
+        route: '/profile/switch-account'
+      },
+
+      {
         id: 'notification-test',
         title: 'test',
         subtitle: 'test',
@@ -425,9 +468,21 @@ export default function ProfileScreen() {
         {/* Header section with avatar and name */}
         <View style={styles.header}>
           <View style={styles.avatarSection}>
-            <View style={styles.avatarContainer}>
+            <TouchableOpacity
+                style={styles.avatarContainer}
+                activeOpacity={0.8}
+                onLongPress={handleOpenQuickSwitch}
+                delayLongPress={500}
+            >
               <Text style={styles.avatarText}>{avatarLetter}</Text>
-            </View>
+
+              {/* Show indicator if there are multiple accounts */}
+              {savedAccounts && savedAccounts.length > 1 && (
+                  <View style={styles.accountsIndicator}>
+                    <Ionicons name="chevron-down" size={12} color="#fff"/>
+                  </View>
+              )}
+            </TouchableOpacity>
           </View>
 
           <View style={styles.nameSection}>
@@ -444,6 +499,16 @@ export default function ProfileScreen() {
             <Text style={styles.usernameTopText}>Логин: {user.username}</Text>
           </View>
         </View>
+
+        {/* Quick Account Switch Modal */}
+        <QuickAccountSwitch
+            currentUser={user}
+            savedAccounts={savedAccounts}
+            visible={quickSwitchVisible}
+            onClose={() => setQuickSwitchVisible(false)}
+            onSwitchAccount={switchAccount}
+            onAddAccount={() => router.push({pathname: '/login', params: {addAccount: 'true'}})}
+        />
 
         {/* Персональная информация - новый дизайн */}
         <View style={styles.userInfoCard}>
@@ -636,15 +701,26 @@ export default function ProfileScreen() {
           })}
         </View>
 
-        {/* Logout button */}
-        <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogout}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="log-out-outline" size={20} color="#FFF" />
-          <Text style={styles.logoutText}>Выйти из аккаунта</Text>
-        </TouchableOpacity>
+        {/* Account Buttons Section - Logout and Switch Account */}
+        <View style={styles.accountButtonsContainer}>
+          <TouchableOpacity
+              style={styles.switchAccountButton}
+              onPress={handleOpenQuickSwitch}
+              activeOpacity={0.8}
+          >
+            <Ionicons name="people-outline" size={20} color="#666"/>
+            <Text style={styles.switchAccountText}>Сменить аккаунт</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              activeOpacity={0.8}
+          >
+            <Ionicons name="log-out-outline" size={20} color="#FFF"/>
+            <Text style={styles.logoutText}>Выйти из аккаунта</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Footer Info */}
         <View style={styles.footerInfo}>
@@ -707,11 +783,25 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 6,
+    position: 'relative', // needed for the indicator
   },
   avatarText: {
     fontSize: 30,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  accountsIndicator: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#fff',
   },
   nameSection: {
     flex: 1,
@@ -921,7 +1011,32 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
-  // Logout and Footer Styles
+  // Logout and Account Buttons Styles
+  accountButtonsContainer: {
+    marginVertical: 12,
+    gap: 10,
+  },
+  switchAccountButton: {
+    flexDirection: 'row',
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    paddingVertical: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 1},
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  switchAccountText: {
+    color: '#444',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
   logoutButton: {
     flexDirection: 'row',
     backgroundColor: '#bb0000',
@@ -929,7 +1044,6 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    marginVertical: 12,
     shadowColor: '#bb0000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,

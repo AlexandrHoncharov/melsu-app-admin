@@ -1,22 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, {useEffect, useState} from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-  SafeAreaView,
-  Keyboard,
-  TouchableWithoutFeedback
+  TouchableWithoutFeedback,
+  View
 } from 'react-native';
-import { useAuth } from '../hooks/useAuth';
-import { Link, router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { StatusBar } from 'expo-status-bar';
+import {useAuth} from '../hooks/useAuth';
+import {Link, router, useLocalSearchParams} from 'expo-router';
+import {Ionicons} from '@expo/vector-icons';
+import {StatusBar} from 'expo-status-bar';
 
 export default function LoginScreen() {
   const [identifier, setIdentifier] = useState('');
@@ -25,12 +25,16 @@ export default function LoginScreen() {
   const [loginError, setLoginError] = useState<string | null>(null);
   const { login, isLoading, isAuthenticated } = useAuth();
 
+  // Get the parameter that indicates if we're adding a new account
+  const params = useLocalSearchParams();
+  const isAddingAccount = params.addAccount === 'true';
+
   // Проверяем, авторизован ли пользователь
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isAddingAccount) {
       router.replace('/(tabs)');
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, isAddingAccount]);
 
   const handleLogin = async () => {
     // Сбрасываем предыдущую ошибку
@@ -48,8 +52,13 @@ export default function LoginScreen() {
     }
 
     try {
-      // Вызываем API для входа в систему
-      await login(identifier, password);
+      // Вызываем API для входа в систему, passing the addAccount flag if needed
+      await login(identifier, password, isAddingAccount);
+
+      // If we're adding an account, navigate back to the account switching screen
+      if (isAddingAccount) {
+        router.replace('/profile/switch-account');
+      }
     } catch (error) {
       // Отображаем ошибку под формой, а не в алерте
       setLoginError((error as Error).message);
@@ -86,7 +95,14 @@ export default function LoginScreen() {
               style={styles.logo}
               resizeMode="contain"
             />
-            <Text style={styles.title}>Вход в систему</Text>
+            <Text style={styles.title}>
+              {isAddingAccount ? 'Добавление аккаунта' : 'Вход в систему'}
+            </Text>
+            {isAddingAccount && (
+                <Text style={styles.subtitle}>
+                  Войдите, чтобы добавить еще один аккаунт
+                </Text>
+            )}
           </View>
 
           <View style={styles.formContainer}>
@@ -152,19 +168,32 @@ export default function LoginScreen() {
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.loginButtonText}>Войти</Text>
+                  <Text style={styles.loginButtonText}>
+                    {isAddingAccount ? 'Добавить аккаунт' : 'Войти'}
+                  </Text>
               )}
             </TouchableOpacity>
+
+            {isAddingAccount && (
+                <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => router.back()}
+                >
+                  <Text style={styles.cancelButtonText}>Отмена</Text>
+                </TouchableOpacity>
+            )}
           </View>
 
-          <View style={styles.registerContainer}>
-            <Text style={styles.registerText}>Нет учетной записи?</Text>
-            <Link href="/register" asChild>
-              <TouchableOpacity testID="register-link">
-                <Text style={styles.registerLink}>Зарегистрироваться</Text>
-              </TouchableOpacity>
-            </Link>
-          </View>
+          {!isAddingAccount && (
+              <View style={styles.registerContainer}>
+                <Text style={styles.registerText}>Нет учетной записи?</Text>
+                <Link href="/register" asChild>
+                  <TouchableOpacity testID="register-link">
+                    <Text style={styles.registerLink}>Зарегистрироваться</Text>
+                  </TouchableOpacity>
+                </Link>
+              </View>
+          )}
         </KeyboardAvoidingView>
       </SafeAreaView>
     </TouchableWithoutFeedback>
@@ -194,6 +223,12 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     color: '#333',
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
   },
   formContainer: {
     marginBottom: 30,
@@ -243,11 +278,26 @@ const styles = StyleSheet.create({
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 12,
   },
   loginButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  cancelButton: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 8,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  cancelButtonText: {
+    color: '#555',
+    fontSize: 16,
+    fontWeight: '500',
   },
   registerContainer: {
     flexDirection: 'row',

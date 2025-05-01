@@ -1,9 +1,9 @@
 // File: melsu_temp/hooks/useAuth.tsx
-import { createContext, useContext, useState, useEffect, ReactNode, useRef } from 'react';
+import {createContext, ReactNode, useContext, useEffect, useRef, useState} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { router } from 'expo-router';
-import { AppState, AppStateStatus } from 'react-native';
+import {router} from 'expo-router';
+import {AppState, AppStateStatus} from 'react-native';
 import authApi from '../src/api/authApi';
 import userApi from '../src/api/userApi';
 import chatService from '../src/services/chatService'; // Импортируем chatService
@@ -335,12 +335,13 @@ const register = async (userData: RegisterData) => {
   }
 }
 
+// Enhanced logout function to ensure reliable token deletion
 const logout = async () => {
   setIsLoading(true);
   try {
     console.log('Starting logout process...');
 
-    // CRITICAL: First unregister device tokens before any other logout actions
+    // FIRST PHASE: Unregister device tokens before any other logout actions
     console.log('Unregistering device tokens before logout...');
     if (chatService) {
       try {
@@ -357,8 +358,97 @@ const logout = async () => {
       }
     }
 
-    // Only after token cleanup, call the API logout endpoint
+    // SECOND PHASE: Directly call the device unregistration API
     try {
+      // Get the token before we potentially delete it
+      const token = await AsyncStorage.getItem('devicePushToken');
+      if (token) {
+        console.log(`Making direct API call to unregister token: ${token.substring(0, 10)}...`);
+        try {
+          await notificationsApi.unregisterDeviceToken(token);
+          console.log('Direct API unregistration completed');
+        } catch (directApiError) {
+          console.warn('Direct API unregistration failed:', directApiError);
+          // Continue with logout process
+        }
+      }
+    } catch (tokenError) {
+      console.warn('Error getting device token for direct unregistration:', tokenError);
+    }
+
+    // THIRD PHASE: Call the API logout endpoint to delete ALL tokens for this user from database
+    try {
+      // Get the current user ID before we clear any tokens
+      const userData = await AsyncStorage.getItem('userData');
+      const userId = userData ? JSON.parse(userData).id : null;
+
+      // First, make sure we properly unregister the current device token
+      const deviceToken = await AsyncStorage.getItem('devicePushToken');
+      if (deviceToken) {
+        try {
+          console.log('Removing current token from database...');
+          await apiClient.post('/device/unregister', {
+            token: deviceToken,
+            // Add authorization header explicitly in case it was cleared
+            headers: {
+              'Authorization': `Bearer ${await SecureStore.getItemAsync('userToken')}`
+            }
+          });
+          console.log('Current token unregistration requested');
+        } catch (tokenDbError) {
+          console.warn('Error unregistering current token:', tokenDbError);
+        }
+      }
+
+      // IMPORTANT: Force removal of ALL tokens for this user using both methods
+
+      // Method 1: Try sending user_id directly
+      if (userId) {
+        try {
+          console.log(`Explicitly requesting removal of ALL tokens for user ${userId}...`);
+          await apiClient.post('/device/unregister/all', {
+            user_id: userId,
+            // Add authorization header explicitly
+            headers: {
+              'Authorization': `Bearer ${await SecureStore.getItemAsync('userToken')}`
+            }
+          });
+          console.log('All user tokens deletion requested successfully with user_id');
+        } catch (userIdError) {
+          console.warn('Error requesting token deletion with user_id:', userIdError);
+
+          // Method 2: Try alternate endpoint if first method fails
+          try {
+            console.log('Attempting alternate method for token deletion...');
+            await apiClient.delete(`/api/user/${userId}/tokens`, {
+              headers: {
+                'Authorization': `Bearer ${await SecureStore.getItemAsync('userToken')}`
+              }
+            });
+            console.log('Alternate token deletion method successful');
+          } catch (alternateError) {
+            console.warn('Alternate token deletion method also failed:', alternateError);
+          }
+        }
+      }
+
+      // Method 3: Try with session-based approach
+      try {
+        console.log('Requesting removal of ALL tokens for current user from database via session...');
+        await apiClient.post('/device/unregister', {
+          token: 'force_all_tokens_removal',
+          all_user_tokens: true,
+          // Add authorization header explicitly
+          headers: {
+            'Authorization': `Bearer ${await SecureStore.getItemAsync('userToken')}`
+          }
+        });
+        console.log('All user tokens deletion from database requested via session');
+      } catch (allTokensError) {
+        console.warn('Error requesting all tokens deletion via session:', allTokensError);
+      }
+
+      // Standard logout call
       await authApi.logout();
       console.log('API logout successful');
     } catch (apiError) {
@@ -366,22 +456,57 @@ const logout = async () => {
       // Continue with local logout regardless of API result
     }
 
-    // Now handle local session data cleanup
+    // FOURTH PHASE: All SecureStore and AsyncStorage cleanup
     try {
+      // Critical: First delete authentication token from SecureStore
       await SecureStore.deleteItemAsync('userToken');
-      await AsyncStorage.removeItem('userData');
-      console.log('Auth tokens removed');
+      console.log('Auth token removed from SecureStore');
 
-      // Full AsyncStorage cleanup
-      const keys = await AsyncStorage.getAllKeys();
-      await AsyncStorage.multiRemove(keys);
-      console.log('All AsyncStorage data cleared');
+      // Then delete device token from AsyncStorage
+      await AsyncStorage.removeItem('devicePushToken');
+      console.log('Device token removed from AsyncStorage');
+
+      // Remove user data
+      await AsyncStorage.removeItem('userData');
+      console.log('User data removed from AsyncStorage');
+
+      // Get all AsyncStorage keys and remove everything except critical system keys
+      const allKeys = await AsyncStorage.getAllKeys();
+      const keysToRemove = allKeys.filter(key =>
+          !key.startsWith('EXPO_CONSTANTS') &&
+          !key.startsWith('SYSTEM_') &&
+          !key.includes('PREFERENCES')
+      );
+
+      if (keysToRemove.length > 0) {
+        await AsyncStorage.multiRemove(keysToRemove);
+        console.log(`Removed ${keysToRemove.length} keys from AsyncStorage`);
+      }
     } catch (storageError) {
       console.error('Error clearing storage:', storageError);
-      // Continue with logout even if storage cleanup fails
+
+      // EMERGENCY CLEANUP: Try individual critical keys if bulk removal fails
+      try {
+        await SecureStore.deleteItemAsync('userToken');
+        await AsyncStorage.removeItem('devicePushToken');
+        await AsyncStorage.removeItem('userData');
+        console.log('Emergency cleanup of critical keys completed');
+      } catch (finalError) {
+        console.error('Critical error during emergency cleanup:', finalError);
+      }
     }
 
-    // Final state reset
+    // FIFTH PHASE: Firebase signout
+    try {
+      if (auth && auth.currentUser) {
+        await auth.signOut();
+        console.log('Firebase signout completed');
+      }
+    } catch (firebaseError) {
+      console.warn('Firebase signout error:', firebaseError);
+    }
+
+    // FINAL PHASE: Reset app state
     setUser(null);
     setIsAuthenticated(false);
 
@@ -390,24 +515,18 @@ const logout = async () => {
   } catch (error) {
     console.error('Unexpected error during logout:', error);
 
-    // Emergency cleanup
-    try {
-      // One more attempt to reset chat service
-      if (chatService) await chatService.reset();
-
-      // Force token removal
-      await SecureStore.deleteItemAsync('userToken');
-
-      // Emergency AsyncStorage cleanup
-      const keys = await AsyncStorage.getAllKeys();
-      await AsyncStorage.multiRemove(keys);
-    } catch (finalError) {
-      console.error('Critical error during emergency cleanup:', finalError);
-    }
-
-    // Force state reset and navigation regardless of errors
+    // FAIL-SAFE: Force reset the app state regardless of errors
     setUser(null);
     setIsAuthenticated(false);
+
+    // Forcibly delete the most critical tokens
+    try {
+      await SecureStore.deleteItemAsync('userToken');
+      await AsyncStorage.removeItem('devicePushToken');
+    } catch (e) {
+      // Nothing more we can do here
+    }
+
     router.replace('/login');
   } finally {
     setIsLoading(false);

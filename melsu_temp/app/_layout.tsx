@@ -1,9 +1,9 @@
 import React from 'react';
-import { Stack } from 'expo-router';
-import { AuthProvider } from '../hooks/useAuth';
-import { StatusBar } from 'expo-status-bar';
-import { NotificationProvider } from '../hooks/useNotifications';
-import { UnreadMessagesProvider } from '../hooks/useUnreadMessages';
+import {Stack} from 'expo-router';
+import {AuthProvider} from '../hooks/useAuth';
+import {StatusBar} from 'expo-status-bar';
+import {NotificationProvider} from '../hooks/useNotifications';
+import {UnreadMessagesProvider} from '../hooks/useUnreadMessages';
 
 export default function RootLayout() {
   return (
@@ -47,6 +47,7 @@ export default function RootLayout() {
               name="chat/[id]"
               options={{
                 title: 'Чат',
+                  headerShown: false,
                 headerTintColor: '#770002',
               }}
             />

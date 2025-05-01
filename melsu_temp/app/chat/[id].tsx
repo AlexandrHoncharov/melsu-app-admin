@@ -1,67 +1,165 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  AppState,
+  Dimensions,
+  Easing,
+  FlatList,
+  KeyboardAvoidingView,
+  Linking,
+  Modal,
+  Platform,
+  RefreshControl,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  ActivityIndicator,
-  StyleSheet,
-  SafeAreaView,
-  RefreshControl,
-  Alert,
-  ToastAndroid,
-  AppState,
-  Linking
+  View
 } from 'react-native';
-import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../hooks/useAuth';
+import {Ionicons} from '@expo/vector-icons';
+import {useLocalSearchParams, useRouter} from 'expo-router';
+import {useAuth} from '../../hooks/useAuth';
 import chatService from '../../src/services/chatService';
 
+// Get screen dimensions for responsive design
+const {width, height} = Dimensions.get('window');
+
+// Simplified Marquee Title Component - Always scrolls when text is long
+const MarqueeTitle = ({title}) => {
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const [textWidth, setTextWidth] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    // Only start animation when we have both widths
+    if (textWidth > 0 && containerWidth > 0) {
+      // Only animate if text doesn't fit
+      if (textWidth > containerWidth) {
+        startScrolling();
+      } else {
+        // Reset position if text fits
+        scrollX.setValue(0);
+      }
+    }
+  }, [textWidth, containerWidth, title]);
+
+  const startScrolling = () => {
+    // Reset to initial position before starting
+    scrollX.setValue(containerWidth);
+
+    // Set up recurring animation
+    Animated.loop(
+        Animated.sequence([
+          // Move from right to left
+          Animated.timing(scrollX, {
+            toValue: -textWidth,
+            duration: Math.max(textWidth * 10, 5000), // Adjust speed based on length
+            useNativeDriver: true,
+            easing: Easing.linear
+          }),
+          // Small pause at the end
+          Animated.delay(800),
+          // Move back to start (off screen right)
+          Animated.timing(scrollX, {
+            toValue: containerWidth,
+            duration: 0, // Instant jump
+            useNativeDriver: true
+          }),
+          // Small pause before restarting
+          Animated.delay(800),
+        ])
+    ).start();
+  };
+
+  return (
+      <View
+          style={styles.titleContainer}
+          onLayout={(event) => {
+            setContainerWidth(event.nativeEvent.layout.width);
+          }}
+      >
+        <Animated.Text
+            style={[
+              styles.titleText,
+              {transform: [{translateX: scrollX}]}
+            ]}
+            onLayout={(event) => {
+              setTextWidth(event.nativeEvent.layout.width);
+            }}
+        >
+          {title}
+        </Animated.Text>
+      </View>
+  );
+};
+
+// Custom StatusBar component for more reliable status bar handling
+function CustomStatusBar({backgroundColor = '#ffffff', barStyle = 'dark-content'}) {
+  const STATUS_BAR_HEIGHT = Platform.OS === 'android' ? 30 : 0;
+
+  return (
+      <View style={{height: STATUS_BAR_HEIGHT, backgroundColor}}>
+        <StatusBar
+            translucent
+            backgroundColor={backgroundColor}
+            barStyle={barStyle}
+        />
+      </View>
+  );
+}
+
+// Helper function to format message time
+const formatMessageTime = (timestamp) => {
+  if (!timestamp) return '';
+
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+};
+
 // Utility function to detect and render clickable links
-// Улучшенная функция для обнаружения и отображения кликабельных ссылок
 const renderTextWithLinks = (text, isOwnMessage) => {
   if (!text) return null;
 
-  // Улучшенное регулярное выражение для URL-адресов
+  // Improved URL regex pattern
   const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+\.[^\s]+)/g;
 
-  // Найти все URL в тексте
+  // Find all URLs in text
   const matches = [...text.matchAll(urlPattern)];
 
   if (matches.length === 0) {
-    // Если ссылок нет, просто вернуть текст
+    // If no links, just return text
     return (
-      <Text style={isOwnMessage ? styles.ownMessageText : {}}>
+        <Text style={isOwnMessage ? styles.ownMessageText : styles.messageText}>
         {text}
       </Text>
     );
   }
 
-  // Создаем массив для хранения результатов
+  // Create array for results
   const result = [];
   let lastIndex = 0;
 
-  // Проходим по каждому найденному URL
+  // Process each URL match
   matches.forEach((match, idx) => {
     const url = match[0];
     const startIndex = match.index;
     const endIndex = startIndex + url.length;
 
-    // Добавляем текст до ссылки, если он есть
+    // Add text before link if any
     if (startIndex > lastIndex) {
       const textBefore = text.substring(lastIndex, startIndex);
       result.push(
-        <Text key={`text-${idx}`} style={isOwnMessage ? styles.ownMessageText : {}}>
+          <Text key={`text-${idx}`} style={isOwnMessage ? styles.ownMessageText : styles.messageText}>
           {textBefore}
         </Text>
       );
     }
 
-    // Добавляем саму ссылку
+    // Add the link itself
     result.push(
       <Text
         key={`url-${idx}`}
@@ -72,14 +170,14 @@ const renderTextWithLinks = (text, isOwnMessage) => {
       </Text>
     );
 
-    // Обновляем lastIndex для следующей итерации
+    // Update lastIndex for next iteration
     lastIndex = endIndex;
   });
 
-  // Добавляем оставшийся текст после последней ссылки, если он есть
+  // Add remaining text after last link if any
   if (lastIndex < text.length) {
     result.push(
-      <Text key="text-last" style={isOwnMessage ? styles.ownMessageText : {}}>
+        <Text key="text-last" style={isOwnMessage ? styles.ownMessageText : styles.messageText}>
         {text.substring(lastIndex)}
       </Text>
     );
@@ -100,7 +198,6 @@ const handleUrlPress = (url) => {
         Linking.openURL(formattedUrl);
       } else {
         console.log(`Cannot open URL: ${formattedUrl}`);
-        // Optionally show an alert to the user
         Alert.alert(
           "Ошибка",
           `Не удалось открыть ссылку: ${url}`
@@ -120,6 +217,7 @@ export default function ChatScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const chatId = Array.isArray(id) ? id[0] : id;
+
   const [messages, setMessages] = useState([]);
   const [chatTitle, setChatTitle] = useState('Чат');
   const [messageText, setMessageText] = useState('');
@@ -130,6 +228,9 @@ export default function ChatScreen() {
   const [lastSent, setLastSent] = useState(null);
   const [otherUserInfo, setOtherUserInfo] = useState(null);
   const [lastMessageTimestamp, setLastMessageTimestamp] = useState(0);
+
+  // New states for action menu
+  const [showActionMenu, setShowActionMenu] = useState(false);
 
   const { user } = useAuth();
   const flatListRef = useRef(null);
@@ -146,6 +247,15 @@ export default function ChatScreen() {
       console.log(`📱 Current user ID set to: ${currentUserIdRef.current}`);
     }
   }, [user]);
+
+  // Set status bar properties for Android
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      StatusBar.setBackgroundColor('#ffffff');
+      StatusBar.setBarStyle('dark-content');
+      StatusBar.setTranslucent(true);
+    }
+  }, []);
 
   // Memoized function to load only new messages
   const loadNewMessages = useCallback(async () => {
@@ -209,7 +319,10 @@ export default function ChatScreen() {
 
   // Load chat data - full load of all messages
   const loadChatData = async (isRefresh = false) => {
-    if (!isRefresh) setLoading(true);
+    // Only show loading screen on very first load, not on refreshes or updates
+    if (!isRefresh && isInitialLoad) {
+      setLoading(true);
+    }
 
     console.log(`📱 Loading chat data for chat ${chatId}...`);
     try {
@@ -293,7 +406,7 @@ export default function ChatScreen() {
 
     } catch (error) {
       console.error('📱 Error loading chat data:', error);
-      if (!isRefresh) {
+      if (!isRefresh && isInitialLoad) {
         Alert.alert(
           "Ошибка",
           "Не удалось загрузить сообщения. Проверьте подключение к интернету."
@@ -432,97 +545,118 @@ export default function ChatScreen() {
     loadChatData(true);
   };
 
-  // Show notification about sending status
-  const showNotification = (message) => {
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-    }
-    // For iOS you can use Alert or another library
+  // Leave chat function
+  const handleLeaveChat = () => {
+    setShowActionMenu(false);
+
+    Alert.alert(
+        "Покинуть чат",
+        "Вы уверены, что хотите покинуть этот чат? Вы больше не будете получать сообщения.",
+        [
+          {text: "Отмена", style: "cancel"},
+          {
+            text: "Покинуть",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await chatService.deleteChat(chatId);
+                router.back();
+              } catch (error) {
+                console.error("Ошибка при покидании чата:", error);
+                Alert.alert("Ошибка", "Не удалось покинуть чат. Попробуйте позже.");
+              }
+            }
+          }
+        ]
+    );
   };
 
-  // Send message
+  // Mute chat function
+  const handleMuteChat = () => {
+    setShowActionMenu(false);
+    // Placeholder for mute functionality
+    Alert.alert("Уведомление", "Функция отключения уведомлений будет доступна в следующем обновлении.");
+  };
+
+  // Send message completely asynchronously
   const handleSendMessage = async () => {
     if (!messageText.trim() || sending) return;
 
     try {
-      setSending(true);
-
-      // CHECK! Make sure the correct ID is used
-      if (!user || !user.id) {
-        throw new Error('User data not available');
-      }
-
-      // CRITICAL CHANGE: Force set correct user ID
-      if (typeof chatService.forceCurrentUserId === 'function') {
-        await chatService.forceCurrentUserId(user.id);
-      }
-
-      // Create a copy of the text (to clear the field immediately)
+      // Store message text before clearing input
       const messageToSend = messageText.trim();
+
+      // Immediately clear input and update UI state
       setMessageText('');
 
-      // For forced reload after sending
+      // Generate a stable ID (will be used until server confirms)
+      const clientMessageId = `local_${Date.now()}`;
       const timestamp = Date.now();
-      setLastSent(timestamp);
 
-      console.log(`📱 Sending message from ${currentUserIdRef.current}: "${messageToSend.substring(0, 20)}..."`);
-
-      // IMPORTANT: First add a "fake" message locally so it appears immediately
-      const tempMessageId = `temp_${Date.now()}`;
-      const tempMessage = {
-        id: tempMessageId,
+      // Immediately add message to UI as if it's already sent
+      const localMessage = {
+        id: clientMessageId,
         senderId: currentUserIdRef.current,
         senderName: user?.fullName || user?.username || 'Я',
         text: messageToSend,
-        timestamp: Date.now(),
-        isFromCurrentUser: true, // IMPORTANT: Force set that this is from the current user
-        isTempMessage: true
+        timestamp: timestamp,
+        isFromCurrentUser: true
+        // No isTempMessage or sending flags - message appears as regular
       };
 
-      // Add temporary message to the list
-      setMessages(prevMessages => [...prevMessages, tempMessage]);
+      // Add message to UI
+      setMessages(prevMessages => [...prevMessages, localMessage]);
 
       // Scroll down to the new message
-      setTimeout(() => {
-        if (flatListRef.current) {
-          flatListRef.current.scrollToEnd({ animated: true });
+      if (flatListRef.current) {
+        flatListRef.current.scrollToEnd({animated: false});
+      }
+
+      // Silently send in background
+      (async () => {
+        try {
+          // Initialize if needed
+          if (typeof chatService.forceCurrentUserId === 'function') {
+            await chatService.forceCurrentUserId(user?.id);
+          }
+
+          // Send to server without affecting UI
+          await chatService.sendMessage(chatId, messageToSend);
+
+          // No UI update needed - message already looks sent
+          // Background sync will eventually update the message ID
+
+          // Optional silent background sync after delay
+          setTimeout(() => {
+            loadNewMessages().catch(() => {/* ignore errors */
+            });
+          }, 5000); // Long delay to ensure no UI disruption
+        } catch (err) {
+          // Only update UI on serious errors
+          console.error('Background send error:', err);
+
+          // Silently mark as failed in state without visual indicators
+          setMessages(prevMessages =>
+              prevMessages.map(msg => {
+                if (msg.id === clientMessageId) {
+                  return {
+                    ...msg,
+                    _sendFailed: true // Internal flag, not used for UI
+                  };
+                }
+                return msg;
+              })
+          );
         }
-      }, 100);
-
-      // Send message to Firebase
-      const messageId = await chatService.sendMessage(chatId, messageToSend);
-      console.log(`📱 Message sent successfully with ID: ${messageId}`);
-
-      // Show notification about successful sending
-      showNotification('Сообщение отправлено');
-
-      // Reload messages after sending to sync with server
-      setTimeout(() => {
-        loadNewMessages(); // Use optimized loading of only new messages
-      }, 500);
+      })();
 
     } catch (error) {
-      console.error('📱 Error sending message:', error);
-      Alert.alert(
-        "Ошибка при отправке",
-        "Не удалось отправить сообщение. Попробуйте еще раз."
-      );
-      // Restore message text in case of error
-      setMessageText(messageText);
-    } finally {
-      setSending(false);
+      console.error('Error in message handling:', error);
+      // Don't show error to user unless critical
     }
   };
 
-  // Format message time
-  const formatMessageTime = (timestamp) => {
-    if (!timestamp) return '';
-
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  // Render message
+  // Render message without loading indicators
   const renderMessage = ({ item }) => {
     // CRITICALLY IMPORTANT: use explicitly specified property
     const isOwnMessage = item.isFromCurrentUser;
@@ -530,25 +664,25 @@ export default function ChatScreen() {
     return (
       <View style={[
         styles.messageContainer,
-        isOwnMessage ? styles.ownMessageContainer : {}
+        isOwnMessage ? styles.ownMessageContainer : styles.otherMessageContainer
       ]}>
         {!isOwnMessage && (
-          <Text style={styles.messageSender}>{item.senderName || `Пользователь ${item.senderId}`}</Text>
+            <Text style={styles.messageSender}>
+              {item.senderName || `Пользователь ${item.senderId}`}
+            </Text>
         )}
 
         <View style={[
           styles.messageBubble,
-          isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble,
-          item.isTempMessage && styles.tempMessageBubble
+          isOwnMessage ? styles.ownMessageBubble : styles.otherMessageBubble
         ]}>
-          <View style={styles.messageText}>
+          <View style={styles.messageContent}>
             {renderTextWithLinks(item.text, isOwnMessage)}
           </View>
         </View>
 
         <Text style={styles.messageTime}>
           {formatMessageTime(item.timestamp)}
-          {item.isTempMessage && " ✓"}
         </Text>
       </View>
     );
@@ -570,33 +704,53 @@ export default function ChatScreen() {
     router.back();
   };
 
-  // Loading state
+  // Fix the loading function to not show the loading on subsequent renders
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <Stack.Screen options={{ title: 'Загрузка...' }} />
-        <ActivityIndicator size="large" color="#770002" />
+        <SafeAreaView style={styles.container} edges={['top']}>
+          <CustomStatusBar/>
+          <View style={styles.header}>
+            <TouchableOpacity
+                style={styles.backButton}
+                onPress={handleBackPress}
+            >
+              <Ionicons name="chevron-back" size={24} color="#000"/>
+            </TouchableOpacity>
+            <Text style={styles.title}>Загрузка...</Text>
+            <View style={{width: 40}}/>
+          </View>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#bb0000"/>
+            <Text style={styles.loadingText}>Загрузка сообщений...</Text>
+          </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <Stack.Screen options={{
-        title: chatTitle,
-        headerTintColor: '#770002',
-        headerLeft: () => (
-          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#770002" />
-          </TouchableOpacity>
-        )
-      }} />
-
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <CustomStatusBar/>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.container}
+        style={styles.keyboardAvoid}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
+        <View style={styles.header}>
+          <TouchableOpacity
+              style={styles.backButton}
+              onPress={handleBackPress}
+          >
+            <Ionicons name="chevron-back" size={24} color="#000"/>
+          </TouchableOpacity>
+          <MarqueeTitle title={chatTitle}/>
+          <TouchableOpacity
+              style={styles.menuButton}
+              onPress={() => setShowActionMenu(true)}
+          >
+            <Ionicons name="ellipsis-vertical" size={24} color="#000"/>
+          </TouchableOpacity>
+        </View>
+
         <FlatList
           ref={flatListRef}
           data={messages}
@@ -607,8 +761,8 @@ export default function ChatScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              colors={['#770002']}
-              tintColor="#770002"
+              colors={['#bb0000']}
+              tintColor="#bb0000"
             />
           }
           ListEmptyComponent={
@@ -622,17 +776,18 @@ export default function ChatScreen() {
 
         <View style={styles.inputContainer}>
           <TextInput
-            style={styles.input}
+              style={styles.messageInput}
             placeholder="Введите сообщение..."
             value={messageText}
             onChangeText={setMessageText}
             multiline
+              maxLength={1000}
           />
 
           <TouchableOpacity
             style={[
               styles.sendButton,
-              (!messageText.trim() || sending) && styles.disabledButton
+              (!messageText.trim() || sending) && styles.sendButtonDisabled
             ]}
             onPress={handleSendMessage}
             disabled={!messageText.trim() || sending}
@@ -644,6 +799,53 @@ export default function ChatScreen() {
             )}
           </TouchableOpacity>
         </View>
+
+        {/* Action Menu Modal */}
+        <Modal
+            visible={showActionMenu}
+            transparent={true}
+            animationType="fade"
+            onRequestClose={() => setShowActionMenu(false)}
+        >
+          <TouchableOpacity
+              style={styles.modalOverlay}
+              activeOpacity={1}
+              onPress={() => setShowActionMenu(false)}
+          >
+            <View style={styles.actionMenuContainer}>
+              <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  onPress={handleRefresh}
+              >
+                <Ionicons name="refresh" size={24} color="#333" style={styles.actionMenuIcon}/>
+                <Text style={styles.actionMenuText}>Обновить</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  onPress={handleMuteChat}
+              >
+                <Ionicons name="notifications-off" size={24} color="#1976D2" style={styles.actionMenuIcon}/>
+                <Text style={styles.actionMenuText}>Отключить уведомления</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                  style={styles.actionMenuItem}
+                  onPress={handleLeaveChat}
+              >
+                <Ionicons name="exit-outline" size={24} color="#D32F2F" style={styles.actionMenuIcon}/>
+                <Text style={styles.actionMenuText}>Покинуть чат</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                  style={[styles.actionMenuItem, styles.actionMenuItemCancel]}
+                  onPress={() => setShowActionMenu(false)}
+              >
+                <Text style={styles.actionMenuCancelText}>Отмена</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -652,64 +854,121 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F9F9F9',
+  },
+  keyboardAvoid: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+    backgroundColor: '#FFFFFF',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  titleContainer: {
+    flex: 1,
+    height: 20,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  titleText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#770002',
+    textAlign: 'center',
+    width: 'auto',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#666',
+  },
   messagesContainer: {
     padding: 16,
-    paddingBottom: 8,
+    paddingBottom: 24,
   },
   messageContainer: {
+    marginBottom: 16,
     maxWidth: '80%',
-    marginBottom: 12,
-    alignSelf: 'flex-start',
   },
   ownMessageContainer: {
     alignSelf: 'flex-end',
   },
+  otherMessageContainer: {
+    alignSelf: 'flex-start',
+  },
   messageSender: {
     fontSize: 12,
-    color: '#666',
-    marginBottom: 2,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
     marginLeft: 8,
   },
   messageBubble: {
     padding: 12,
     borderRadius: 16,
-    backgroundColor: '#fff',
-    borderBottomLeftRadius: 4,
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 1},
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   ownMessageBubble: {
-    backgroundColor: '#770002',
-    borderBottomLeftRadius: 16,
+    backgroundColor: '#F3E5F5',
     borderBottomRightRadius: 4,
   },
   otherMessageBubble: {
+    backgroundColor: '#E3F2FD',
     borderBottomLeftRadius: 4,
-    borderBottomRightRadius: 16,
   },
   tempMessageBubble: {
     opacity: 0.7,
   },
-  messageText: {
-    fontSize: 16,
-    color: '#333',
+  messageContent: {
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
+  messageText: {
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
+  },
   ownMessageText: {
-    color: '#fff',
+    fontSize: 14,
+    color: '#333',
+    lineHeight: 20,
   },
   messageLink: {
-    color: '#007AFF', // iOS blue link color
+    color: '#007AFF',
     textDecorationLine: 'underline',
   },
   ownMessageLink: {
-    color: '#B3E5FC', // Lighter blue for better visibility on dark background
+    color: '#7B1FA2',
     textDecorationLine: 'underline',
   },
   messageTime: {
@@ -722,32 +981,36 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
-    backgroundColor: '#fff',
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#eee',
+    borderTopColor: '#E5E5EA',
+    padding: 8,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 8,
+    paddingLeft: 12,
+    paddingRight: 12,
   },
-  input: {
+  messageInput: {
     flex: 1,
-    minHeight: 40,
-    maxHeight: 120,
-    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 8,
+    maxHeight: 100,
     fontSize: 16,
+    backgroundColor: '#F9F9F9',
   },
   sendButton: {
+    backgroundColor: '#bb0000',
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#770002',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
   },
-  disabledButton: {
-    backgroundColor: '#ccc',
+  sendButtonDisabled: {
+    backgroundColor: '#E0E0E0',
   },
   emptyContainer: {
     padding: 30,
@@ -757,8 +1020,57 @@ const styles = StyleSheet.create({
   emptyText: {
     color: '#999',
     textAlign: 'center',
+    fontSize: 16,
   },
-  backButton: {
-    padding: 8,
-  }
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  actionMenuContainer: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 16,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 16, // Additional padding for iOS
+  },
+  actionMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  actionMenuItemCancel: {
+    justifyContent: 'center',
+    borderBottomWidth: 0,
+    marginTop: 8,
+  },
+  actionMenuIcon: {
+    marginRight: 16,
+  },
+  actionMenuText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  actionMenuCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#bb0000',
+  },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    marginRight: 8,
+  },
+  messageStatusIcon: {
+    marginLeft: 4,
+  },
+  failedMessageBubble: {
+    borderColor: '#F44336',
+    borderWidth: 1,
+    opacity: 0.8,
+  },
 });

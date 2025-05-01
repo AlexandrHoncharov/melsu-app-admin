@@ -9,20 +9,35 @@
         </a>
     </div>
 
-    <!-- Поиск -->
+    <!-- Поиск и сортировка -->
     <div class="mb-6">
-        <form action="{{ url_for('teachers_list') }}" method="GET" class="flex">
+        <form action="{{ url_for('teachers_list') }}" class="flex flex-wrap gap-2" method="GET">
             <input type="text" name="search" value="{{ search_query|default('', true) }}"
-                   class="flex-grow px-4 py-2 border rounded-l-md focus:outline-none focus:ring-2 focus:ring-primary"
+                   class="flex-grow px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
                    placeholder="Поиск по ФИО, должности или кафедре">
-            <button type="submit" class="bg-gray-200 hover:bg-gray-300 px-4 py-2 border-t border-r border-b rounded-r-md">
-                Найти
-            </button>
-            {% if search_query %}
-                <a href="{{ url_for('teachers_list') }}" class="ml-2 flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm">
+
+            <div class="flex items-center">
+                <select class="border rounded-md px-2 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                        name="sort">
+                    <option if sort== value="name" {%
+                    'name' %}selected{% endif %}>По ФИО</option>
+                    <option if sort== value="position" {%
+                    'position' %}selected{% endif %}>По должности</option>
+                    <option if sort== value="department" {%
+                    'department' %}selected{% endif %}>По кафедре</option>
+                </select>
+
+                <button class="ml-2 bg-gray-200 hover:bg-gray-300 px-4 py-2 border rounded-md" type="submit">
+                    Применить
+                </button>
+
+                {% if search_query or sort != 'name' %}
+                <a class="ml-2 flex items-center px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-md text-sm"
+                   href="{{ url_for('teachers_list') }}">
                     Сбросить
                 </a>
-            {% endif %}
+                {% endif %}
+            </div>
         </form>
     </div>
 
@@ -41,9 +56,45 @@
         <table class="min-w-full bg-white">
             <thead>
                 <tr class="bg-gray-100 text-gray-600 uppercase text-sm leading-normal">
-                    <th class="py-3 px-6 text-left">ФИО</th>
-                    <th class="py-3 px-6 text-left">Должность</th>
-                    <th class="py-3 px-6 text-left">Кафедра</th>
+                    <th class="py-3 px-6 text-left">
+                        <a class="flex items-center"
+                           href="{{ url_for('teachers_list', sort='name', search=search_query) }}">
+                            ФИО
+                            {% if sort == 'name' %}
+                            <svg class="h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                 xmlns="http://www.w3.org/2000/svg">
+                                <path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"
+                                      stroke-width="2"/>
+                            </svg>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th class="py-3 px-6 text-left">
+                        <a class="flex items-center"
+                           href="{{ url_for('teachers_list', sort='position', search=search_query) }}">
+                            Должность
+                            {% if sort == 'position' %}
+                            <svg class="h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                 xmlns="http://www.w3.org/2000/svg">
+                                <path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"
+                                      stroke-width="2"/>
+                            </svg>
+                            {% endif %}
+                        </a>
+                    </th>
+                    <th class="py-3 px-6 text-left">
+                        <a class="flex items-center"
+                           href="{{ url_for('teachers_list', sort='department', search=search_query) }}">
+                            Кафедра
+                            {% if sort == 'department' %}
+                            <svg class="h-4 w-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                                 xmlns="http://www.w3.org/2000/svg">
+                                <path d="M19 9l-7 7-7-7" stroke-linecap="round" stroke-linejoin="round"
+                                      stroke-width="2"/>
+                            </svg>
+                            {% endif %}
+                        </a>
+                    </th>
                     <th class="py-3 px-6 text-center">Учетная запись</th>
                     <th class="py-3 px-6 text-center">Действия</th>
                 </tr>

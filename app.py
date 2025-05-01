@@ -640,24 +640,89 @@ def logout():
     return redirect(url_for('login'))
 
 
+# Обновленная функция teachers_list с сортировкой
 @app.route('/teachers')
 @login_required
 def teachers_list():
     search_query = request.args.get('search', '')
+    sort = request.args.get('sort', 'name')  # По умолчанию сортировка по имени
 
     if search_query:
         # Поиск по имени, должности или кафедре
-        teachers = Teacher.query.filter(
+        base_query = Teacher.query.filter(
             db.or_(
                 Teacher.name.ilike(f'%{search_query}%'),
                 Teacher.position.ilike(f'%{search_query}%'),
                 Teacher.department.ilike(f'%{search_query}%')
             )
-        ).all()
+        )
     else:
-        teachers = Teacher.query.all()
+        base_query = Teacher.query
 
-    return render_template('teachers/list.html', teachers=teachers, search_query=search_query)
+    # Применяем сортировку
+    if sort == 'position':
+        teachers = base_query.order_by(Teacher.position).all()
+    elif sort == 'department':
+        teachers = base_query.order_by(Teacher.department).all()
+    else:  # По умолчанию сортируем по имени
+        teachers = base_query.order_by(Teacher.name).all()
+
+    return render_template('teachers/list.html',
+                           teachers=teachers,
+                           search_query=search_query,
+                           sort=sort)
+
+
+# Новый маршрут для перегенерации учетных данных преподавателя
+@app.route('/teachers/regenerate_credentials/<int:teacher_id>', methods=['POST'])
+@login_required
+def regenerate_teacher_credentials(teacher_id):
+    try:
+        teacher = Teacher.query.get_or_404(teacher_id)
+
+        if not teacher.has_account or not teacher.user_id:
+            flash('У этого преподавателя нет учетной записи', 'error')
+            return redirect(url_for('teachers_list'))
+
+        # Получаем пользователя преподавателя
+        user = User.query.get(teacher.user_id)
+        if not user:
+            flash('Учетная запись не найдена', 'error')
+            return redirect(url_for('teachers_list'))
+
+        # Генерируем новые учетные данные на основе ФИО
+        username, password = Teacher.generate_credentials(name=teacher.name)
+
+        # Обновляем учетные данные пользователя
+        user.username = username
+        user.password_plain = password
+        user.password = generate_password_hash(password)
+
+        # Сохраняем изменения
+        db.session.commit()
+
+        # Отправляем уведомление пользователю о смене учетных данных
+        create_and_send_notification(
+            recipient_id=user.id,
+            title="Изменение учетных данных",
+            body=f"Ваши учетные данные были обновлены. Новый логин: {username}, новый пароль: {password}",
+            notification_type='system',
+            sender_id=session.get('user_id'),
+            data={
+                'username': username,
+                'credentials_updated': True
+            }
+        )
+
+        flash(f'Учетные данные для {teacher.name} успешно обновлены. Новый логин: {username}, новый пароль: {password}',
+              'success')
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при обновлении учетных данных: {str(e)}', 'error')
+        print(f"Ошибка при обновлении учетных данных: {str(e)}")
+
+    return redirect(url_for('view_teacher_credentials', teacher_id=teacher_id))
 
 
 @app.route('/teachers/sync', methods=['GET', 'POST'])
@@ -2129,8 +2194,8 @@ def create_teacher_account(teacher_id):
             flash('У этого преподавателя уже есть учетная запись', 'warning')
             return redirect(url_for('teachers_list'))
 
-        # Генерируем логин и пароль
-        username, password = Teacher.generate_credentials()
+        # Генерируем логин на основе ФИО и пароль
+        username, password = Teacher.generate_credentials(name=teacher.name)
 
         # Создаем нового пользователя
         new_user = User(

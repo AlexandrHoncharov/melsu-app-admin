@@ -66,14 +66,95 @@ class Teacher(db.Model):
         return f'<Teacher {self.name}>'
 
     @staticmethod
-    def generate_credentials():
-        # Генерация логина (строчные буквы, 6 символов)
-        login = ''.join(random.choices(string.ascii_lowercase, k=6))
+    def generate_credentials(name=None):
+        """
+        Generates username and password for a teacher
 
-        # Генерация пароля (буквы + цифры, 8 символов)
+        Args:
+            name (str, optional): Teacher name to generate username from
+
+        Returns:
+            tuple: (username, password)
+        """
+        from models import User
+
+        # Generate password (letters + digits, 8 characters)
         password = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
 
-        return login, password
+        # If no name provided, fall back to random username
+        if not name or not name.strip():
+            login = ''.join(random.choices(string.ascii_lowercase, k=6))
+            return login, password
+
+        try:
+            # Transliterate Russian name to Latin
+            try:
+                from transliterate import translit
+                latin_name = translit(name, 'ru', reversed=True)
+            except:
+                # Fallback if transliteration fails or module not installed
+                latin_name = name
+
+            # Clean and normalize name
+            latin_name = latin_name.lower()
+            import re
+            latin_name = re.sub(r'[^\w\s]', '', latin_name)  # Remove special characters
+
+            # Split name into parts
+            name_parts = latin_name.split()
+
+            # Try different username formats
+            username_formats = []
+
+            # Format 1: lastname
+            if len(name_parts) >= 1:
+                username_formats.append(f"{name_parts[0]}")
+
+            # Format 2: lastname.firstname
+            if len(name_parts) >= 2:
+                username_formats.append(f"{name_parts[0]}.{name_parts[1]}")
+
+            # Format 3: first letter of firstname + lastname
+            if len(name_parts) >= 2 and len(name_parts[1]) > 0:
+                username_formats.append(f"{name_parts[1][0]}{name_parts[0]}")
+
+            # Format 4: lastname + first letter of firstname
+            if len(name_parts) >= 2 and len(name_parts[1]) > 0:
+                username_formats.append(f"{name_parts[0]}{name_parts[1][0]}")
+
+            # Format 5: firstname.lastname (if not already created as lastname.firstname)
+            if len(name_parts) >= 2:
+                username_formats.append(f"{name_parts[1]}.{name_parts[0]}")
+
+            # Try each format until we find a unique username
+            for base_username in username_formats:
+                username = base_username
+                suffix = 1
+
+                # Check if username exists, if yes, add a number suffix
+                while User.query.filter_by(username=username).first() is not None:
+                    username = f"{base_username}{suffix}"
+                    suffix += 1
+
+                    # Avoid infinite loop if we somehow can't find a unique username
+                    if suffix > 100:
+                        # Fallback to random username
+                        username = 'teacher_' + ''.join(random.choices(string.ascii_lowercase, k=6))
+                        break
+
+                # If we found a unique username, return it
+                if User.query.filter_by(username=username).first() is None:
+                    return username, password
+
+            # If all formats failed, fallback to random username
+            username = 'teacher_' + ''.join(random.choices(string.ascii_lowercase, k=6))
+            return username, password
+
+        except Exception as e:
+            # Handle any errors
+            print(f"Error generating credentials: {str(e)}")
+            username = 'teacher_' + ''.join(random.choices(string.ascii_lowercase, k=6))
+            return username, password
 
 
 class Schedule(db.Model):

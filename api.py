@@ -3422,133 +3422,172 @@ def register_device(current_user):
         }), 500
 
 
-@app.route('/api/device/unregister', methods=['POST'])
+# Add this new endpoint to app.py for token deletion using token authentication
+
+@app.route('/api/device/unregister/all', methods=['POST'])
 @token_required
-def unregister_device(current_user):
-    """Улучшенная функция отмены регистрации устройства с поддержкой iOS"""
+def unregister_all_user_tokens(current_user):
+    """
+    Unregisters ALL device tokens for the current authenticated user.
+    Uses token authentication for reliability.
+    """
     try:
-        print(f"📱 Запрос на отмену регистрации устройства для user_id={current_user.id}")
+        # Get user_id parameter (optional, defaults to current authenticated user)
+        user_id = request.json.get('user_id', current_user.id)
 
-        data = request.json
-
-        if not data:
-            print(f"📱 Отсутствуют данные в запросе для отмены регистрации, user_id={current_user.id}")
-            return jsonify({'message': 'Не предоставлены данные', 'success': False}), 400
-
-        token = data.get('token')
-        platform = data.get('platform', 'unknown')
-        unregister_all = data.get('unregister_all', False)
-
-        # Специальный случай: удаляем все токены для этого пользователя
-        if unregister_all or not token:
-            if not token:
-                print(f"📱 Токен не предоставлен для отмены регистрации, user_id={current_user.id}")
-                print(f"📱 Отменяем регистрацию ВСЕХ токенов для user_id={current_user.id}")
-            else:
-                print(f"📱 Запрошена отмена регистрации ВСЕХ токенов для user_id={current_user.id}")
-
-            # Получаем все токены пользователя
-            user_tokens = DeviceToken.query.filter_by(user_id=current_user.id).all()
-
-            # Информация для логирования
-            if user_tokens:
-                print(f"📱 Найдено {len(user_tokens)} токенов пользователя")
-                for token_obj in user_tokens:
-                    token_preview = token_obj.token[:15] + '...' if len(token_obj.token) > 15 else token_obj.token
-                    print(
-                        f"   - Удаление токена: {token_preview} (платформа: {token_obj.platform}, устройство: {token_obj.device_name})")
-            else:
-                print(f"📱 Токены не найдены для user_id={current_user.id}")
-
-            # Удаляем все токены пользователя
-            deleted = DeviceToken.query.filter_by(user_id=current_user.id).delete()
-            db.session.commit()
-
-            # Информация для iOS устройств
-            ios_info = {}
-            if platform.lower() == 'ios':
-                ios_info = {
-                    'ios_notes': 'Все токены iOS устройств успешно удалены'
-                }
-
+        # Check if admin is trying to delete tokens for another user
+        if str(user_id) != str(current_user.id) and not current_user.is_admin:
             return jsonify({
-                'message': f'Удалены все токены устройств ({deleted} токенов)',
-                'success': True,
-                'deleted_count': deleted,
-                **ios_info
-            }), 200
+                'success': False,
+                'message': 'Cannot delete tokens for another user'
+            }), 403
 
-        # Находим и удаляем конкретный токен
-        token_preview = token[:15] + '...' if len(token) > 15 else token
-        print(f"📱 Отмена регистрации токена: {token_preview} для user_id={current_user.id}")
+        print(f"Deleting ALL tokens for user_id={user_id}")
 
-        device_token = DeviceToken.query.filter_by(token=token).first()
-        if device_token:
-            # Дополнительная проверка безопасности: только разрешаем удаление, если токен принадлежит текущему пользователю
-            if device_token.user_id != current_user.id:
-                print(
-                    f"📱 Токен принадлежит user_id={device_token.user_id}, а не текущему пользователю={current_user.id}")
-                return jsonify({
-                    'message': 'У вас нет прав на отмену регистрации этого токена',
-                    'success': False
-                }), 403
+        # Find and delete all tokens for this user
+        token_count = DeviceToken.query.filter_by(user_id=user_id).count()
+        deleted = DeviceToken.query.filter_by(user_id=user_id).delete()
+        db.session.commit()
 
-            # Удаляем токен
-            db.session.delete(device_token)
-            db.session.commit()
-            print(f"📱 Успешно отменена регистрация токена для user_id={current_user.id}")
+        return jsonify({
+            'success': True,
+            'message': f'Successfully deleted {deleted} device tokens for user {user_id}',
+            'count': deleted,
+            'tokens_found': token_count
+        })
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting user tokens: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error deleting tokens: {str(e)}'
+        }), 500
 
-            # iOS-специфичная информация
-            ios_info = {}
-            if platform.lower() == 'ios' or device_token.platform.lower() == 'ios':
-                ios_info = {
-                    'ios_notes': 'Токен iOS устройства успешно удален'
-                }
 
+# Add this alternative endpoint for token deletion using RESTful pattern
+@app.route('/api/user/<int:user_id>/tokens', methods=['DELETE'])
+@token_required
+def delete_user_tokens(current_user, user_id):
+    """
+    RESTful endpoint to delete all tokens for a specific user
+    """
+    try:
+        # Check if admin is trying to delete tokens for another user
+        if str(user_id) != str(current_user.id) and not current_user.is_admin:
             return jsonify({
-                'message': 'Регистрация токена устройства отменена',
+                'success': False,
+                'message': 'Cannot delete tokens for another user'
+            }), 403
+
+        print(f"RESTful deletion of all tokens for user_id={user_id}")
+
+        # Find and delete all tokens for this user
+        deleted = DeviceToken.query.filter_by(user_id=user_id).delete()
+        db.session.commit()
+
+        if deleted > 0:
+            return jsonify({
                 'success': True,
-                'deleted_count': 1,
-                **ios_info
-            }), 200
+                'message': f'Successfully deleted {deleted} device tokens',
+                'count': deleted
+            })
         else:
-            print(f"📱 Токен не найден для отмены регистрации, user_id={current_user.id}")
+            return jsonify({
+                'success': True,
+                'message': 'No tokens found for this user',
+                'count': 0
+            })
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error deleting user tokens: {str(e)}")
+        return jsonify({
+            'success': False,
+            'message': f'Error deleting tokens: {str(e)}'
+        }), 500
 
-            # Специальный случай: если токен не найден, но это iOS устройство,
-            # попробуем найти другие токены устройств iOS этого пользователя и удалить их
-            if platform.lower() == 'ios':
-                print(f"📱 Попытка найти другие iOS токены для user_id={current_user.id}")
-                ios_tokens = DeviceToken.query.filter_by(
-                    user_id=current_user.id,
-                    platform='ios'
-                ).all()
 
-                if ios_tokens:
-                    print(f"📱 Найдено {len(ios_tokens)} других iOS токенов, удаляем их")
-                    for ios_token in ios_tokens:
-                        db.session.delete(ios_token)
+# Modify the existing unregister_device function to handle token-based authentication
+@app.route('/api/device/unregister', methods=['POST'])
+def unregister_device():
+    """
+    Unregisters device tokens. Can unregister a specific token or all tokens for the current user.
+    Now handles both session and token authentication for better reliability.
+    """
+    try:
+        # Try to get the user from token first (more reliable in API contexts)
+        current_user = None
+        user_id = None
 
-                    db.session.commit()
-                    return jsonify({
-                        'message': f'Удалены альтернативные iOS токены ({len(ios_tokens)} токенов)',
-                        'success': True,
-                        'deleted_count': len(ios_tokens),
-                        'note': 'Запрошенный токен не был найден, но были удалены другие iOS токены'
-                    }), 200
+        # Check for Authorization header
+        if 'Authorization' in request.headers:
+            try:
+                auth_header = request.headers['Authorization']
+                if auth_header.startswith('Bearer '):
+                    token = auth_header.split(' ')[1]
+
+                    # Decode token to get user_id
+                    payload = jwt.decode(token, app.config.get('SECRET_KEY'), algorithms=['HS256'])
+                    user_id = payload['sub']
+
+                    # Get user object
+                    current_user = User.query.get(user_id)
+                    print(f"User {user_id} authenticated via token")
+            except Exception as token_error:
+                print(f"Token authentication failed: {str(token_error)}")
+
+        # Fall back to session if token auth failed
+        if not user_id and 'user_id' in session:
+            user_id = session['user_id']
+            current_user = User.query.get(user_id)
+            print(f"User {user_id} authenticated via session")
+
+        token = request.json.get('token')
+        all_user_tokens = request.json.get('all_user_tokens', False)
+        force_token = request.json.get('force_token')  # Added for compatibility
+
+        # Handle 'force_all_tokens_removal' special case
+        if token == 'force_all_tokens_removal' or force_token == 'force_all_tokens_removal':
+            all_user_tokens = True
+
+        # If all_user_tokens flag is set and we have a user_id
+        if all_user_tokens and user_id:
+            deleted_count = DeviceToken.query.filter_by(user_id=user_id).delete()
+            db.session.commit()
 
             return jsonify({
-                'message': 'Токен не найден',
-                'success': False
+                'success': True,
+                'message': f'Deleted {deleted_count} tokens for user {user_id}'
+            })
+
+        # Traditional single token deletion
+        if not token:
+            return jsonify({
+                'success': False,
+                'message': 'Token not provided'
+            }), 400
+
+        # Find and delete the token
+        deleted = DeviceToken.query.filter_by(token=token).delete()
+        db.session.commit()
+
+        if deleted:
+            return jsonify({
+                'success': True,
+                'message': 'Device token unregistered successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'Token not found'
             }), 404
 
     except Exception as e:
         db.session.rollback()
-        print(f"📱 Ошибка при отмене регистрации токена устройства для user_id={current_user.id}: {str(e)}")
+        print(f"Error unregistering token: {str(e)}")
         return jsonify({
-            'message': f'Ошибка: {str(e)}',
-            'success': False
+            'success': False,
+            'message': f'Error unregistering token: {str(e)}'
         }), 500
-
 
 @app.route('/api/device/test-notification', methods=['POST'])
 @token_required

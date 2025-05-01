@@ -133,8 +133,12 @@ export default function ScheduleScreen() {
     if (Platform.OS === 'android') {
       StatusBar.setBackgroundColor('#FFFFFF');
     }
+
+    // Only load data if authenticated
+    if (isAuthenticated) {
     loadScheduleData();
-  }, []);
+    }
+  }, [isAuthenticated]);
 
   // Load data when date changes
   useEffect(() => {
@@ -197,8 +201,15 @@ export default function ScheduleScreen() {
 
   // Load schedule data - main loading function
   const loadScheduleData = async () => {
+    // Add this check at the beginning of the function
+    if (!isAuthenticated) {
+      console.log('Not loading schedule data - user not authenticated');
+      return;
+    }
+
     setIsLoading(true);
     try {
+      console.log('Starting login process...');
       // Check network status
       const isNetworkAvailable = await scheduleService.isNetworkAvailable();
       setIsOffline(!isNetworkAvailable);

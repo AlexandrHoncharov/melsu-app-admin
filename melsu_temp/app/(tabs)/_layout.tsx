@@ -1,15 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Tabs, router, usePathname } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../hooks/useAuth';
-import { useUnreadMessages } from '../../hooks/useUnreadMessages';
-import { StyleSheet, View, Text, AppState } from 'react-native';
+import React, {useEffect, useRef, useState} from 'react';
+import {Tabs, router, usePathname} from 'expo-router';
+import {Ionicons} from '@expo/vector-icons';
+import {useAuth} from '../../hooks/useAuth';
+import {useUnreadMessages} from '../../hooks/useUnreadMessages';
+import {StyleSheet, View, Text, AppState} from 'react-native';
 import chatService from '../../src/services/chatService';
 import apiClient from '../../src/api/apiClient';
 
 export default function TabLayout() {
-  const { isAuthenticated, isLoading } = useAuth();
-  const { unreadCount, refreshUnreadCount } = useUnreadMessages();
+  const {isAuthenticated, isLoading} = useAuth();
+  const {unreadCount, refreshUnreadCount} = useUnreadMessages();
   const [localUnreadCount, setLocalUnreadCount] = useState(unreadCount || 0);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const appState = useRef(AppState.currentState);
@@ -73,15 +73,15 @@ export default function TabLayout() {
       // Promise с таймаутом в 4 секунды
       const countPromise = getUnreadCount();
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Таймаут получения непрочитанных сообщений')), 4000)
+          setTimeout(() => reject(new Error('Таймаут получения непрочитанных сообщений')), 4000)
       );
 
       // Используем Promise.race для ограничения времени выполнения
       const count = await Promise.race([countPromise, timeoutPromise])
-        .catch(err => {
-          console.warn('Ошибка или таймаут при получении непрочитанных сообщений:', err.message);
-          return 0; // Возвращаем 0 в случае ошибки или таймаута
-        });
+          .catch(err => {
+            console.warn('Ошибка или таймаут при получении непрочитанных сообщений:', err.message);
+            return 0; // Возвращаем 0 в случае ошибки или таймаута
+          });
 
       // Очищаем таймаут, так как операция завершена
       if (updateTimeoutRef.current) {
@@ -229,19 +229,19 @@ export default function TabLayout() {
   }
 
   // Custom badge component for Chat tab
-  const ChatTabIcon = ({ color, size, focused }) => (
-    <View style={{ width: size, height: size, justifyContent: 'center', alignItems: 'center' }}>
-      <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} color={color} size={size} />
-      {localUnreadCount > 0 && (
-        <View style={styles.badgeContainer}>
-          {localUnreadCount > 99 ? (
-            <Text style={styles.badgeText}>99+</Text>
-          ) : (
-            <Text style={styles.badgeText}>{localUnreadCount}</Text>
-          )}
-        </View>
-      )}
-    </View>
+  const ChatTabIcon = ({color, size, focused}) => (
+      <View style={{width: size, height: size, justifyContent: 'center', alignItems: 'center'}}>
+        <Ionicons name={focused ? "chatbubbles" : "chatbubbles-outline"} color={color} size={size}/>
+        {localUnreadCount > 0 && (
+            <View style={styles.badgeContainer}>
+              {localUnreadCount > 99 ? (
+                  <Text style={styles.badgeText}>99+</Text>
+              ) : (
+                  <Text style={styles.badgeText}>{localUnreadCount}</Text>
+              )}
+            </View>
+        )}
+      </View>
   );
 
   // Custom badge component for Notifications tab
@@ -278,32 +278,38 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Расписание',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" color={color} size={size} />
+          tabBarIcon: ({color, size}) => (
+              <Ionicons name="calendar-outline" color={color} size={size}/>
           ),
         }}
       />
 
       {/* News tab */}
       <Tabs.Screen
-        name="news-list"
-        options={{
-          title: 'Новости',
-          tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? "newspaper" : "newspaper-outline"} color={color} size={size} />
+          name="news-list"
+          options={{
+            title: 'Новости',
+            tabBarIcon: ({color, size, focused}) => (
+                <Ionicons name={focused ? "newspaper" : "newspaper-outline"} color={color} size={size}/>
           ),
-        }}
+          }}
       />
 
       <Tabs.Screen
-        name="events"
-        options={{
-          title: 'Мероприятия',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="tennisball-outline" color={color} size={size} />
-          ),
-        }}
+          name="events"
+          options={{
+            // отключаем вывод кнопки‑вкладки
+            href: null,
+
+            // остальные опции можно оставить,
+            // они понадобятся, если вы будете открывать экран по ссылке
+            title: 'Мероприятия',
+            tabBarIcon: ({color, size}) => (
+                <Ionicons name="tennisball-outline" color={color} size={size}/>
+            ),
+          }}
       />
+
 
       {/* Notifications tab */}
       <Tabs.Screen
@@ -320,27 +326,27 @@ export default function TabLayout() {
       />
 
       <Tabs.Screen
-        name="chats"
-        options={{
-          title: 'Чаты',
-          tabBarIcon: (props) => <ChatTabIcon {...props} />,
-          tabBarOnPress: ({ navigation, defaultHandler }) => {
-            // Форсируем обновление при нажатии на вкладку чатов
-            updateUnreadCount(true);
-            // Также обновляем через хук для полной синхронизации
-            refreshUnreadCount();
-            defaultHandler();
-          }
+          name="chats"
+          options={{
+            title: 'Чаты',
+            tabBarIcon: (props) => <ChatTabIcon {...props} />,
+            tabBarOnPress: ({navigation, defaultHandler}) => {
+              // Форсируем обновление при нажатии на вкладку чатов
+              updateUnreadCount(true);
+              // Также обновляем через хук для полной синхронизации
+              refreshUnreadCount();
+              defaultHandler();
+            }
         }}
       />
 
       <Tabs.Screen
-        name="profile"
+          name="profile"
         options={{
           title: 'Профиль',
           headerShown: false,
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-outline" color={color} size={size} />
+          tabBarIcon: ({color, size}) => (
+              <Ionicons name="person-outline" color={color} size={size}/>
           ),
         }}
       />

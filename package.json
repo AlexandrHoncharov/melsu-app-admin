@@ -1,0 +1,22 @@
+{
+  "dependencies": {
+    "@react-navigation/native": "^7.1.5",
+    "@react-navigation/stack": "^7.2.9",
+    "expo-image-manipulator": "^13.0.6",
+    "expo-network": "~7.0.5",
+    "install": "^0.13.0",
+    "npm": "^11.2.0",
+    "react-native-render-html": "^6.3.4",
+    "requests": "^0.3.0",
+    "expo": "~52.0.46",
+    "react": "18.3.1",
+    "react-native": "0.76.9",
+    "firebase": "9.23.0"
+  },
+  "name": "melsu-app-admin",
+  "version": "1.0.0",
+  "scripts": {
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  }
+}

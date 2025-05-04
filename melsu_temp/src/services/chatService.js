@@ -18,7 +18,7 @@ import {
 import {signInAnonymously, signInWithCustomToken} from 'firebase/auth';
 import apiClient from '../api/apiClient';
 import * as Device from 'expo-device';
-import { Platform } from 'react-native';
+import {Platform} from 'react-native';
 
 class ChatService {
     constructor() {
@@ -650,7 +650,7 @@ class ChatService {
             // Сначала получаем всех студентов этой группы
             let students = [];
             try {
-                const response = await apiClient.get('/users', { params: { role: 'student', group: groupName } });
+                const response = await apiClient.get('/users', {params: {role: 'student', group: groupName}});
                 students = response.data || [];
                 console.log(`Found ${students.length} students in group ${groupName}`);
             } catch (error) {
@@ -660,7 +660,7 @@ class ChatService {
             }
 
             // Подготавливаем объект участников
-            const participants = { [myUserId]: true };
+            const participants = {[myUserId]: true};
             students.forEach(student => {
                 if (student.id) {
                     participants[String(student.id)] = true;
@@ -708,7 +708,7 @@ class ChatService {
                 senderName: this.currentUser.fullName || this.currentUser.username || `Преподаватель`,
                 text: `Добро пожаловать в групповой чат для группы ${groupName}!`,
                 timestamp: serverTimestamp(),
-                read: { [myUserId]: true }
+                read: {[myUserId]: true}
             };
 
             await set(ref(database, `messages/${chatId}/${messageData.id}`), messageData);
@@ -742,73 +742,73 @@ class ChatService {
     }
 
     /**
- * Удаление чата для текущего пользователя
- * @param {string} chatId ID чата для удаления
- * @returns {Promise<boolean>} Результат операции
- */
-async deleteChat(chatId) {
-  try {
-    // Проверяем наличие пользователя и корректной инициализации
-    if (!this.initialized || !this.currentUser) {
-      const initResult = await this.initialize();
-      if (!initResult) {
-        throw new Error('Не удалось инициализировать сервис чатов');
-      }
+     * Удаление чата для текущего пользователя
+     * @param {string} chatId ID чата для удаления
+     * @returns {Promise<boolean>} Результат операции
+     */
+    async deleteChat(chatId) {
+        try {
+            // Проверяем наличие пользователя и корректной инициализации
+            if (!this.initialized || !this.currentUser) {
+                const initResult = await this.initialize();
+                if (!initResult) {
+                    throw new Error('Не удалось инициализировать сервис чатов');
+                }
+            }
+
+            if (!chatId) {
+                throw new Error('ID чата не указан');
+            }
+
+            // ВСЕГДА используем строковый ID
+            const myUserId = this.getCurrentUserId();
+
+            console.log(`Удаление чата ${chatId} для пользователя ${myUserId}`);
+
+            // Проверяем, существует ли чат
+            const chatRef = ref(database, `chats/${chatId}`);
+            const chatSnapshot = await get(chatRef);
+
+            if (!chatSnapshot.exists()) {
+                throw new Error(`Чат с ID ${chatId} не найден`);
+            }
+
+            const chatData = chatSnapshot.val();
+
+            // Проверяем, является ли пользователь участником чата
+            if (!chatData.participants || !chatData.participants[myUserId]) {
+                throw new Error('У вас нет доступа к этому чату');
+            }
+
+            // Удаляем чат из списка чатов пользователя (установка null удаляет запись)
+            await set(ref(database, `userChats/${myUserId}/${chatId}`), null);
+
+            // Обновляем список участников чата, удаляя текущего пользователя
+            const participantUpdates = {};
+            participantUpdates[myUserId] = null; // null означает удаление ключа
+
+            await update(ref(database, `chats/${chatId}/participants`), participantUpdates);
+
+            // Добавляем системное сообщение о выходе для групповых чатов
+            if (chatData.type === 'group') {
+                const messageRef = push(ref(database, `messages/${chatId}`));
+                const userName = this.currentUser.fullName || this.currentUser.username || 'Пользователь';
+
+                await set(messageRef, {
+                    id: messageRef.key,
+                    text: `${userName} покинул(а) чат`,
+                    isSystem: true,
+                    timestamp: serverTimestamp()
+                });
+            }
+
+            console.log(`Чат ${chatId} успешно удален из списка пользователя ${myUserId}`);
+            return true;
+        } catch (error) {
+            console.error(`Ошибка при удалении чата ${chatId}:`, error);
+            throw error;
+        }
     }
-
-    if (!chatId) {
-      throw new Error('ID чата не указан');
-    }
-
-    // ВСЕГДА используем строковый ID
-    const myUserId = this.getCurrentUserId();
-
-    console.log(`Удаление чата ${chatId} для пользователя ${myUserId}`);
-
-    // Проверяем, существует ли чат
-    const chatRef = ref(database, `chats/${chatId}`);
-    const chatSnapshot = await get(chatRef);
-
-    if (!chatSnapshot.exists()) {
-      throw new Error(`Чат с ID ${chatId} не найден`);
-    }
-
-    const chatData = chatSnapshot.val();
-
-    // Проверяем, является ли пользователь участником чата
-    if (!chatData.participants || !chatData.participants[myUserId]) {
-      throw new Error('У вас нет доступа к этому чату');
-    }
-
-    // Удаляем чат из списка чатов пользователя (установка null удаляет запись)
-    await set(ref(database, `userChats/${myUserId}/${chatId}`), null);
-
-    // Обновляем список участников чата, удаляя текущего пользователя
-    const participantUpdates = {};
-    participantUpdates[myUserId] = null; // null означает удаление ключа
-
-    await update(ref(database, `chats/${chatId}/participants`), participantUpdates);
-
-    // Добавляем системное сообщение о выходе для групповых чатов
-    if (chatData.type === 'group') {
-      const messageRef = push(ref(database, `messages/${chatId}`));
-      const userName = this.currentUser.fullName || this.currentUser.username || 'Пользователь';
-
-      await set(messageRef, {
-        id: messageRef.key,
-        text: `${userName} покинул(а) чат`,
-        isSystem: true,
-        timestamp: serverTimestamp()
-      });
-    }
-
-    console.log(`Чат ${chatId} успешно удален из списка пользователя ${myUserId}`);
-    return true;
-  } catch (error) {
-    console.error(`Ошибка при удалении чата ${chatId}:`, error);
-    throw error;
-  }
-}
 
     // Отправка сообщения в чат
     async sendMessage(chatId, text) {
@@ -896,7 +896,7 @@ async deleteChat(chatId) {
                             .catch(e => {
                                 // Эта ошибка уже будет обработана внутри sendNotificationToUser
                                 // Здесь мы просто предотвращаем распространение исключения дальше
-                                return { success: false, error: e.message };
+                                return {success: false, error: e.message};
                             })
                     );
                 }
@@ -920,150 +920,150 @@ async deleteChat(chatId) {
         }
     }
 
-/**
- * Get only new messages from a chat since a specific timestamp
- * @param {string} chatId - The chat ID to fetch messages for
- * @param {number} lastTimestamp - Only get messages newer than this timestamp
- * @returns {Promise<Array>} - Array of new messages
- */
-async getNewChatMessages(chatId, lastTimestamp = 0) {
-    if (!chatId) {
-        console.error('Chat ID is empty');
-        return [];
-    }
-
-    // Ensure proper initialization
-    if (!this.initialized || !this.currentUser) {
-        const initResult = await this.initialize();
-        if (!initResult) {
-            console.error('Failed to initialize when getting new chat messages');
-            return [];
-        }
-    }
-
-    if (!this.currentUser || !this.currentUser.id) {
-        console.error('Current user is not initialized');
-        return [];
-    }
-
-    // Always use string ID
-    const myUserId = this.getCurrentUserId();
-
-    try {
-        console.log(`Getting new messages for chat ${chatId} since timestamp ${lastTimestamp}`);
-        const messagesRef = ref(database, `messages/${chatId}`);
-
-        // Create appropriate query based on whether we have a timestamp
-        let messagesQuery;
-
-        if (lastTimestamp > 0) {
-            // If we have a timestamp, query messages newer than that timestamp
-            messagesQuery = query(
-                messagesRef,
-                orderByChild('timestamp'),
-                // Use startAfter for timestamps - critical fix
-                startAfter(lastTimestamp)
-            );
-        } else {
-            // If no timestamp, just order by timestamp
-            messagesQuery = query(
-                messagesRef,
-                orderByChild('timestamp')
-            );
-        }
-
-        const snapshot = await get(messagesQuery);
-        if (!snapshot.exists()) {
-            console.log(`No new messages found for chat ${chatId}`);
+    /**
+     * Get only new messages from a chat since a specific timestamp
+     * @param {string} chatId - The chat ID to fetch messages for
+     * @param {number} lastTimestamp - Only get messages newer than this timestamp
+     * @returns {Promise<Array>} - Array of new messages
+     */
+    async getNewChatMessages(chatId, lastTimestamp = 0) {
+        if (!chatId) {
+            console.error('Chat ID is empty');
             return [];
         }
 
-        // Process messages the same way as in getChatMessages
-        const messagesData = snapshot.val() || {};
-        const messages = Object.values(messagesData);
-
-        // Sort messages by timestamp
-        messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-
-        // Process messages to ensure consistency
-        const processedMessages = messages.map(message => {
-            // Convert senderId to string
-            const senderId = String(message.senderId || '');
-
-            // Determine message ownership
-            const isFromCurrentUser = senderId === myUserId;
-
-            return {
-                ...message,
-                senderId,
-                isFromCurrentUser,
-                senderName: message.senderName || `Пользователь ${senderId}`
-            };
-        });
-
-        console.log(`Loaded ${processedMessages.length} new messages for chat ${chatId}`);
-        return processedMessages;
-    } catch (error) {
-        console.error(`Error getting new messages for chat ${chatId}:`, error);
-        return [];
-    }
-}
-
-async sendNotificationToUser(recipientId, chatId, messagePreview, senderName) {
-    try {
-        // Проверяем, что аргументы переданы корректно
-        if (!recipientId || !chatId || !messagePreview) {
-            console.log(`Skipping notification: Invalid arguments for user ${recipientId}`);
-            return { success: false, skipped: true, reason: 'invalid_arguments' };
-        }
-
-        // Проверяем, не отправляем ли мы сообщение самому себе
-        const myUserId = this.getCurrentUserId();
-        if (recipientId === myUserId) {
-            console.log(`Skipping notification: Cannot send to self (${recipientId})`);
-            return { success: false, skipped: true, reason: 'self_notification' };
-        }
-
-        console.log(`Sending push notification to user ${recipientId} about new message in chat ${chatId}`);
-
-        // Используем эндпоинт отправки устройственных уведомлений вместо /chat/send-notification
-        const response = await apiClient.post('/device/send-notification', {
-            recipient_id: recipientId,
-            title: senderName,
-            body: messagePreview,
-            data: {
-                type: 'chat',
-                chat_id: chatId,
-                message_preview: messagePreview,
-                sender_name: senderName
+        // Ensure proper initialization
+        if (!this.initialized || !this.currentUser) {
+            const initResult = await this.initialize();
+            if (!initResult) {
+                console.error('Failed to initialize when getting new chat messages');
+                return [];
             }
-        });
-
-        console.log(`Push notification response:`, response.data);
-
-        // Если ответ успешный, но получатель не найден или у него нет токенов
-        if (response.data?.status === 'no_tokens' || response.data?.message?.includes('No device tokens')) {
-            console.log(`User ${recipientId} has no registered devices for notifications`);
-            return { success: false, skipped: true, reason: 'no_tokens' };
         }
 
-        // Успешная отправка
-        return { success: true, receipt: response.data };
-    } catch (error) {
-        // Проверка на специфическую ошибку "No device tokens"
-        if (error.message && (
-            error.message.includes('No device tokens') ||
-            error.message.includes('not found for recipient')
-        )) {
-            console.log(`User ${recipientId} has no registered devices for notifications`);
-            return { success: false, skipped: true, reason: 'no_tokens' };
+        if (!this.currentUser || !this.currentUser.id) {
+            console.error('Current user is not initialized');
+            return [];
         }
 
-        // Для остальных ошибок - логирование, но без бросания исключения
-        console.log(`Failed to send notification to user ${recipientId}: ${error.message}`);
-        return { success: false, error: error.message };
+        // Always use string ID
+        const myUserId = this.getCurrentUserId();
+
+        try {
+            console.log(`Getting new messages for chat ${chatId} since timestamp ${lastTimestamp}`);
+            const messagesRef = ref(database, `messages/${chatId}`);
+
+            // Create appropriate query based on whether we have a timestamp
+            let messagesQuery;
+
+            if (lastTimestamp > 0) {
+                // If we have a timestamp, query messages newer than that timestamp
+                messagesQuery = query(
+                    messagesRef,
+                    orderByChild('timestamp'),
+                    // Use startAfter for timestamps - critical fix
+                    startAfter(lastTimestamp)
+                );
+            } else {
+                // If no timestamp, just order by timestamp
+                messagesQuery = query(
+                    messagesRef,
+                    orderByChild('timestamp')
+                );
+            }
+
+            const snapshot = await get(messagesQuery);
+            if (!snapshot.exists()) {
+                console.log(`No new messages found for chat ${chatId}`);
+                return [];
+            }
+
+            // Process messages the same way as in getChatMessages
+            const messagesData = snapshot.val() || {};
+            const messages = Object.values(messagesData);
+
+            // Sort messages by timestamp
+            messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+            // Process messages to ensure consistency
+            const processedMessages = messages.map(message => {
+                // Convert senderId to string
+                const senderId = String(message.senderId || '');
+
+                // Determine message ownership
+                const isFromCurrentUser = senderId === myUserId;
+
+                return {
+                    ...message,
+                    senderId,
+                    isFromCurrentUser,
+                    senderName: message.senderName || `Пользователь ${senderId}`
+                };
+            });
+
+            console.log(`Loaded ${processedMessages.length} new messages for chat ${chatId}`);
+            return processedMessages;
+        } catch (error) {
+            console.error(`Error getting new messages for chat ${chatId}:`, error);
+            return [];
+        }
     }
-}
+
+    async sendNotificationToUser(recipientId, chatId, messagePreview, senderName) {
+        try {
+            // Проверяем, что аргументы переданы корректно
+            if (!recipientId || !chatId || !messagePreview) {
+                console.log(`Skipping notification: Invalid arguments for user ${recipientId}`);
+                return {success: false, skipped: true, reason: 'invalid_arguments'};
+            }
+
+            // Проверяем, не отправляем ли мы сообщение самому себе
+            const myUserId = this.getCurrentUserId();
+            if (recipientId === myUserId) {
+                console.log(`Skipping notification: Cannot send to self (${recipientId})`);
+                return {success: false, skipped: true, reason: 'self_notification'};
+            }
+
+            console.log(`Sending push notification to user ${recipientId} about new message in chat ${chatId}`);
+
+            // Используем эндпоинт отправки устройственных уведомлений вместо /chat/send-notification
+            const response = await apiClient.post('/device/send-notification', {
+                recipient_id: recipientId,
+                title: senderName,
+                body: messagePreview,
+                data: {
+                    type: 'chat',
+                    chat_id: chatId,
+                    message_preview: messagePreview,
+                    sender_name: senderName
+                }
+            });
+
+            console.log(`Push notification response:`, response.data);
+
+            // Если ответ успешный, но получатель не найден или у него нет токенов
+            if (response.data?.status === 'no_tokens' || response.data?.message?.includes('No device tokens')) {
+                console.log(`User ${recipientId} has no registered devices for notifications`);
+                return {success: false, skipped: true, reason: 'no_tokens'};
+            }
+
+            // Успешная отправка
+            return {success: true, receipt: response.data};
+        } catch (error) {
+            // Проверка на специфическую ошибку "No device tokens"
+            if (error.message && (
+                error.message.includes('No device tokens') ||
+                error.message.includes('not found for recipient')
+            )) {
+                console.log(`User ${recipientId} has no registered devices for notifications`);
+                return {success: false, skipped: true, reason: 'no_tokens'};
+            }
+
+            // Для остальных ошибок - логирование, но без бросания исключения
+            console.log(`Failed to send notification to user ${recipientId}: ${error.message}`);
+            return {success: false, error: error.message};
+        }
+    }
 
     // Получение списка чатов пользователя
     async getUserChats() {

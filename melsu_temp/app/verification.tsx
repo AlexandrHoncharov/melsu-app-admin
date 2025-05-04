@@ -1,22 +1,21 @@
-import React, {useState, useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    Image,
-    TouchableOpacity,
-    ScrollView,
-    Alert,
     ActivityIndicator,
+    Alert,
+    BackHandler,
+    Image,
     SafeAreaView,
-    BackHandler
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
-import {Stack, router} from 'expo-router';
+import {router, Stack} from 'expo-router';
 import {Ionicons} from '@expo/vector-icons';
 import {StatusBar} from 'expo-status-bar';
 import {useAuth} from '../hooks/useAuth';
 import * as ImagePicker from 'expo-image-picker';
-import userApi from '../src/api/userApi';
 
 export default function VerificationScreen() {
     const {

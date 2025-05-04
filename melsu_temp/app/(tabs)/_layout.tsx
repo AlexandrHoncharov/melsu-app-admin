@@ -1,9 +1,9 @@
 import React, {useEffect, useRef, useState} from 'react';
-import {Tabs, router, usePathname} from 'expo-router';
+import {router, Tabs, usePathname} from 'expo-router';
 import {Ionicons} from '@expo/vector-icons';
 import {useAuth} from '../../hooks/useAuth';
 import {useUnreadMessages} from '../../hooks/useUnreadMessages';
-import {StyleSheet, View, Text, AppState} from 'react-native';
+import {AppState, StyleSheet, Text, View} from 'react-native';
 import chatService from '../../src/services/chatService';
 import apiClient from '../../src/api/apiClient';
 

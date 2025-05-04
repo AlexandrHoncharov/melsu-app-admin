@@ -1,5 +1,5 @@
 import React from 'react';
-import { Stack } from 'expo-router';
+import {Stack} from 'expo-router';
 import {AuthProvider} from '../hooks/useAuth';
 import {StatusBar} from 'expo-status-bar';
 import {NotificationProvider} from '../hooks/useNotifications';

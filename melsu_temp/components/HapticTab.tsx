@@ -1,5 +1,5 @@
 import React from 'react';
-import {View, TouchableOpacity, StyleSheet} from 'react-native';
+import {StyleSheet, TouchableOpacity, View} from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {BottomTabBarProps} from '@react-navigation/bottom-tabs';
 import {appColors} from '../hooks/useThemeColor';

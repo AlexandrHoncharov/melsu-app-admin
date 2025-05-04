@@ -1,15 +1,7 @@
-import React, {useState, useEffect} from 'react';
-import {
-    View,
-    Text,
-    Modal,
-    StyleSheet,
-    TouchableOpacity,
-    ScrollView,
-    Platform
-} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {Modal, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
-import {format, parseISO, differenceInMinutes, isBefore, isAfter} from 'date-fns';
+import {differenceInMinutes, format, isAfter, isBefore} from 'date-fns';
 import {ru} from 'date-fns/locale';
 
 // Define the props interface

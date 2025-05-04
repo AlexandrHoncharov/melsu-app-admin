@@ -1,20 +1,19 @@
-import React, {forwardRef, useImperativeHandle, useState, useEffect, useRef} from 'react';
+import React, {forwardRef, useEffect, useImperativeHandle, useRef, useState} from 'react';
 import {
-    View,
-    FlatList,
-    TouchableOpacity,
-    Text,
-    StyleSheet,
-    Alert,
     ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    RefreshControl,
+    StyleSheet,
+    Text,
     TouchableHighlight,
-    RefreshControl, // Import for pull-to-refresh
-    Image
+    TouchableOpacity,
+    View
 } from 'react-native';
-import {useRouter, useFocusEffect} from 'expo-router';
+import {useFocusEffect, useRouter} from 'expo-router';
 import {Ionicons} from '@expo/vector-icons';
 import chatService from '../../src/services/chatService';
-import Constants from 'expo-constants';
 import {useAuth} from '../../hooks/useAuth'; // Import useAuth hook
 
 const ChatsList = forwardRef((props, ref) => {

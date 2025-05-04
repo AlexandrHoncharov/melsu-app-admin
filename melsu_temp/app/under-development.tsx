@@ -1,15 +1,7 @@
 // File: app/under-development.tsx
 import React from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    Image,
-    TouchableOpacity,
-    SafeAreaView,
-    ScrollView
-} from 'react-native';
-import {Stack, useLocalSearchParams, router} from 'expo-router';
+import {Image, SafeAreaView, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {router, Stack, useLocalSearchParams} from 'expo-router';
 import {Ionicons} from '@expo/vector-icons';
 
 export default function UnderDevelopmentScreen() {

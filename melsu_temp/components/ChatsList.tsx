@@ -1,14 +1,14 @@
 // File: components/ChatsList.tsx
-import React, {useState, useEffect, useRef, forwardRef, useImperativeHandle} from 'react';
+import React, {forwardRef, useEffect, useImperativeHandle, useState} from 'react';
 import {
-    View,
-    Text,
-    FlatList,
-    TouchableOpacity,
-    StyleSheet,
     ActivityIndicator,
+    FlatList,
     RefreshControl,
-    ScrollView
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {router, useFocusEffect} from 'expo-router';

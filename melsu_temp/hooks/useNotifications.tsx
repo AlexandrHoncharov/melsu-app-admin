@@ -2,7 +2,6 @@
 import React, {createContext, useContext, useEffect, useRef, useState} from 'react';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
-import {Platform} from 'react-native';
 import {useAuth} from '../hooks/useAuth';
 import notificationsApi from '../src/api/notificationsApi';
 import {registerBackgroundNotificationHandler} from '../src/utils/backgroundNotificationHandler';

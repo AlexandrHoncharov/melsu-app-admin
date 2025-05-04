@@ -1,16 +1,16 @@
-import React, {useState, useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
-    StyleSheet,
-    View,
-    Text,
-    ScrollView,
-    Image,
     ActivityIndicator,
-    TouchableOpacity,
-    SafeAreaView,
-    StatusBar,
+    Dimensions,
+    Image,
     Platform,
-    Dimensions
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import {useLocalSearchParams, useRouter} from 'expo-router';
 import newsApi, {NewsDetail} from '../../src/api/newsApi';

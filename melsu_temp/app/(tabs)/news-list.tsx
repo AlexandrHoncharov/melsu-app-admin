@@ -1,17 +1,17 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
-    StyleSheet,
-    View,
-    Text,
+    ActivityIndicator,
+    Dimensions,
     FlatList,
     Image,
-    TouchableOpacity,
-    ActivityIndicator,
-    RefreshControl,
-    Dimensions,
     Platform,
+    RefreshControl,
+    SafeAreaView,
     StatusBar,
-    SafeAreaView
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import {router} from 'expo-router';
 import newsApi, {NewsItem} from '../../src/api/newsApi';

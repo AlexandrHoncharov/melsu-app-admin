@@ -1,8 +1,5 @@
 // src/utils/authUtils.js
-import {
-    signInWithCustomToken,
-    signOut as firebaseSignOut
-} from 'firebase/auth';
+import {signInWithCustomToken, signOut as firebaseSignOut} from 'firebase/auth';
 import {auth} from '../config/firebase';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 

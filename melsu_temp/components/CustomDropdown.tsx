@@ -1,15 +1,15 @@
 // components/CustomDropdown.tsx
 import React, {useState} from 'react';
 import {
-    View,
-    Text,
-    Modal,
-    TouchableOpacity,
-    FlatList,
-    StyleSheet,
-    TextInput,
     Dimensions,
-    TouchableWithoutFeedback
+    FlatList,
+    Modal,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View
 } from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 

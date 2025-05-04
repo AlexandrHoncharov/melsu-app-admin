@@ -1,8 +1,7 @@
-import React, {useState, useEffect} from 'react';
-import {View, Text, StyleSheet, TouchableOpacity} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
-import {format, differenceInMinutes, isBefore, isAfter, parseISO} from 'date-fns';
-import {ru} from 'date-fns/locale';
+import {differenceInMinutes, format, isAfter, isBefore, parseISO} from 'date-fns';
 
 // Colors
 const COLORS = {

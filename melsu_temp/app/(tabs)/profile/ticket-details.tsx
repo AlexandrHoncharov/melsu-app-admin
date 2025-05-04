@@ -1,22 +1,22 @@
-import React, {useState, useEffect, useCallback, useRef} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    TextInput,
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
     ActivityIndicator,
     Alert,
-    SafeAreaView,
-    Image,
-    RefreshControl,
     Dimensions,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
+    RefreshControl,
+    SafeAreaView,
     ScrollView,
-    StatusBar
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {router, useLocalSearchParams} from 'expo-router';

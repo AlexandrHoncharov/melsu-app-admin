@@ -1,18 +1,17 @@
-import React, {useState, useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
-    View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    SafeAreaView,
+    StyleSheet,
+    Switch,
     Text,
     TextInput,
-    FlatList,
     TouchableOpacity,
-    StyleSheet,
-    ActivityIndicator,
-    SafeAreaView,
-    Alert,
-    Switch,
-    ScrollView
+    View
 } from 'react-native';
-import {Stack, router} from 'expo-router';
+import {router, Stack} from 'expo-router';
 import {Ionicons} from '@expo/vector-icons';
 import {useAuth} from '../hooks/useAuth';
 import apiClient from '../src/api/apiClient';

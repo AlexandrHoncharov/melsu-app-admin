@@ -1,15 +1,6 @@
 // File: app/(tabs)/events.tsx
 import React, {useEffect} from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    SafeAreaView,
-    ScrollView,
-    Animated,
-    Easing,
-    Dimensions
-} from 'react-native';
+import {Animated, Dimensions, Easing, SafeAreaView, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useAuth} from '../../hooks/useAuth';
 

@@ -1,18 +1,18 @@
 // File: melsu_temp/app/(tabs)/profile/change-password.tsx
 import React, {useState} from 'react';
 import {
-    View,
-    Text,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
     ActivityIndicator,
     Alert,
-    ScrollView,
-    SafeAreaView,
     KeyboardAvoidingView,
     Platform,
-    StatusBar
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {useAuth} from '../../../hooks/useAuth';

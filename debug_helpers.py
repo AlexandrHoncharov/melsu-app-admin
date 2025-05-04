@@ -3,10 +3,10 @@
 Добавьте этот файл в тот же каталог, где находится api.py
 """
 import json
+import logging
 import os
 import time
-import logging
-from flask import current_app
+
 from firebase_admin import messaging
 
 # Настраиваем логгер

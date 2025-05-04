@@ -1,14 +1,6 @@
 // File: melsu_temp/app/(tabs)/profile/support.tsx
 import React from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    SafeAreaView,
-    Image,
-    useWindowDimensions
-} from 'react-native';
+import {SafeAreaView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View} from 'react-native';
 import {Ionicons} from '@expo/vector-icons';
 import {router} from 'expo-router';
 

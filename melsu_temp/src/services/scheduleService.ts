@@ -2,7 +2,7 @@
 import apiClient from '../api/apiClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import {format, addDays, startOfWeek, endOfWeek} from 'date-fns';
+import {addDays, endOfWeek, format, startOfWeek} from 'date-fns';
 import {ru} from 'date-fns/locale';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -137,50 +137,6 @@ class ScheduleService {
         } catch (error) {
             console.error(`Error in getCourseInfo for group ${group}:`, error);
             return null;
-        }
-    }
-
-    /**
-     * Get course info from cache
-     */
-    private async getCourseInfoFromCache(group: string): Promise<CourseInfo | null> {
-        try {
-            const cacheKey = `${STORAGE_KEYS.COURSE_INFO}${group}`;
-            const cachedInfoJson = await AsyncStorage.getItem(cacheKey);
-            if (!cachedInfoJson) {
-                return null;
-            }
-
-            // Check cache expiration
-            const lastUpdateJson = await AsyncStorage.getItem(`${cacheKey}_updated`);
-            if (lastUpdateJson) {
-                const lastUpdate = new Date(JSON.parse(lastUpdateJson));
-                const now = new Date();
-                const minutesDiff = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
-
-                if (minutesDiff > CACHE_EXPIRATION_TIME) {
-                    // Cache expired
-                    return null;
-                }
-            }
-
-            return JSON.parse(cachedInfoJson);
-        } catch (error) {
-            console.error('Error getting course info from cache:', error);
-            return null;
-        }
-    }
-
-    /**
-     * Save course info to cache
-     */
-    private async saveCourseInfoToCache(group: string, info: CourseInfo): Promise<void> {
-        try {
-            const cacheKey = `${STORAGE_KEYS.COURSE_INFO}${group}`;
-            await AsyncStorage.setItem(cacheKey, JSON.stringify(info));
-            await AsyncStorage.setItem(`${cacheKey}_updated`, JSON.stringify(new Date()));
-        } catch (error) {
-            console.error('Error saving course info to cache:', error);
         }
     }
 
@@ -374,6 +330,65 @@ class ScheduleService {
     }
 
     /**
+     * Clear schedule cache
+     */
+    async clearCache(): Promise<void> {
+        try {
+            await AsyncStorage.removeItem(STORAGE_KEYS.SCHEDULE_DATA);
+            await AsyncStorage.removeItem(STORAGE_KEYS.WEEK_SCHEDULE);
+            await AsyncStorage.removeItem(STORAGE_KEYS.SCHEDULE_LAST_UPDATE);
+            console.debug('Schedule cache cleared');
+        } catch (error) {
+            console.error('Error clearing schedule cache:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get course info from cache
+     */
+    private async getCourseInfoFromCache(group: string): Promise<CourseInfo | null> {
+        try {
+            const cacheKey = `${STORAGE_KEYS.COURSE_INFO}${group}`;
+            const cachedInfoJson = await AsyncStorage.getItem(cacheKey);
+            if (!cachedInfoJson) {
+                return null;
+            }
+
+            // Check cache expiration
+            const lastUpdateJson = await AsyncStorage.getItem(`${cacheKey}_updated`);
+            if (lastUpdateJson) {
+                const lastUpdate = new Date(JSON.parse(lastUpdateJson));
+                const now = new Date();
+                const minutesDiff = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
+
+                if (minutesDiff > CACHE_EXPIRATION_TIME) {
+                    // Cache expired
+                    return null;
+                }
+            }
+
+            return JSON.parse(cachedInfoJson);
+        } catch (error) {
+            console.error('Error getting course info from cache:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Save course info to cache
+     */
+    private async saveCourseInfoToCache(group: string, info: CourseInfo): Promise<void> {
+        try {
+            const cacheKey = `${STORAGE_KEYS.COURSE_INFO}${group}`;
+            await AsyncStorage.setItem(cacheKey, JSON.stringify(info));
+            await AsyncStorage.setItem(`${cacheKey}_updated`, JSON.stringify(new Date()));
+        } catch (error) {
+            console.error('Error saving course info to cache:', error);
+        }
+    }
+
+    /**
      * Check if cache is still valid
      */
     private async isCacheValid(): Promise<boolean> {
@@ -453,21 +468,6 @@ class ScheduleService {
             await AsyncStorage.setItem(STORAGE_KEYS.SCHEDULE_LAST_UPDATE, new Date().toISOString());
         } catch (error) {
             console.error('Error saving week schedule to cache:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Clear schedule cache
-     */
-    async clearCache(): Promise<void> {
-        try {
-            await AsyncStorage.removeItem(STORAGE_KEYS.SCHEDULE_DATA);
-            await AsyncStorage.removeItem(STORAGE_KEYS.WEEK_SCHEDULE);
-            await AsyncStorage.removeItem(STORAGE_KEYS.SCHEDULE_LAST_UPDATE);
-            console.debug('Schedule cache cleared');
-        } catch (error) {
-            console.error('Error clearing schedule cache:', error);
             throw error;
         }
     }

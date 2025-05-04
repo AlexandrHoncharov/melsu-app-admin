@@ -1,5 +1,5 @@
-import React, {useState, useEffect} from 'react';
-import {View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, ScrollView} from 'react-native';
+import React, {useEffect, useState} from 'react';
+import {ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {usePushNotifications} from '../hooks/usePushNotifications';
 import * as Device from 'expo-device';
 import {Ionicons} from '@expo/vector-icons';

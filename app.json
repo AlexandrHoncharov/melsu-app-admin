@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "f30e1ee0-de59-4e0b-a4b8-32c1aad3c6da"
+      }
+    },
+    "android": {
+      "package": "com.sanumxxx.melsuappadmin"
+    }
+  }
+}

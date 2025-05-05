@@ -345,16 +345,16 @@ export default function ProfileScreen() {
                 route: '/profile/change-password'
             },
 
-            {
-                id: 'notification-test',
-                title: 'test',
-                subtitle: 'test',
-                icon: 'ticket-outline',
-                iconBgColor: '#F3EFFA',
-                iconColor: '#673AB7',
-                route: '/profile/notification-test',
-                badge: ticketsLoaded ? unreadTickets : undefined
-            },
+            // {
+            //     id: 'notification-test',
+            //     title: 'test',
+            //     subtitle: 'test',
+            //     icon: 'ticket-outline',
+            //     iconBgColor: '#F3EFFA',
+            //     iconColor: '#673AB7',
+            //     route: '/profile/notification-test',
+            //     badge: ticketsLoaded ? unreadTickets : undefined
+            // },
 
             // Notifications item removed as requested
             {
@@ -376,15 +376,15 @@ export default function ProfileScreen() {
                 iconColor: '#F57C00',
                 route: '/profile/support'
             },
-            {
-                id: 'about',
-                title: 'О приложении',
-                subtitle: 'Информация о приложении',
-                icon: 'information-circle-outline',
-                iconBgColor: '#ECEFF9',
-                iconColor: '#3F51B5',
-                route: '/profile/about'
-            }
+            // {
+            //     id: 'about',
+            //     title: 'О приложении',
+            //     subtitle: 'Информация о приложении',
+            //     icon: 'information-circle-outline',
+            //     iconBgColor: '#ECEFF9',
+            //     iconColor: '#3F51B5',
+            //     route: '/profile/about'
+            // }
         ];
 
         // Add verification item for students
@@ -392,39 +392,39 @@ export default function ProfileScreen() {
             const verificationInfo = getVerificationInfo(user.verificationStatus);
 
             // Сначала добавляем верификацию
-            commonItems.splice(1, 0, {
-                id: 'verification',
-                title: 'Верификация студента',
-                subtitle: verificationInfo.text,
-                icon: verificationInfo.icon,
-                iconBgColor: verificationInfo.bgColor,
-                iconColor: verificationInfo.color,
-                route: '/verification'
-            });
+            // commonItems.splice(1, 0, {
+            //     id: 'verification',
+            //     title: 'Верификация студента',
+            //     subtitle: verificationInfo.text,
+            //     icon: verificationInfo.icon,
+            //     iconBgColor: verificationInfo.bgColor,
+            //     iconColor: verificationInfo.color,
+            //     route: '/verification'
+            // });
 
-            // Затем добавляем дополнительные занятия для студентов
-            commonItems.splice(2, 0, {
-                id: 'student-retakes',
-                title: 'Пересдачи',
-                subtitle: 'Запись на пересдачи и консультации',
-                icon: 'calendar-outline',
-                iconBgColor: '#E3F2FD',
-                iconColor: '#1976D2',
-                route: '/profile/student-retakes'
-            });
+            // // Затем добавляем дополнительные занятия для студентов
+            // commonItems.splice(2, 0, {
+            //     id: 'student-retakes',
+            //     title: 'Пересдачи',
+            //     subtitle: 'Запись на пересдачи и консультации',
+            //     icon: 'calendar-outline',
+            //     iconBgColor: '#E3F2FD',
+            //     iconColor: '#1976D2',
+            //     route: '/profile/student-retakes'
+            // });
         }
 
         // Add retake schedule for teachers
         if (user?.role === 'teacher') {
-            commonItems.splice(1, 0, {
-                id: 'retakes',
-                title: 'Мой график пересдач',
-                subtitle: 'Управление пересдачами и консультациями',
-                icon: 'calendar-outline',
-                iconBgColor: '#E0F2F1',
-                iconColor: '#009688',
-                route: '/profile/retakes'
-            });
+            // commonItems.splice(1, 0, {
+            //     id: 'retakes',
+            //     title: 'Мой график пересдач',
+            //     subtitle: 'Управление пересдачами и консультациями',
+            //     icon: 'calendar-outline',
+            //     iconBgColor: '#E0F2F1',
+            //     iconColor: '#009688',
+            //     route: '/profile/retakes'
+            // });
         }
 
         return commonItems;

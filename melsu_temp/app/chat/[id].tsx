@@ -2,10 +2,8 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
     ActivityIndicator,
     Alert,
-    Animated,
     AppState,
     Dimensions,
-    Easing,
     FlatList,
     KeyboardAvoidingView,
     Linking,
@@ -24,75 +22,24 @@ import {Ionicons} from '@expo/vector-icons';
 import {useLocalSearchParams, useRouter} from 'expo-router';
 import {useAuth} from '../../hooks/useAuth';
 import chatService from '../../src/services/chatService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 
 // Get screen dimensions for responsive design
 const {width, height} = Dimensions.get('window');
 
-// Simplified Marquee Title Component - Always scrolls when text is long
-const MarqueeTitle = ({title}) => {
-    const scrollX = useRef(new Animated.Value(0)).current;
-    const [textWidth, setTextWidth] = useState(0);
-    const [containerWidth, setContainerWidth] = useState(0);
-
-    useEffect(() => {
-        // Only start animation when we have both widths
-        if (textWidth > 0 && containerWidth > 0) {
-            // Only animate if text doesn't fit
-            if (textWidth > containerWidth) {
-                startScrolling();
-            } else {
-                // Reset position if text fits
-                scrollX.setValue(0);
-            }
-        }
-    }, [textWidth, containerWidth, title]);
-
-    const startScrolling = () => {
-        // Reset to initial position before starting
-        scrollX.setValue(containerWidth);
-
-        // Set up recurring animation
-        Animated.loop(
-            Animated.sequence([
-                // Move from right to left
-                Animated.timing(scrollX, {
-                    toValue: -textWidth,
-                    duration: Math.max(textWidth * 10, 5000), // Adjust speed based on length
-                    useNativeDriver: true,
-                    easing: Easing.linear
-                }),
-                // Small pause at the end
-                Animated.delay(800),
-                // Move back to start (off screen right)
-                Animated.timing(scrollX, {
-                    toValue: containerWidth,
-                    duration: 0, // Instant jump
-                    useNativeDriver: true
-                }),
-                // Small pause before restarting
-                Animated.delay(800),
-            ])
-        ).start();
-    };
-
+// Two-line header component for better displaying long names and additional info
+const TwoLineHeader = ({title, subtitle}) => {
     return (
-        <View
-            style={styles.titleContainer}
-            onLayout={(event) => {
-                setContainerWidth(event.nativeEvent.layout.width);
-            }}
-        >
-            <Animated.Text
-                style={[
-                    styles.titleText,
-                    {transform: [{translateX: scrollX}]}
-                ]}
-                onLayout={(event) => {
-                    setTextWidth(event.nativeEvent.layout.width);
-                }}
-            >
-                {title}
-            </Animated.Text>
+        <View style={styles.twoLineHeaderContainer}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+                {title || 'Чат'}
+            </Text>
+            {subtitle ? (
+                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                    {subtitle}
+                </Text>
+            ) : null}
         </View>
     );
 };
@@ -213,6 +160,47 @@ const handleUrlPress = (url) => {
         });
 };
 
+// Helper functions for local message cache
+const getChatMessagesFromCache = async (chatId) => {
+    try {
+        const cacheKey = `chat_messages_${chatId}`;
+        const cachedData = await AsyncStorage.getItem(cacheKey);
+        return cachedData ? JSON.parse(cachedData) : [];
+    } catch (error) {
+        console.error('Error getting messages from cache:', error);
+        return [];
+    }
+};
+
+const saveChatMessagesToCache = async (chatId, messages) => {
+    try {
+        const cacheKey = `chat_messages_${chatId}`;
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(messages));
+    } catch (error) {
+        console.error('Error saving messages to cache:', error);
+    }
+};
+
+const getChatInfoFromCache = async (chatId) => {
+    try {
+        const cacheKey = `chat_info_${chatId}`;
+        const cachedData = await AsyncStorage.getItem(cacheKey);
+        return cachedData ? JSON.parse(cachedData) : null;
+    } catch (error) {
+        console.error('Error getting chat info from cache:', error);
+        return null;
+    }
+};
+
+const saveChatInfoToCache = async (chatId, chatInfo) => {
+    try {
+        const cacheKey = `chat_info_${chatId}`;
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(chatInfo));
+    } catch (error) {
+        console.error('Error saving chat info to cache:', error);
+    }
+};
+
 export default function ChatScreen() {
     const {id} = useLocalSearchParams();
     const router = useRouter();
@@ -220,6 +208,7 @@ export default function ChatScreen() {
 
     const [messages, setMessages] = useState([]);
     const [chatTitle, setChatTitle] = useState('Чат');
+    const [chatSubtitle, setChatSubtitle] = useState('');
     const [messageText, setMessageText] = useState('');
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -228,6 +217,8 @@ export default function ChatScreen() {
     const [lastSent, setLastSent] = useState(null);
     const [otherUserInfo, setOtherUserInfo] = useState(null);
     const [lastMessageTimestamp, setLastMessageTimestamp] = useState(0);
+    const [isOffline, setIsOffline] = useState(false);
+    const [chatInfo, setChatInfo] = useState(null);
 
     // New states for action menu
     const [showActionMenu, setShowActionMenu] = useState(false);
@@ -236,6 +227,7 @@ export default function ChatScreen() {
     const flatListRef = useRef(null);
     const appStateRef = useRef(AppState.currentState);
     const pollingIntervalRef = useRef(null);
+    const networkListener = useRef(null);
 
     // Save current user ID in ref for reliable access
     const currentUserIdRef = useRef(user ? String(user.id) : null);
@@ -248,6 +240,30 @@ export default function ChatScreen() {
         }
     }, [user]);
 
+    // Setup network listener
+    useEffect(() => {
+        // Check initial network state
+        NetInfo.fetch().then(state => {
+            setIsOffline(!state.isConnected);
+        });
+
+        // Subscribe to network state updates
+        networkListener.current = NetInfo.addEventListener(state => {
+            setIsOffline(!state.isConnected);
+
+            // If we just came back online, try to sync messages
+            if (state.isConnected && isOffline) {
+                loadChatData();
+            }
+        });
+
+        return () => {
+            if (networkListener.current) {
+                networkListener.current();
+            }
+        };
+    }, []);
+
     // Set status bar properties for Android
     useEffect(() => {
         if (Platform.OS === 'android') {
@@ -259,7 +275,7 @@ export default function ChatScreen() {
 
     // Memoized function to load only new messages
     const loadNewMessages = useCallback(async () => {
-        if (!user || !user.id) return;
+        if (!user || !user.id || isOffline) return;
 
         try {
             await chatService.initialize();
@@ -293,6 +309,9 @@ export default function ChatScreen() {
 
                     const updatedMessages = [...prevMessages, ...uniqueNewMessages];
 
+                    // Save to local cache for offline access
+                    saveChatMessagesToCache(chatId, updatedMessages);
+
                     // Update last message timestamp
                     if (uniqueNewMessages.length > 0) {
                         const latestTimestamp = Math.max(...uniqueNewMessages.map(m => m.timestamp || 0));
@@ -315,7 +334,47 @@ export default function ChatScreen() {
         } catch (error) {
             console.error('📱 Error loading new messages:', error);
         }
-    }, [chatId, lastMessageTimestamp, user]);
+    }, [chatId, lastMessageTimestamp, user, isOffline]);
+
+    // Parse chat title and subtitle from chat info
+    const parseChatInfo = useCallback((chatData) => {
+        if (!chatData) return;
+
+        let titleText = 'Чат';
+        let subtitleText = '';
+
+        if (chatData.type === 'personal') {
+            // For personal chats, try to extract name and details
+            const userName = chatData.withUserName || `Пользователь ${chatData.withUser}`;
+
+            // Split by parentheses if they exist to separate name and details
+            if (userName.includes('(')) {
+                const nameParts = userName.split('(');
+                titleText = nameParts[0].trim();
+                subtitleText = nameParts[1].replace(')', '').trim();
+            } else {
+                titleText = userName;
+
+                // Try to get other user role/details
+                if (chatData.withUserRole === 'student') {
+                    subtitleText = chatData.withUserGroup || '';
+                } else if (chatData.withUserRole === 'teacher') {
+                    subtitleText = chatData.withUserDepartment || '';
+                }
+            }
+        } else if (chatData.type === 'group') {
+            // For group chats, use name and group code
+            titleText = chatData.name || 'Групповой чат';
+            subtitleText = chatData.groupCode || '';
+        }
+
+        setChatTitle(titleText);
+        setChatSubtitle(subtitleText);
+        setChatInfo(chatData);
+
+        // Save chat info to cache for offline access
+        saveChatInfoToCache(chatId, chatData);
+    }, [chatId]);
 
     // Load chat data - full load of all messages
     const loadChatData = async (isRefresh = false) => {
@@ -325,10 +384,43 @@ export default function ChatScreen() {
         }
 
         console.log(`📱 Loading chat data for chat ${chatId}...`);
+
+        // Check network connectivity
+        const netInfo = await NetInfo.fetch();
+        const isConnected = netInfo.isConnected;
+        setIsOffline(!isConnected);
+
         try {
             // Important! First check current user
             if (!user || !user.id) {
                 throw new Error('User data not available');
+            }
+
+            if (isOffline) {
+                console.log('📱 Device is offline, loading from cache...');
+
+                // Load chat info from cache
+                const cachedChatInfo = await getChatInfoFromCache(chatId);
+                if (cachedChatInfo) {
+                    parseChatInfo(cachedChatInfo);
+                }
+
+                // Load messages from cache
+                const cachedMessages = await getChatMessagesFromCache(chatId);
+                if (cachedMessages && cachedMessages.length > 0) {
+                    setMessages(cachedMessages);
+
+                    // Update last message timestamp
+                    const latestTimestamp = Math.max(...cachedMessages.map(m => m.timestamp || 0));
+                    setLastMessageTimestamp(latestTimestamp);
+
+                    console.log(`📱 Loaded ${cachedMessages.length} messages from cache`);
+                }
+
+                setLoading(false);
+                setRefreshing(false);
+                setIsInitialLoad(false);
+                return;
             }
 
             // Initialize service
@@ -347,17 +439,15 @@ export default function ChatScreen() {
 
             // Set chat title and save conversation partner info
             if (thisChat) {
-                if (thisChat.type === 'personal') {
-                    setChatTitle(thisChat.withUserName || 'Личный чат');
+                parseChatInfo(thisChat);
 
+                if (thisChat.type === 'personal') {
                     // Save conversation partner info for notifications
                     setOtherUserInfo({
                         id: thisChat.withUser,
                         name: thisChat.withUserName,
                         role: thisChat.withUserRole
                     });
-                } else if (thisChat.type === 'group') {
-                    setChatTitle(thisChat.name || 'Групповой чат');
                 }
             }
 
@@ -401,16 +491,36 @@ export default function ChatScreen() {
 
             setMessages(chatMessages);
 
+            // Save messages to cache for offline access
+            await saveChatMessagesToCache(chatId, chatMessages);
+
             // Mark messages as read
             await chatService.markMessagesAsRead(chatId);
 
         } catch (error) {
             console.error('📱 Error loading chat data:', error);
-            if (!isRefresh && isInitialLoad) {
-                Alert.alert(
-                    "Ошибка",
-                    "Не удалось загрузить сообщения. Проверьте подключение к интернету."
-                );
+
+            if (!isOffline) {
+                // Try to load from cache if online loading failed
+                console.log('📱 Loading from cache after online error...');
+
+                // Load chat info from cache
+                const cachedChatInfo = await getChatInfoFromCache(chatId);
+                if (cachedChatInfo) {
+                    parseChatInfo(cachedChatInfo);
+                }
+
+                // Load messages from cache
+                const cachedMessages = await getChatMessagesFromCache(chatId);
+                if (cachedMessages && cachedMessages.length > 0) {
+                    setMessages(cachedMessages);
+                    console.log(`📱 Loaded ${cachedMessages.length} messages from cache after error`);
+                } else if (!isRefresh && isInitialLoad) {
+                    Alert.alert(
+                        "Ошибка",
+                        "Не удалось загрузить сообщения. Проверьте подключение к интернету."
+                    );
+                }
             }
         } finally {
             setLoading(false);
@@ -421,6 +531,8 @@ export default function ChatScreen() {
 
     // Enhanced message listener setup with optimization
     const setupEnhancedMessageListener = useCallback(async () => {
+        if (isOffline) return;
+
         try {
             await chatService.initialize();
 
@@ -449,6 +561,9 @@ export default function ChatScreen() {
 
                         const updatedMessages = [...prevMessages, processedNewMessage];
 
+                        // Save to cache for offline access
+                        saveChatMessagesToCache(chatId, updatedMessages);
+
                         // Scroll to new message
                         setTimeout(() => {
                             if (flatListRef.current) {
@@ -474,10 +589,13 @@ export default function ChatScreen() {
         } catch (error) {
             console.error('📱 Error setting up enhanced message listener:', error);
         }
-    }, [chatId, loadNewMessages, lastMessageTimestamp]);
+    }, [chatId, loadNewMessages, lastMessageTimestamp, isOffline]);
 
     // Start or stop polling interval depending on app state
     const setupPolling = useCallback(() => {
+        // Don't set up polling if offline
+        if (isOffline) return () => {};
+
         // Clear previous interval if it exists
         if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current);
@@ -494,7 +612,7 @@ export default function ChatScreen() {
                 clearInterval(pollingIntervalRef.current);
             }
         };
-    }, [loadNewMessages]);
+    }, [loadNewMessages, isOffline]);
 
     // Track app state to optimize background operation
     useEffect(() => {
@@ -525,19 +643,35 @@ export default function ChatScreen() {
         // Load initial data
         loadChatData();
 
-        // Set up enhanced message listener
-        setupEnhancedMessageListener();
+        // Set up enhanced message listener if online
+        if (!isOffline) {
+            setupEnhancedMessageListener();
+        }
 
-        // Set up additional polling for reliability
+        // Set up additional polling for reliability if online
         const cleanupPolling = setupPolling();
 
         // Unsubscribe from listeners when leaving the screen
         return () => {
-            chatService.removeChatMessageListener(chatId);
-            chatService.cleanup();
+            if (!isOffline) {
+                chatService.removeChatMessageListener(chatId);
+                chatService.cleanup();
+            }
             cleanupPolling();
         };
-    }, [chatId, setupEnhancedMessageListener, setupPolling]);
+    }, [chatId, setupEnhancedMessageListener, setupPolling, isOffline]);
+
+    // Update polling and listeners when online status changes
+    useEffect(() => {
+        if (!isOffline) {
+            setupEnhancedMessageListener();
+            setupPolling();
+        } else {
+            if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+            }
+        }
+    }, [isOffline, setupEnhancedMessageListener, setupPolling]);
 
     // Handler for pull-to-refresh
     const handleRefresh = () => {
@@ -558,6 +692,14 @@ export default function ChatScreen() {
                     text: "Покинуть",
                     style: "destructive",
                     onPress: async () => {
+                        if (isOffline) {
+                            Alert.alert(
+                                "Нет подключения",
+                                "Для выхода из чата требуется подключение к интернету."
+                            );
+                            return;
+                        }
+
                         try {
                             await chatService.deleteChat(chatId);
                             router.back();
@@ -582,6 +724,14 @@ export default function ChatScreen() {
     const handleSendMessage = async () => {
         if (!messageText.trim() || sending) return;
 
+        if (isOffline) {
+            Alert.alert(
+                "Нет подключения",
+                "Для отправки сообщений требуется подключение к интернету."
+            );
+            return;
+        }
+
         try {
             // Store message text before clearing input
             const messageToSend = messageText.trim();
@@ -605,7 +755,14 @@ export default function ChatScreen() {
             };
 
             // Add message to UI
-            setMessages(prevMessages => [...prevMessages, localMessage]);
+            setMessages(prevMessages => {
+                const updatedMessages = [...prevMessages, localMessage];
+
+                // Save to cache for offline access
+                saveChatMessagesToCache(chatId, updatedMessages);
+
+                return updatedMessages;
+            });
 
             // Scroll down to the new message
             if (flatListRef.current) {
@@ -636,8 +793,8 @@ export default function ChatScreen() {
                     console.error('Background send error:', err);
 
                     // Silently mark as failed in state without visual indicators
-                    setMessages(prevMessages =>
-                        prevMessages.map(msg => {
+                    setMessages(prevMessages => {
+                        const updatedMessages = prevMessages.map(msg => {
                             if (msg.id === clientMessageId) {
                                 return {
                                     ...msg,
@@ -645,8 +802,13 @@ export default function ChatScreen() {
                                 };
                             }
                             return msg;
-                        })
-                    );
+                        });
+
+                        // Save updated messages to cache
+                        saveChatMessagesToCache(chatId, updatedMessages);
+
+                        return updatedMessages;
+                    });
                 }
             })();
 
@@ -742,7 +904,7 @@ export default function ChatScreen() {
                     >
                         <Ionicons name="chevron-back" size={24} color="#000"/>
                     </TouchableOpacity>
-                    <MarqueeTitle title={chatTitle}/>
+                    <TwoLineHeader title={chatTitle} subtitle={chatSubtitle} />
                     <TouchableOpacity
                         style={styles.menuButton}
                         onPress={() => setShowActionMenu(true)}
@@ -750,6 +912,14 @@ export default function ChatScreen() {
                         <Ionicons name="ellipsis-vertical" size={24} color="#000"/>
                     </TouchableOpacity>
                 </View>
+
+                {/* Offline indicator */}
+                {isOffline && (
+                    <View style={styles.offlineBar}>
+                        <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
+                        <Text style={styles.offlineText}>Отключено от сети</Text>
+                    </View>
+                )}
 
                 <FlatList
                     ref={flatListRef}
@@ -768,7 +938,9 @@ export default function ChatScreen() {
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Text style={styles.emptyText}>
-                                Нет сообщений. Начните общение прямо сейчас!
+                                {isOffline
+                                    ? "Нет локально сохраненных сообщений"
+                                    : "Нет сообщений. Начните общение прямо сейчас!"}
                             </Text>
                         </View>
                     }
@@ -777,20 +949,21 @@ export default function ChatScreen() {
                 <View style={styles.inputContainer}>
                     <TextInput
                         style={styles.messageInput}
-                        placeholder="Введите сообщение..."
+                        placeholder={isOffline ? "Нет подключения к сети" : "Введите сообщение..."}
                         value={messageText}
                         onChangeText={setMessageText}
                         multiline
                         maxLength={1000}
+                        editable={!isOffline}
                     />
 
                     <TouchableOpacity
                         style={[
                             styles.sendButton,
-                            (!messageText.trim() || sending) && styles.sendButtonDisabled
+                            (!messageText.trim() || sending || isOffline) && styles.sendButtonDisabled
                         ]}
                         onPress={handleSendMessage}
-                        disabled={!messageText.trim() || sending}
+                        disabled={!messageText.trim() || sending || isOffline}
                     >
                         {sending ? (
                             <ActivityIndicator size="small" color="#fff"/>
@@ -816,26 +989,49 @@ export default function ChatScreen() {
                             <TouchableOpacity
                                 style={styles.actionMenuItem}
                                 onPress={handleRefresh}
+                                disabled={isOffline}
                             >
-                                <Ionicons name="refresh" size={24} color="#333" style={styles.actionMenuIcon}/>
-                                <Text style={styles.actionMenuText}>Обновить</Text>
+                                <Ionicons
+                                    name="refresh"
+                                    size={24}
+                                    color={isOffline ? "#999" : "#333"}
+                                    style={styles.actionMenuIcon}
+                                />
+                                <Text style={[styles.actionMenuText, isOffline && styles.disabledText]}>
+                                    Обновить
+                                </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
                                 style={styles.actionMenuItem}
                                 onPress={handleMuteChat}
+                                disabled={isOffline}
                             >
-                                <Ionicons name="notifications-off" size={24} color="#1976D2"
-                                          style={styles.actionMenuIcon}/>
-                                <Text style={styles.actionMenuText}>Отключить уведомления</Text>
+                                <Ionicons
+                                    name="notifications-off"
+                                    size={24}
+                                    color={isOffline ? "#999" : "#1976D2"}
+                                    style={styles.actionMenuIcon}
+                                />
+                                <Text style={[styles.actionMenuText, isOffline && styles.disabledText]}>
+                                    Отключить уведомления
+                                </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
                                 style={styles.actionMenuItem}
                                 onPress={handleLeaveChat}
+                                disabled={isOffline}
                             >
-                                <Ionicons name="exit-outline" size={24} color="#D32F2F" style={styles.actionMenuIcon}/>
-                                <Text style={styles.actionMenuText}>Покинуть чат</Text>
+                                <Ionicons
+                                    name="exit-outline"
+                                    size={24}
+                                    color={isOffline ? "#999" : "#D32F2F"}
+                                    style={styles.actionMenuIcon}
+                                />
+                                <Text style={[styles.actionMenuText, isOffline && styles.disabledText]}>
+                                    Покинуть чат
+                                </Text>
                             </TouchableOpacity>
 
                             <TouchableOpacity
@@ -866,7 +1062,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: 16,
+        paddingVertical: 12,
         paddingHorizontal: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#E5E5EA',
@@ -884,19 +1080,28 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    titleContainer: {
+    twoLineHeaderContainer: {
         flex: 1,
-        height: 20,
-        overflow: 'hidden',
         justifyContent: 'center',
         alignItems: 'center',
+        padding: 4,
     },
-    titleText: {
+    headerTitle: {
         fontSize: 18,
         fontWeight: 'bold',
         color: '#770002',
         textAlign: 'center',
-        width: 'auto',
+    },
+    headerSubtitle: {
+        fontSize: 13,
+        color: '#666',
+        textAlign: 'center',
+        marginTop: 2,
+    },
+    title: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#770002',
     },
     loadingContainer: {
         flex: 1,
@@ -1073,5 +1278,21 @@ const styles = StyleSheet.create({
         borderColor: '#F44336',
         borderWidth: 1,
         opacity: 0.8,
+    },
+    offlineBar: {
+        backgroundColor: '#E53935',
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 6,
+    },
+    offlineText: {
+        color: '#fff',
+        fontSize: 14,
+        marginLeft: 6,
+        fontWeight: '500',
+    },
+    disabledText: {
+        color: '#999',
     },
 });

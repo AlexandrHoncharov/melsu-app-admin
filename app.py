@@ -245,19 +245,63 @@ def edit_student(student_id):
             flash(f'Error updating information: {e}', 'error')
     return render_template('students/edit.html', student=student)
 
+
 @app.route('/students/<int:student_id>/delete', methods=['POST'])
 @login_required
 def delete_student(student_id):
-    """Deletes a student user."""
+    """Deletes a student user and all associated data."""
     try:
         student = User.query.filter_by(id=student_id, role='student').first_or_404()
         student_name = student.full_name or student.username
+
+        # Delete all associated data first (tickets, verification logs, device tokens, etc.)
+        # Notification cleanup
+        Notification.query.filter_by(user_id=student_id).delete()
+
+        # Ticket attachments cleanup
+        ticket_messages = TicketMessage.query.filter_by(user_id=student_id).all()
+        for message in ticket_messages:
+            attachment = TicketAttachment.query.filter_by(message_id=message.id).first()
+            if attachment:
+                # Delete the actual file
+                try:
+                    attachment_path = os.path.join(TICKET_ATTACHMENTS_FOLDER, attachment.filename)
+                    if os.path.exists(attachment_path):
+                        os.remove(attachment_path)
+                except Exception as e:
+                    print(f"Error deleting attachment file: {e}")
+                db.session.delete(attachment)
+
+        # Delete ticket messages
+        TicketMessage.query.filter_by(user_id=student_id).delete()
+
+        # Delete tickets
+        Ticket.query.filter_by(user_id=student_id).delete()
+
+        # Delete verification logs
+        VerificationLog.query.filter_by(student_id=student_id).delete()
+
+        # Delete device tokens
+        DeviceToken.query.filter_by(user_id=student_id).delete()
+
+        # Delete student card image if it exists
+        if student.student_card_image:
+            try:
+                card_path = os.path.join(STUDENT_CARDS_FOLDER, student.student_card_image)
+                if os.path.exists(card_path):
+                    os.remove(card_path)
+            except Exception as e:
+                print(f"Error deleting student card image: {e}")
+
+        # Finally delete the student user
         db.session.delete(student)
         db.session.commit()
-        flash(f'Student "{student_name}" successfully deleted', 'success')
+        flash(f'Студент "{student_name}" успешно удален', 'success')
     except Exception as e:
         db.session.rollback()
-        flash(f'Error deleting student: {e}', 'error')
+        flash(f'Ошибка при удалении студента: {e}', 'error')
+        print(f"Error deleting student: {e}")
+
     return redirect(url_for('students_list'))
 
 # === Teacher Management === #

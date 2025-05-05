@@ -1,6 +1,6 @@
+// src/config/firebase.js
 import {initializeApp} from 'firebase/app';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {getReactNativePersistence, initializeAuth} from 'firebase/auth';
 
 // Firebase конфигурация
 const firebaseConfig = {
@@ -19,90 +19,158 @@ let app = null;
 let auth = null;
 let database = null;
 
+// Флаг для отслеживания статуса инициализации
+let initialized = false;
+let initializationAttempted = false;
+
+// Безопасная инициализация Firebase
+const initializeFirebase = async () => {
+  // Если уже была попытка инициализации, не повторяем её
+  if (initializationAttempted) {
+    return { app, auth, database, initialized };
+  }
+
+  initializationAttempted = true;
+
+  try {
+    console.log("Инициализация Firebase...");
+
+    // 1. Инициализация приложения
+    app = initializeApp(firebaseConfig);
+    console.log("Firebase app инициализирован");
+
+    // 2. Инициализация аутентификации с персистентностью через AsyncStorage
+    // Используем динамический импорт для предотвращения ошибок при первичной загрузке
+    try {
+      const { getReactNativePersistence, initializeAuth } = await import('firebase/auth');
+      auth = initializeAuth(app, {
+        persistence: getReactNativePersistence(AsyncStorage)
+      });
+      console.log("Firebase Auth инициализирован с AsyncStorage");
+    } catch (authError) {
+      console.error("Ошибка при инициализации Firebase Auth:", authError);
+      // Если произошла ошибка с Auth, продолжаем с Database
+    }
+
+    // 3. Инициализация базы данных
+    try {
+      const { getDatabase } = await import('firebase/database');
+      database = getDatabase(app);
+      console.log("Firebase Realtime Database инициализирована");
+    } catch (dbError) {
+      console.error("Ошибка при инициализации Firebase Database:", dbError);
+    }
+
+    // Если дошли до этой точки, считаем инициализацию успешной
+    initialized = true;
+    return { app, auth, database, initialized };
+
+  } catch (error) {
+    console.error("Ошибка при инициализации Firebase:", error);
+    initialized = false;
+
+    // Создаем заглушки для предотвращения ошибок в коде
+    app = app || {
+      name: '[firebase-app-mock]',
+      options: {...firebaseConfig},
+      automaticDataCollectionEnabled: false
+    };
+
+    auth = auth || {
+      currentUser: null,
+      app: app,
+      name: '[auth-mock]',
+      signInWithCustomToken: async () => ({ user: { uid: 'mock-user' } }),
+      signInAnonymously: async () => ({ user: { uid: 'anonymous-user' } }),
+      signOut: async () => Promise.resolve()
+    };
+
+    database = database || createMockDatabase();
+
+    return { app, auth, database, initialized };
+  }
+};
+
+// Функция для создания имитации базы данных
+function createMockDatabase() {
+  return {
+    app,
+    _checkNotDeleted: () => true,
+    ref: (path = '/') => createMockReference(path),
+    getReferenceFromURL: (url) => createMockReference('/mock-from-url'),
+    goOffline: () => console.log("Mock DB: goOffline"),
+    goOnline: () => console.log("Mock DB: goOnline"),
+    refFromURL: (url) => createMockReference('/mock-from-url')
+  };
+}
+
 // Функция для имитации объекта Database Reference
 function createMockReference(path) {
   return {
     key: path.split('/').pop(),
     path: path,
-    _checkNotDeleted: () => true, // Это решает проблему с _checkNotDeleted
+    _path: path,
+    _checkNotDeleted: () => true,
     toString: () => path,
-
-    // Методы для работы с данными
     on: (eventType, callback) => {
       console.log(`Mock DB: listening to ${path} for ${eventType}`);
-
-      // Создаем мок-снапшот
-      const mockSnapshot = {
+      if (callback) setTimeout(() => callback({
         key: path.split('/').pop(),
         val: () => ({}),
         exists: () => false,
-        forEach: (fn) => {
-        },
+        forEach: (fn) => {},
         hasChildren: () => false,
         numChildren: () => 0,
         toJSON: () => ({})
-      };
-
-      if (callback) setTimeout(() => callback(mockSnapshot), 0);
-      return callback; // Возвращаем callback для off()
+      }), 0);
+      return callback;
     },
-
     off: (eventType, callback) => {
       console.log(`Mock DB: unlisten ${path} for ${eventType}`);
       return undefined;
     },
-
     once: (eventType) => {
       console.log(`Mock DB: once ${path} for ${eventType}`);
       return Promise.resolve({
         key: path.split('/').pop(),
         val: () => ({}),
         exists: () => false,
-        forEach: (fn) => {
-        },
+        forEach: (fn) => {},
         hasChildren: () => false,
         numChildren: () => 0,
         toJSON: () => ({})
       });
     },
-
     push: () => {
-      const newKey = `mock-key-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const newKey = `mock-key-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
       const newPath = `${path}/${newKey}`;
       const newRef = createMockReference(newPath);
       newRef.key = newKey;
       return newRef;
     },
-
     set: (value) => {
       console.log(`Mock DB: set at ${path}`);
       return Promise.resolve();
     },
-
     update: (value) => {
       console.log(`Mock DB: update at ${path}`);
       return Promise.resolve();
     },
-
     remove: () => {
       console.log(`Mock DB: remove at ${path}`);
       return Promise.resolve();
     },
-
     child: (childPath) => {
       return createMockReference(`${path}/${childPath}`);
     },
-
     orderByChild: (path) => {
       console.log(`Mock DB: orderByChild ${path}`);
       return createMockReference(path);
     },
-
     limitToLast: (limit) => {
       console.log(`Mock DB: limitToLast ${limit}`);
       return createMockReference(path);
     },
-
     startAfter: (value) => {
       console.log(`Mock DB: startAfter`);
       return createMockReference(path);
@@ -110,72 +178,257 @@ function createMockReference(path) {
   };
 }
 
-// Попытка инициализации Firebase
-try {
-  console.log("Инициализация Firebase...");
+// Экспортируем соответствующие методы для использования в компонентах
+let cachedResult = null;
 
-  // Инициализация приложения
-  app = initializeApp(firebaseConfig);
-  console.log("Firebase app инициализирован");
+// Экспортируем функции Firebase/database
+export const get = async (...args) => {
+  if (!cachedResult) {
+    cachedResult = await initializeFirebase();
+  }
+  if (!cachedResult.initialized) {
+    return { exists: () => false, val: () => null };
+  }
+  try {
+    const { get } = await import('firebase/database');
+    return await get(...args);
+  } catch (error) {
+    console.warn('Error using Firebase get:', error);
+    return { exists: () => false, val: () => null };
+  }
+};
 
-  // Инициализация аутентификации с персистентностью через AsyncStorage
-  auth = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage)
-  });
-  console.log("Firebase Auth инициализирован с AsyncStorage");
+export const set = async (...args) => {
+  if (!cachedResult) {
+    cachedResult = await initializeFirebase();
+  }
+  if (!cachedResult.initialized) {
+    return Promise.resolve();
+  }
+  try {
+    const { set } = await import('firebase/database');
+    return await set(...args);
+  } catch (error) {
+    console.warn('Error using Firebase set:', error);
+    return Promise.resolve();
+  }
+};
 
-  // Настоящий импорт getDatabase
-  const {getDatabase} = require('firebase/database');
-  database = getDatabase(app);
-  console.log("Firebase Realtime Database инициализирована");
+export const update = async (...args) => {
+  if (!cachedResult) {
+    cachedResult = await initializeFirebase();
+  }
+  if (!cachedResult.initialized) {
+    return Promise.resolve();
+  }
+  try {
+    const { update } = await import('firebase/database');
+    return await update(...args);
+  } catch (error) {
+    console.warn('Error using Firebase update:', error);
+    return Promise.resolve();
+  }
+};
 
-} catch (error) {
-  console.error("Ошибка при инициализации Firebase:", error);
+export const push = (...args) => {
+  if (!cachedResult) {
+    // Для push мы не делаем await, вместо этого возвращаем
+    // мок-объект с методом key, чтобы код не ломался
+    setTimeout(() => initializeFirebase(), 0);
+    const mockRef = createMockReference('mock/path');
+    mockRef.key = `mock-key-${Date.now()}`;
+    return mockRef;
+  }
+  if (!cachedResult.initialized) {
+    const mockRef = createMockReference('mock/path');
+    mockRef.key = `mock-key-${Date.now()}`;
+    return mockRef;
+  }
+  try {
+    const { push } = require('firebase/database');
+    return push(...args);
+  } catch (error) {
+    console.warn('Error using Firebase push:', error);
+    const mockRef = createMockReference('mock/path');
+    mockRef.key = `mock-key-${Date.now()}`;
+    return mockRef;
+  }
+};
 
-  // Базовая мок версия app
-  app = {
-    name: '[firebase-app-mock]',
-    options: {...firebaseConfig},
-    automaticDataCollectionEnabled: false
-  };
+export const ref = (...args) => {
+  if (!cachedResult) {
+    // Аналогично push
+    setTimeout(() => initializeFirebase(), 0);
+    return createMockReference(args[1] || '/');
+  }
+  if (!cachedResult.initialized || !cachedResult.database) {
+    return createMockReference(args[1] || '/');
+  }
+  try {
+    const { ref } = require('firebase/database');
+    return ref(...args);
+  } catch (error) {
+    console.warn('Error using Firebase ref:', error);
+    return createMockReference(args[1] || '/');
+  }
+};
 
-  // Мок версия auth
-  auth = {
-    currentUser: null,
-    app: app,
-    name: '[auth-mock]',
+export const onValue = (...args) => {
+  if (!cachedResult) {
+    setTimeout(() => initializeFirebase(), 0);
+    return () => {}; // Возвращаем пустую функцию для отписки
+  }
+  if (!cachedResult.initialized) {
+    // Если не инициализировано, просто вызываем callback с пустыми данными
+    setTimeout(() => {
+      if (args[1]) {
+        args[1]({
+          exists: () => false,
+          val: () => null,
+          forEach: () => {}
+        });
+      }
+    }, 0);
+    return () => {}; // Возвращаем пустую функцию для отписки
+  }
+  try {
+    const { onValue } = require('firebase/database');
+    return onValue(...args);
+  } catch (error) {
+    console.warn('Error using Firebase onValue:', error);
+    // Если ошибка, просто вызываем callback с пустыми данными
+    setTimeout(() => {
+      if (args[1]) {
+        args[1]({
+          exists: () => false,
+          val: () => null,
+          forEach: () => {}
+        });
+      }
+    }, 0);
+    return () => {}; // Возвращаем пустую функцию для отписки
+  }
+};
 
-    signInWithCustomToken: async () => {
-      console.log("Mock: signInWithCustomToken");
-      return {user: {uid: 'mock-user'}};
-    },
+export const off = (...args) => {
+  if (!cachedResult || !cachedResult.initialized) {
+    return; // Ничего не делаем, если не инициализировано
+  }
+  try {
+    const { off } = require('firebase/database');
+    return off(...args);
+  } catch (error) {
+    console.warn('Error using Firebase off:', error);
+  }
+};
 
-    signInAnonymously: async () => {
-      console.log("Mock: signInAnonymously");
-      return {user: {uid: 'anonymous-user'}};
-    },
+export const query = (...args) => {
+  if (!cachedResult || !cachedResult.initialized) {
+    return args[0]; // Просто возвращаем первый аргумент (ref)
+  }
+  try {
+    const { query } = require('firebase/database');
+    return query(...args);
+  } catch (error) {
+    console.warn('Error using Firebase query:', error);
+    return args[0]; // В случае ошибки возвращаем первый аргумент (ref)
+  }
+};
 
-    signOut: async () => {
-      console.log("Mock: signOut");
-      return Promise.resolve();
-    }
-  };
+export const orderByChild = (path) => {
+  if (!cachedResult || !cachedResult.initialized) {
+    return (ref) => ref; // Возвращаем функцию-заглушку
+  }
+  try {
+    const { orderByChild } = require('firebase/database');
+    return orderByChild(path);
+  } catch (error) {
+    console.warn('Error using Firebase orderByChild:', error);
+    return (ref) => ref; // В случае ошибки возвращаем функцию-заглушку
+  }
+};
 
-  // Мок версия database с поддержкой _checkNotDeleted
-  database = {
-    app: app,
-    _checkNotDeleted: () => true,
+export const limitToLast = (limit) => {
+  if (!cachedResult || !cachedResult.initialized) {
+    return (ref) => ref; // Возвращаем функцию-заглушку
+  }
+  try {
+    const { limitToLast } = require('firebase/database');
+    return limitToLast(limit);
+  } catch (error) {
+    console.warn('Error using Firebase limitToLast:', error);
+    return (ref) => ref; // В случае ошибки возвращаем функцию-заглушку
+  }
+};
 
-    ref: (path = '/') => createMockReference(path),
+export const startAfter = (value) => {
+  if (!cachedResult || !cachedResult.initialized) {
+    return (ref) => ref; // Возвращаем функцию-заглушку
+  }
+  try {
+    const { startAfter } = require('firebase/database');
+    return startAfter(value);
+  } catch (error) {
+    console.warn('Error using Firebase startAfter:', error);
+    return (ref) => ref; // В случае ошибки возвращаем функцию-заглушку
+  }
+};
 
-    // Дополнительные методы
-    getReferenceFromURL: (url) => createMockReference('/mock-from-url'),
-    goOffline: () => console.log("Mock DB: goOffline"),
-    goOnline: () => console.log("Mock DB: goOnline"),
-    refFromURL: (url) => createMockReference('/mock-from-url')
-  };
+export const serverTimestamp = () => {
+  if (!cachedResult || !cachedResult.initialized) {
+    return Date.now(); // Возвращаем текущее время
+  }
+  try {
+    const { serverTimestamp } = require('firebase/database');
+    return serverTimestamp();
+  } catch (error) {
+    console.warn('Error using Firebase serverTimestamp:', error);
+    return Date.now(); // В случае ошибки возвращаем текущее время
+  }
+};
 
-  console.warn("⚠️ Инициализация Firebase не удалась. Используется имитация API для предотвращения сбоев.");
-}
+// Экспортируем функции Firebase/auth
+export const signInWithCustomToken = async (...args) => {
+  if (!cachedResult) {
+    cachedResult = await initializeFirebase();
+  }
+  if (!cachedResult.initialized || !cachedResult.auth) {
+    return { user: { uid: 'mock-user' } };
+  }
+  try {
+    const { signInWithCustomToken } = await import('firebase/auth');
+    return await signInWithCustomToken(...args);
+  } catch (error) {
+    console.warn('Error using Firebase signInWithCustomToken:', error);
+    return { user: { uid: 'mock-user' } };
+  }
+};
 
+export const signInAnonymously = async (...args) => {
+  if (!cachedResult) {
+    cachedResult = await initializeFirebase();
+  }
+  if (!cachedResult.initialized || !cachedResult.auth) {
+    return { user: { uid: 'anonymous-user' } };
+  }
+  try {
+    const { signInAnonymously } = await import('firebase/auth');
+    return await signInAnonymously(...args);
+  } catch (error) {
+    console.warn('Error using Firebase signInAnonymously:', error);
+    return { user: { uid: 'anonymous-user' } };
+  }
+};
+
+// Инициализируем Firebase и экспортируем основные объекты
 export { app, auth, database };
+
+// Запускаем инициализацию сразу для ускорения
+initializeFirebase().then(({ app: a, auth: au, database: db, initialized: init }) => {
+  // Обновляем экспортируемые объекты после инициализации
+  if (init) {
+    app = a;
+    auth = au;
+    database = db;
+  }
+});

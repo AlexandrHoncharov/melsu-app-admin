@@ -56,7 +56,7 @@ export default function AboutScreen() {
                         <Text style={styles.logoText}>MelSU</Text>
                         <Text style={styles.logoTextUniversity}>Go</Text>
                     </View>
-                    <Text style={styles.appName}>MelSU Go</Text>
+                    <Text style={styles.appName}>my.melsu</Text>
                     <Text style={styles.appVersion}>Версия 1.2.1</Text>
                 </View>
 
@@ -64,7 +64,7 @@ export default function AboutScreen() {
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>О приложении</Text>
                     <Text style={styles.sectionText}>
-                        MelSU Go — официальное мобильное приложение для студентов и преподавателей Мелитопольского
+                        my.melsu — официальное мобильное приложение для студентов и преподавателей Мелитопольского
                         государственного университета.
                         Приложение разработано для удобного доступа к расписанию занятий, общения между студентами и
                         преподавателями,

@@ -1,24 +1,19 @@
 // File: src/services/chatService.js
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {auth, database} from '../config/firebase';
 import {
-    get,
-    limitToLast,
-    off,
-    onValue,
-    orderByChild,
-    push,
-    query,
-    ref,
-    serverTimestamp,
-    set,
-    startAfter,
-    update
-} from 'firebase/database';
-import {signInAnonymously, signInWithCustomToken} from 'firebase/auth';
+    auth, database,
+    ref, get, set, update, push, query, limitToLast,
+    orderByChild, startAfter, onValue, off, serverTimestamp,
+    signInWithCustomToken, signInAnonymously
+} from '../config/firebase';
 import apiClient from '../api/apiClient';
 import * as Device from 'expo-device';
 import {Platform} from 'react-native';
+import authUtils from '../utils/authUtils';
+
+// Local storage для кэширования сообщений
+const MESSAGE_CACHE_KEY = 'chat_message_cache';
+const CHAT_CACHE_KEY = 'chat_cache';
 
 class ChatService {
     constructor() {
@@ -29,6 +24,62 @@ class ChatService {
         this.initializationInProgress = false; // Флаг для предотвращения рекурсии
         this.deviceToken = null; // Токен устройства для push-уведомлений
         this.unreadCountCallback = null; // Callback для обновления счетчика непрочитанных сообщений
+        this.messageCache = {}; // Локальный кэш сообщений для каждого чата
+        this.chatCache = {}; // Локальный кэш данных чатов
+    }
+
+    /**
+     * Загрузка кэша сообщений из локального хранилища
+     */
+    async loadMessageCache() {
+        try {
+            const cacheJson = await AsyncStorage.getItem(MESSAGE_CACHE_KEY);
+            if (cacheJson) {
+                this.messageCache = JSON.parse(cacheJson);
+                console.log('Кэш сообщений загружен из хранилища');
+            }
+        } catch (e) {
+            console.warn('Ошибка при загрузке кэша сообщений:', e);
+            this.messageCache = {};
+        }
+    }
+
+    /**
+     * Сохранение кэша сообщений в локальное хранилище
+     */
+    async saveMessageCache() {
+        try {
+            await AsyncStorage.setItem(MESSAGE_CACHE_KEY, JSON.stringify(this.messageCache));
+        } catch (e) {
+            console.warn('Ошибка при сохранении кэша сообщений:', e);
+        }
+    }
+
+    /**
+     * Загрузка кэша чатов из локального хранилища
+     */
+    async loadChatCache() {
+        try {
+            const cacheJson = await AsyncStorage.getItem(CHAT_CACHE_KEY);
+            if (cacheJson) {
+                this.chatCache = JSON.parse(cacheJson);
+                console.log('Кэш чатов загружен из хранилища');
+            }
+        } catch (e) {
+            console.warn('Ошибка при загрузке кэша чатов:', e);
+            this.chatCache = {};
+        }
+    }
+
+    /**
+     * Сохранение кэша чатов в локальное хранилище
+     */
+    async saveChatCache() {
+        try {
+            await AsyncStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(this.chatCache));
+        } catch (e) {
+            console.warn('Ошибка при сохранении кэша чатов:', e);
+        }
     }
 
     /**
@@ -109,6 +160,12 @@ class ChatService {
             // Устанавливаем флаг, что инициализация в процессе
             this.initializationInProgress = true;
 
+            // Загружаем кэши
+            await Promise.all([
+                this.loadMessageCache(),
+                this.loadChatCache()
+            ]);
+
             // Очищаем пользователя перед новой инициализацией
             this.currentUser = null;
 
@@ -141,21 +198,12 @@ class ChatService {
             this.currentUser = userData;
             console.log(`ChatService: Initialized with user: ID=${this.currentUser.id}, Name=${this.currentUser.fullName || this.currentUser.username}, Role=${this.currentUser.role}`);
 
-            // Пробуем аутентифицироваться в Firebase без рекурсивных вызовов
-            try {
-                const response = await apiClient.post('/auth/firebase-token');
-                const {token} = response.data;
-                await signInWithCustomToken(auth, token);
-                console.log('Firebase authentication successful with token');
-            } catch (authError) {
-                console.warn('Firebase auth failed with token, trying anonymous auth:', authError);
-
-                try {
-                    await signInAnonymously(auth);
-                    console.log('Anonymous auth successful');
-                } catch (anonError) {
-                    console.warn('Anonymous auth failed:', anonError);
-                }
+            // Используем authUtils для Firebase аутентификации
+            const authSuccess = await authUtils.syncFirebaseAuth();
+            if (authSuccess) {
+                console.log('Firebase authentication successful via authUtils');
+            } else {
+                console.warn('Firebase authentication failed via authUtils, but continuing');
             }
 
             // Записываем основную информацию о пользователе в Firebase
@@ -172,6 +220,7 @@ class ChatService {
                 });
             } catch (dbError) {
                 console.warn('Error writing user data to database:', dbError);
+                // Продолжаем работу даже при ошибке записи
             }
 
             // Загружаем сохраненный токен устройства, если есть
@@ -246,7 +295,6 @@ class ChatService {
 
     // Улучшенная версия метода registerDeviceToken в chatService.js
     // Добавляет проверку на существующие токены перед регистрацией
-
     async registerDeviceToken(token) {
         if (!token || !this.initialized || !this.currentUser) {
             return false;
@@ -374,16 +422,17 @@ class ChatService {
 
         // Выход из Firebase Auth
         try {
-            if (auth.currentUser) {
-                await auth.signOut();
-                console.log('Successfully signed out from Firebase Auth');
-            }
+            await authUtils.signOut();
         } catch (error) {
             console.warn('Error signing out from Firebase Auth:', error);
         }
 
         // Очищаем все обработчики событий
         this.listeners = {};
+
+        // Сохраняем кэши для будущего использования
+        await this.saveMessageCache();
+        await this.saveChatCache();
 
         console.log('ChatService completely reset - all state cleared, listeners removed, user signed out');
 
@@ -534,79 +583,129 @@ class ChatService {
 
             console.log(`Итоговое отображаемое имя пользователя: ${otherUserDisplayName}`);
 
-            // Проверяем, существует ли уже такой чат
-            const chatRef = ref(database, `chats/${chatId}`);
-            const snapshot = await get(chatRef);
+            try {
+                // Проверяем, существует ли уже такой чат
+                const chatRef = ref(database, `chats/${chatId}`);
+                const snapshot = await get(chatRef);
 
-            if (!snapshot.exists()) {
-                console.log(`Creating new chat ${chatId}`);
+                if (!snapshot.exists()) {
+                    console.log(`Creating new chat ${chatId}`);
 
-                // Создаем новый чат
-                await set(chatRef, {
-                    id: chatId, type: 'personal', createdAt: serverTimestamp(), participants: {
-                        [myUserId]: true, [otherUserId]: true
-                    }
-                });
-
-                // Добавляем чат в список чатов текущего пользователя
-                await set(ref(database, `userChats/${myUserId}/${chatId}`), {
-                    id: chatId,
-                    type: 'personal',
-                    withUser: otherUserId,
-                    withUserRole: otherUserInfo.role || 'unknown',
-                    withUserName: otherUserDisplayName,
-                    updatedAt: serverTimestamp()
-                });
-
-                // Формируем имя текущего пользователя
-                let currentUserName = this.currentUser.fullName || this.currentUser.username;
-                let currentUserDetails = '';
-                if (this.currentUser.role === 'student' && this.currentUser.group) {
-                    currentUserDetails = ` (${this.currentUser.group})`;
-                } else if (this.currentUser.role === 'teacher' && this.currentUser.department) {
-                    currentUserDetails = ` (${this.currentUser.department})`;
-                }
-
-                const currentUserDisplayName = currentUserName + currentUserDetails;
-
-                console.log(`Current user display name: ${currentUserDisplayName}`);
-
-                // Добавляем чат в список чатов другого пользователя
-                await set(ref(database, `userChats/${otherUserId}/${chatId}`), {
-                    id: chatId,
-                    type: 'personal',
-                    withUser: myUserId,
-                    withUserName: currentUserDisplayName,
-                    withUserRole: this.currentUser.role || 'unknown',
-                    updatedAt: serverTimestamp()
-                });
-
-                console.log(`Personal chat ${chatId} successfully created`);
-            } else {
-                console.log(`Chat ${chatId} already exists, updating`);
-
-                // Обновляем имена пользователей, если чат уже существует
-                // Получаем текущие данные чата
-                try {
-                    const myUserChatRef = ref(database, `userChats/${myUserId}/${chatId}`);
-                    const myUserChatSnapshot = await get(myUserChatRef);
-
-                    if (myUserChatSnapshot.exists()) {
-                        const chatData = myUserChatSnapshot.val();
-
-                        // Если имя поменялось или отсутствует, обновляем
-                        if (!chatData.withUserName || chatData.withUserName === `Пользователь ${otherUserId}` ||
-                            chatData.withUserName.startsWith('Преподаватель ')) {
-                            console.log(`Updating other user name to: ${otherUserDisplayName}`);
-                            await update(myUserChatRef, {
-                                withUserName: otherUserDisplayName,
-                                updatedAt: serverTimestamp()
-                            });
+                    // Создаем новый чат
+                    await set(chatRef, {
+                        id: chatId, type: 'personal', createdAt: serverTimestamp(), participants: {
+                            [myUserId]: true, [otherUserId]: true
                         }
+                    });
+
+                    // Добавляем чат в список чатов текущего пользователя
+                    await set(ref(database, `userChats/${myUserId}/${chatId}`), {
+                        id: chatId,
+                        type: 'personal',
+                        withUser: otherUserId,
+                        withUserRole: otherUserInfo.role || 'unknown',
+                        withUserName: otherUserDisplayName,
+                        updatedAt: serverTimestamp()
+                    });
+
+                    // Формируем имя текущего пользователя
+                    let currentUserName = this.currentUser.fullName || this.currentUser.username;
+                    let currentUserDetails = '';
+                    if (this.currentUser.role === 'student' && this.currentUser.group) {
+                        currentUserDetails = ` (${this.currentUser.group})`;
+                    } else if (this.currentUser.role === 'teacher' && this.currentUser.department) {
+                        currentUserDetails = ` (${this.currentUser.department})`;
                     }
-                } catch (updateError) {
-                    console.warn('Error updating chat name:', updateError);
+
+                    const currentUserDisplayName = currentUserName + currentUserDetails;
+
+                    console.log(`Current user display name: ${currentUserDisplayName}`);
+
+                    // Добавляем чат в список чатов другого пользователя
+                    await set(ref(database, `userChats/${otherUserId}/${chatId}`), {
+                        id: chatId,
+                        type: 'personal',
+                        withUser: myUserId,
+                        withUserName: currentUserDisplayName,
+                        withUserRole: this.currentUser.role || 'unknown',
+                        updatedAt: serverTimestamp()
+                    });
+
+                    // Кэшируем информацию о чате
+                    this.chatCache[chatId] = {
+                        id: chatId,
+                        type: 'personal',
+                        participants: {
+                            [myUserId]: true,
+                            [otherUserId]: true
+                        },
+                        withUser: otherUserId,
+                        withUserName: otherUserDisplayName,
+                        withUserRole: otherUserInfo.role || 'unknown',
+                        createdAt: Date.now(),
+                        updatedAt: Date.now()
+                    };
+
+                    // Сохраняем кэш
+                    await this.saveChatCache();
+
+                    console.log(`Personal chat ${chatId} successfully created`);
+                } else {
+                    console.log(`Chat ${chatId} already exists, updating`);
+
+                    // Обновляем имена пользователей, если чат уже существует
+                    // Получаем текущие данные чата
+                    try {
+                        const myUserChatRef = ref(database, `userChats/${myUserId}/${chatId}`);
+                        const myUserChatSnapshot = await get(myUserChatRef);
+
+                        if (myUserChatSnapshot.exists()) {
+                            const chatData = myUserChatSnapshot.val();
+
+                            // Если имя поменялось или отсутствует, обновляем
+                            if (!chatData.withUserName || chatData.withUserName === `Пользователь ${otherUserId}` ||
+                                chatData.withUserName.startsWith('Преподаватель ')) {
+                                console.log(`Updating other user name to: ${otherUserDisplayName}`);
+                                await update(myUserChatRef, {
+                                    withUserName: otherUserDisplayName,
+                                    updatedAt: serverTimestamp()
+                                });
+                            }
+
+                            // Обновляем кэш
+                            this.chatCache[chatId] = {
+                                ...this.chatCache[chatId] || {},
+                                ...chatData,
+                                withUserName: otherUserDisplayName,
+                                updatedAt: Date.now()
+                            };
+                        }
+                    } catch (updateError) {
+                        console.warn('Error updating chat name:', updateError);
+                    }
                 }
+            } catch (firebaseError) {
+                console.warn('Firebase error creating chat:', firebaseError);
+
+                // Если Firebase недоступен, используем только локальный кэш
+                this.chatCache[chatId] = {
+                    id: chatId,
+                    type: 'personal',
+                    participants: {
+                        [myUserId]: true,
+                        [otherUserId]: true
+                    },
+                    withUser: otherUserId,
+                    withUserName: otherUserDisplayName,
+                    withUserRole: otherUserInfo.role || 'unknown',
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                };
+
+                // Сохраняем кэш
+                await this.saveChatCache();
+
+                console.log(`Chat created in local cache due to Firebase error: ${chatId}`);
             }
 
             return chatId;
@@ -667,73 +766,161 @@ class ChatService {
                 }
             });
 
-            // Создаем групповой чат в Firebase
-            const chatRef = ref(database, `chats/${chatId}`);
-            await set(chatRef, {
-                id: chatId,
-                type: 'group',
-                name: displayName,
-                groupCode: groupName,
-                createdBy: myUserId,
-                createdAt: serverTimestamp(),
-                participants: participants
-            });
+            try {
+                // Создаем групповой чат в Firebase
+                const chatRef = ref(database, `chats/${chatId}`);
+                await set(chatRef, {
+                    id: chatId,
+                    type: 'group',
+                    name: displayName,
+                    groupCode: groupName,
+                    createdBy: myUserId,
+                    createdAt: serverTimestamp(),
+                    participants: participants
+                });
 
-            // Добавляем чат в список чатов создателя
-            await set(ref(database, `userChats/${myUserId}/${chatId}`), {
-                id: chatId,
-                type: 'group',
-                name: displayName,
-                groupCode: groupName,
-                updatedAt: serverTimestamp()
-            });
+                // Добавляем чат в список чатов создателя
+                await set(ref(database, `userChats/${myUserId}/${chatId}`), {
+                    id: chatId,
+                    type: 'group',
+                    name: displayName,
+                    groupCode: groupName,
+                    updatedAt: serverTimestamp()
+                });
 
-            // Добавляем чат в списки чатов всех студентов
-            for (const student of students) {
-                if (student.id) {
-                    await set(ref(database, `userChats/${String(student.id)}/${chatId}`), {
-                        id: chatId,
-                        type: 'group',
-                        name: displayName,
-                        groupCode: groupName,
+                // Добавляем чат в списки чатов всех студентов
+                for (const student of students) {
+                    if (student.id) {
+                        await set(ref(database, `userChats/${String(student.id)}/${chatId}`), {
+                            id: chatId,
+                            type: 'group',
+                            name: displayName,
+                            groupCode: groupName,
+                            updatedAt: serverTimestamp()
+                        });
+                    }
+                }
+
+                // Отправляем приветственное сообщение
+                const welcomeMessageRef = push(ref(database, `messages/${chatId}`));
+                const messageId = welcomeMessageRef.key;
+
+                const messageData = {
+                    id: messageId,
+                    senderId: myUserId,
+                    senderName: this.currentUser.fullName || this.currentUser.username || `Преподаватель`,
+                    text: `Добро пожаловать в групповой чат для группы ${groupName}!`,
+                    timestamp: serverTimestamp(),
+                    read: {[myUserId]: true}
+                };
+
+                await set(ref(database, `messages/${chatId}/${messageId}`), messageData);
+
+                // Обновляем информацию о последнем сообщении
+                const lastMessageInfo = {
+                    id: messageId,
+                    text: messageData.text.length > 30 ? `${messageData.text.substring(0, 30)}...` : messageData.text,
+                    senderId: myUserId,
+                    timestamp: serverTimestamp()
+                };
+
+                await update(chatRef, {
+                    lastMessage: lastMessageInfo
+                });
+
+                // Обновляем информацию о чате у всех участников
+                for (const userId of Object.keys(participants)) {
+                    await update(ref(database, `userChats/${userId}/${chatId}`), {
+                        lastMessage: lastMessageInfo,
                         updatedAt: serverTimestamp()
                     });
                 }
-            }
 
-            // Отправляем приветственное сообщение
-            const messageData = {
-                id: push(ref(database, `messages/${chatId}`)).key,
-                senderId: myUserId,
-                senderName: this.currentUser.fullName || this.currentUser.username || `Преподаватель`,
-                text: `Добро пожаловать в групповой чат для группы ${groupName}!`,
-                timestamp: serverTimestamp(),
-                read: {[myUserId]: true}
-            };
+                // Кэшируем групповой чат
+                this.chatCache[chatId] = {
+                    id: chatId,
+                    type: 'group',
+                    name: displayName,
+                    groupCode: groupName,
+                    createdBy: myUserId,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    participants: participants,
+                    lastMessage: {
+                        id: messageId,
+                        text: messageData.text.length > 30 ? `${messageData.text.substring(0, 30)}...` : messageData.text,
+                        senderId: myUserId,
+                        timestamp: Date.now()
+                    }
+                };
 
-            await set(ref(database, `messages/${chatId}/${messageData.id}`), messageData);
+                // Кэшируем первое сообщение
+                if (!this.messageCache[chatId]) {
+                    this.messageCache[chatId] = [];
+                }
 
-            // Обновляем информацию о последнем сообщении
-            const lastMessageInfo = {
-                id: messageData.id,
-                text: messageData.text.length > 30 ? `${messageData.text.substring(0, 30)}...` : messageData.text,
-                senderId: myUserId,
-                timestamp: serverTimestamp()
-            };
-
-            await update(chatRef, {
-                lastMessage: lastMessageInfo
-            });
-
-            // Обновляем информацию о чате у всех участников
-            for (const userId of Object.keys(participants)) {
-                await update(ref(database, `userChats/${userId}/${chatId}`), {
-                    lastMessage: lastMessageInfo,
-                    updatedAt: serverTimestamp()
+                this.messageCache[chatId].push({
+                    ...messageData,
+                    timestamp: Date.now(),
+                    isFromCurrentUser: true
                 });
+
+                // Сохраняем кэши
+                await Promise.all([
+                    this.saveChatCache(),
+                    this.saveMessageCache()
+                ]);
+
+                console.log(`Group chat ${chatId} successfully created for group ${groupName}`);
+            } catch (firebaseError) {
+                console.warn('Firebase error creating group chat:', firebaseError);
+
+                // Если Firebase недоступен, используем только локальный кэш
+                const messageId = `mock-msg-${Date.now()}`;
+                const welcomeMessage = {
+                    id: messageId,
+                    senderId: myUserId,
+                    senderName: this.currentUser.fullName || this.currentUser.username || `Преподаватель`,
+                    text: `Добро пожаловать в групповой чат для группы ${groupName}!`,
+                    timestamp: Date.now(),
+                    read: {[myUserId]: true},
+                    isFromCurrentUser: true
+                };
+
+                // Кэшируем групповой чат
+                this.chatCache[chatId] = {
+                    id: chatId,
+                    type: 'group',
+                    name: displayName,
+                    groupCode: groupName,
+                    createdBy: myUserId,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    participants: participants,
+                    lastMessage: {
+                        id: messageId,
+                        text: welcomeMessage.text.length > 30 ? `${welcomeMessage.text.substring(0, 30)}...` : welcomeMessage.text,
+                        senderId: myUserId,
+                        timestamp: Date.now()
+                    }
+                };
+
+                // Кэшируем первое сообщение
+                if (!this.messageCache[chatId]) {
+                    this.messageCache[chatId] = [];
+                }
+
+                this.messageCache[chatId].push(welcomeMessage);
+
+                // Сохраняем кэши
+                await Promise.all([
+                    this.saveChatCache(),
+                    this.saveMessageCache()
+                ]);
+
+                console.log(`Group chat created in local cache due to Firebase error: ${chatId}`);
             }
 
-            console.log(`Group chat ${chatId} successfully created for group ${groupName}`);
             return chatId;
         } catch (error) {
             console.error('Error creating group chat:', error);
@@ -765,44 +952,79 @@ class ChatService {
 
             console.log(`Удаление чата ${chatId} для пользователя ${myUserId}`);
 
-            // Проверяем, существует ли чат
-            const chatRef = ref(database, `chats/${chatId}`);
-            const chatSnapshot = await get(chatRef);
+            try {
+                // Проверяем, существует ли чат
+                const chatRef = ref(database, `chats/${chatId}`);
+                const chatSnapshot = await get(chatRef);
 
-            if (!chatSnapshot.exists()) {
-                throw new Error(`Чат с ID ${chatId} не найден`);
+                if (!chatSnapshot.exists()) {
+                    console.warn(`Чат с ID ${chatId} не найден в Firebase, проверяем локальный кэш`);
+                    // Проверяем локальный кэш
+                    if (!this.chatCache[chatId]) {
+                        throw new Error(`Чат с ID ${chatId} не найден`);
+                    }
+                }
+
+                // Получаем данные чата из Firebase или кэша
+                const chatData = chatSnapshot.exists() ?
+                    chatSnapshot.val() : this.chatCache[chatId];
+
+                // Проверяем, является ли пользователь участником чата
+                if (!chatData.participants || !chatData.participants[myUserId]) {
+                    throw new Error('У вас нет доступа к этому чату');
+                }
+
+                // Удаляем чат из списка чатов пользователя (установка null удаляет запись)
+                await set(ref(database, `userChats/${myUserId}/${chatId}`), null);
+
+                // Обновляем список участников чата, удаляя текущего пользователя
+                const participantUpdates = {};
+                participantUpdates[myUserId] = null; // null означает удаление ключа
+
+                await update(ref(database, `chats/${chatId}/participants`), participantUpdates);
+
+                // Добавляем системное сообщение о выходе для групповых чатов
+                if (chatData.type === 'group') {
+                    const messageRef = push(ref(database, `messages/${chatId}`));
+                    const userName = this.currentUser.fullName || this.currentUser.username || 'Пользователь';
+
+                    await set(messageRef, {
+                        id: messageRef.key,
+                        text: `${userName} покинул(а) чат`,
+                        isSystem: true,
+                        timestamp: serverTimestamp()
+                    });
+
+                    // Добавляем системное сообщение в кэш
+                    if (this.messageCache[chatId]) {
+                        this.messageCache[chatId].push({
+                            id: messageRef.key || `mock-system-${Date.now()}`,
+                            text: `${userName} покинул(а) чат`,
+                            isSystem: true,
+                            timestamp: Date.now()
+                        });
+                        await this.saveMessageCache();
+                    }
+                }
+
+                // Удаляем чат из локального кэша
+                if (this.chatCache[chatId]) {
+                    delete this.chatCache[chatId];
+                    await this.saveChatCache();
+                }
+
+                console.log(`Чат ${chatId} успешно удален из списка пользователя ${myUserId}`);
+            } catch (firebaseError) {
+                console.warn('Firebase error deleting chat:', firebaseError);
+
+                // Если Firebase недоступен, удаляем чат только из локального кэша
+                if (this.chatCache[chatId]) {
+                    delete this.chatCache[chatId];
+                    await this.saveChatCache();
+                    console.log(`Чат ${chatId} удален только из локального кэша`);
+                }
             }
 
-            const chatData = chatSnapshot.val();
-
-            // Проверяем, является ли пользователь участником чата
-            if (!chatData.participants || !chatData.participants[myUserId]) {
-                throw new Error('У вас нет доступа к этому чату');
-            }
-
-            // Удаляем чат из списка чатов пользователя (установка null удаляет запись)
-            await set(ref(database, `userChats/${myUserId}/${chatId}`), null);
-
-            // Обновляем список участников чата, удаляя текущего пользователя
-            const participantUpdates = {};
-            participantUpdates[myUserId] = null; // null означает удаление ключа
-
-            await update(ref(database, `chats/${chatId}/participants`), participantUpdates);
-
-            // Добавляем системное сообщение о выходе для групповых чатов
-            if (chatData.type === 'group') {
-                const messageRef = push(ref(database, `messages/${chatId}`));
-                const userName = this.currentUser.fullName || this.currentUser.username || 'Пользователь';
-
-                await set(messageRef, {
-                    id: messageRef.key,
-                    text: `${userName} покинул(а) чат`,
-                    isSystem: true,
-                    timestamp: serverTimestamp()
-                });
-            }
-
-            console.log(`Чат ${chatId} успешно удален из списка пользователя ${myUserId}`);
             return true;
         } catch (error) {
             console.error(`Ошибка при удалении чата ${chatId}:`, error);
@@ -831,11 +1053,22 @@ class ChatService {
         console.log(`Sending message from ${myUserId} (${senderName}) to chat ${chatId}`);
 
         try {
-            // Создаем новое сообщение
-            const newMessageRef = push(ref(database, `messages/${chatId}`));
-            const messageId = newMessageRef.key;
+            // Создаем уникальный ID сообщения
+            let messageId;
+            let firebasePush = false;
 
-            // Сохраняем сообщение
+            try {
+                // Пробуем использовать Firebase push для создания уникального ID
+                const newMessageRef = push(ref(database, `messages/${chatId}`));
+                messageId = newMessageRef.key;
+                firebasePush = true;
+            } catch (pushError) {
+                // Если не удалось, создаем клиентский ID
+                messageId = `local_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+                console.warn('Using client-generated message ID due to Firebase error:', pushError);
+            }
+
+            // Создаем данные сообщения
             const messageData = {
                 id: messageId,
                 senderId: myUserId,
@@ -845,71 +1078,179 @@ class ChatService {
                 read: {[myUserId]: true}
             };
 
-            await set(newMessageRef, messageData);
-
-            // Обновляем информацию о последнем сообщении в чате
-            const lastMessageInfo = {
-                id: messageId,
-                text: text.length > 30 ? `${text.substring(0, 30)}...` : text,
-                senderId: myUserId,
-                timestamp: serverTimestamp()
+            // Локальная копия сообщения для кэша
+            const localMessageData = {
+                ...messageData,
+                timestamp: Date.now(), // Используем клиентский timestamp для кэша
+                isFromCurrentUser: true // Добавляем флаг для UI
             };
 
-            await update(ref(database, `chats/${chatId}`), {
-                lastMessage: lastMessageInfo
-            });
+            try {
+                // Пробуем сохранить в Firebase
+                if (firebasePush) {
+                    await set(ref(database, `messages/${chatId}/${messageId}`), messageData);
+                } else {
+                    // Если не удалось создать push, используем set с клиентским ID
+                    await set(ref(database, `messages/${chatId}/${messageId}`), messageData);
+                }
 
-            // Получаем участников чата и обновляем их информацию о чате
-            const chatSnapshot = await get(ref(database, `chats/${chatId}/participants`));
-            const participants = chatSnapshot.val() || {};
+                // Создаем превью сообщения для последнего сообщения
+                const lastMessageInfo = {
+                    id: messageId,
+                    text: text.length > 30 ? `${text.substring(0, 30)}...` : text,
+                    senderId: myUserId,
+                    timestamp: serverTimestamp()
+                };
 
-            // Получаем информацию о чате для уведомлений
-            let chatName = '';
-            if (chatId.startsWith('group_')) {
-                const chatSnapshot = await get(ref(database, `chats/${chatId}`));
-                const chatData = chatSnapshot.val();
-                chatName = chatData?.name || 'Групповой чат';
-            } else {
-                chatName = 'Личный чат';
-            }
-
-            // Обработка каждого участника
-            const notificationPromises = [];
-
-            for (const userId of Object.keys(participants)) {
-                // Обновляем информацию о чате у пользователя
-                await update(ref(database, `userChats/${userId}/${chatId}`), {
-                    lastMessage: lastMessageInfo, updatedAt: serverTimestamp()
+                // Обновляем чат информацией о последнем сообщении
+                await update(ref(database, `chats/${chatId}`), {
+                    lastMessage: lastMessageInfo
                 });
 
-                // Отправляем push-уведомление другим участникам
-                if (userId !== myUserId) {
-                    // Создаем превью сообщения (укороченная версия для уведомления)
-                    const messagePreview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+                // Получаем информацию о чате и участниках
+                let chatName = '';
+                let participants = {};
 
-                    // Добавляем имя чата к уведомлению
-                    const notificationSenderName = `${senderName} (${chatName})`;
+                const chatSnapshot = await get(ref(database, `chats/${chatId}`));
+                if (chatSnapshot.exists()) {
+                    const chatData = chatSnapshot.val();
 
-                    // Отправляем уведомление асинхронно, не ожидая завершения
-                    notificationPromises.push(
-                        this.sendNotificationToUser(userId, chatId, messagePreview, notificationSenderName)
-                            .catch(e => {
-                                // Эта ошибка уже будет обработана внутри sendNotificationToUser
-                                // Здесь мы просто предотвращаем распространение исключения дальше
-                                return {success: false, error: e.message};
-                            })
-                    );
+                    // Для группового чата берем название
+                    if (chatData.type === 'group') {
+                        chatName = chatData.name || 'Групповой чат';
+                    } else {
+                        chatName = 'Личный чат';
+                    }
+
+                    // Получаем участников
+                    participants = chatData.participants || {};
+                } else if (this.chatCache[chatId]) {
+                    // Если нет в Firebase, пробуем из кэша
+                    const chatData = this.chatCache[chatId];
+
+                    if (chatData.type === 'group') {
+                        chatName = chatData.name || 'Групповой чат';
+                    } else {
+                        chatName = 'Личный чат';
+                    }
+
+                    participants = chatData.participants || {};
+                } else {
+                    // Извлекаем ID пользователей из ID личного чата
+                    if (chatId.startsWith('personal_')) {
+                        const userIds = chatId.split('_').slice(1);
+                        participants = userIds.reduce((acc, userId) => {
+                            acc[userId] = true;
+                            return acc;
+                        }, {});
+                        chatName = 'Личный чат';
+                    } else {
+                        // Для группового чата извлекаем код группы
+                        chatName = 'Групповой чат';
+                        // Добавляем текущего пользователя как участника
+                        participants[myUserId] = true;
+                    }
                 }
-            }
 
-            // Ждем завершения всех уведомлений, но игнорируем ошибки
-            if (notificationPromises.length > 0) {
-                try {
+                // Локальная версия lastMessageInfo для кэша
+                const localLastMessageInfo = {
+                    ...lastMessageInfo,
+                    timestamp: Date.now() // Используем клиентский timestamp
+                };
+
+                // Обновляем информацию о чате у каждого участника
+                for (const userId of Object.keys(participants)) {
+                    if (participants[userId]) {
+                        await update(ref(database, `userChats/${userId}/${chatId}`), {
+                            lastMessage: lastMessageInfo,
+                            updatedAt: serverTimestamp()
+                        });
+                    }
+                }
+
+                // Обновляем локальный кэш
+                if (!this.messageCache[chatId]) {
+                    this.messageCache[chatId] = [];
+                }
+
+                // Добавляем сообщение в кэш
+                this.messageCache[chatId].push(localMessageData);
+
+                // Обновляем кэш чата
+                if (this.chatCache[chatId]) {
+                    this.chatCache[chatId] = {
+                        ...this.chatCache[chatId],
+                        lastMessage: localLastMessageInfo,
+                        updatedAt: Date.now()
+                    };
+                }
+
+                // Сохраняем кэши
+                await Promise.all([
+                    this.saveMessageCache(),
+                    this.saveChatCache()
+                ]);
+
+                // Отправляем push-уведомления другим участникам
+                const notificationPromises = [];
+                for (const userId of Object.keys(participants)) {
+                    if (userId !== myUserId && participants[userId]) {
+                        // Создаем превью сообщения (укороченная версия для уведомления)
+                        const messagePreview = text.length > 50 ? `${text.substring(0, 50)}...` : text;
+
+                        // Добавляем имя чата к уведомлению
+                        const notificationSenderName = `${senderName} (${chatName})`;
+
+                        // Отправляем уведомление асинхронно
+                        notificationPromises.push(
+                            this.sendNotificationToUser(userId, chatId, messagePreview, notificationSenderName)
+                                .catch(e => {
+                                    // Игнорируем ошибки уведомлений
+                                    return {success: false, error: e.message};
+                                })
+                        );
+                    }
+                }
+
+                // Ждем завершения отправки уведомлений
+                if (notificationPromises.length > 0) {
                     await Promise.allSettled(notificationPromises);
-                } catch (notifError) {
-                    // Игнорируем любые ошибки от уведомлений
-                    console.log('Some notifications may have failed, but message was sent successfully');
                 }
+            } catch (firebaseError) {
+                console.warn('Firebase error sending message:', firebaseError);
+
+                // Если Firebase недоступен, сохраняем только в локальный кэш
+                if (!this.messageCache[chatId]) {
+                    this.messageCache[chatId] = [];
+                }
+
+                // Добавляем сообщение в кэш
+                this.messageCache[chatId].push(localMessageData);
+
+                // Обновляем кэш чата
+                if (this.chatCache[chatId]) {
+                    // Локальная версия lastMessageInfo
+                    const localLastMessageInfo = {
+                        id: messageId,
+                        text: text.length > 30 ? `${text.substring(0, 30)}...` : text,
+                        senderId: myUserId,
+                        timestamp: Date.now()
+                    };
+
+                    this.chatCache[chatId] = {
+                        ...this.chatCache[chatId],
+                        lastMessage: localLastMessageInfo,
+                        updatedAt: Date.now()
+                    };
+                }
+
+                // Сохраняем кэши
+                await Promise.all([
+                    this.saveMessageCache(),
+                    this.saveChatCache()
+                ]);
+
+                console.log(`Message saved to local cache only due to Firebase error: ${chatId}`);
             }
 
             console.log(`Message sent successfully to chat ${chatId}`);
@@ -951,58 +1292,94 @@ class ChatService {
 
         try {
             console.log(`Getting new messages for chat ${chatId} since timestamp ${lastTimestamp}`);
-            const messagesRef = ref(database, `messages/${chatId}`);
 
-            // Create appropriate query based on whether we have a timestamp
-            let messagesQuery;
+            // Сначала пробуем получить из Firebase
+            try {
+                const messagesRef = ref(database, `messages/${chatId}`);
 
-            if (lastTimestamp > 0) {
-                // If we have a timestamp, query messages newer than that timestamp
-                messagesQuery = query(
-                    messagesRef,
-                    orderByChild('timestamp'),
-                    // Use startAfter for timestamps - critical fix
-                    startAfter(lastTimestamp)
-                );
-            } else {
-                // If no timestamp, just order by timestamp
-                messagesQuery = query(
-                    messagesRef,
-                    orderByChild('timestamp')
-                );
+                // Create appropriate query based on whether we have a timestamp
+                let messagesQuery;
+
+                if (lastTimestamp > 0) {
+                    // If we have a timestamp, query messages newer than that timestamp
+                    messagesQuery = query(
+                        messagesRef,
+                        orderByChild('timestamp'),
+                        startAfter(lastTimestamp)
+                    );
+                } else {
+                    // If no timestamp, just order by timestamp
+                    messagesQuery = query(
+                        messagesRef,
+                        orderByChild('timestamp')
+                    );
+                }
+
+                const snapshot = await get(messagesQuery);
+                if (snapshot.exists()) {
+                    // Process messages from Firebase
+                    const messagesData = snapshot.val() || {};
+                    const messages = Object.values(messagesData);
+
+                    // Sort messages by timestamp
+                    messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+                    // Process messages to ensure consistency
+                    const processedMessages = messages.map(message => {
+                        // Convert senderId to string
+                        const senderId = String(message.senderId || '');
+
+                        // Determine message ownership
+                        const isFromCurrentUser = senderId === myUserId;
+
+                        return {
+                            ...message,
+                            senderId,
+                            isFromCurrentUser,
+                            senderName: message.senderName || `Пользователь ${senderId}`
+                        };
+                    });
+
+                    // Обновляем локальный кэш новыми сообщениями
+                    if (processedMessages.length > 0) {
+                        if (!this.messageCache[chatId]) {
+                            this.messageCache[chatId] = [];
+                        }
+
+                        // Добавляем только те сообщения, которых еще нет в кэше
+                        const existingIds = new Set(this.messageCache[chatId].map(m => m.id));
+                        const newMessages = processedMessages.filter(m => !existingIds.has(m.id));
+
+                        if (newMessages.length > 0) {
+                            this.messageCache[chatId] = [...this.messageCache[chatId], ...newMessages];
+                            await this.saveMessageCache();
+                        }
+                    }
+
+                    console.log(`Loaded ${processedMessages.length} new messages for chat ${chatId} from Firebase`);
+                    return processedMessages;
+                }
+            } catch (firebaseError) {
+                console.warn('Firebase error getting new messages:', firebaseError);
+                // Продолжаем и пробуем локальный кэш
             }
 
-            const snapshot = await get(messagesQuery);
-            if (!snapshot.exists()) {
-                console.log(`No new messages found for chat ${chatId}`);
-                return [];
+            // Если не получилось из Firebase или не нашли новых сообщений, проверяем локальный кэш
+            if (this.messageCache[chatId]) {
+                const cachedMessages = this.messageCache[chatId].filter(
+                    msg => msg.timestamp > lastTimestamp
+                );
+
+                // Сортируем по времени
+                cachedMessages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+
+                console.log(`Loaded ${cachedMessages.length} new messages for chat ${chatId} from local cache`);
+                return cachedMessages;
             }
 
-            // Process messages the same way as in getChatMessages
-            const messagesData = snapshot.val() || {};
-            const messages = Object.values(messagesData);
-
-            // Sort messages by timestamp
-            messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
-
-            // Process messages to ensure consistency
-            const processedMessages = messages.map(message => {
-                // Convert senderId to string
-                const senderId = String(message.senderId || '');
-
-                // Determine message ownership
-                const isFromCurrentUser = senderId === myUserId;
-
-                return {
-                    ...message,
-                    senderId,
-                    isFromCurrentUser,
-                    senderName: message.senderName || `Пользователь ${senderId}`
-                };
-            });
-
-            console.log(`Loaded ${processedMessages.length} new messages for chat ${chatId}`);
-            return processedMessages;
+            // Если нет данных ни в Firebase, ни в кэше, возвращаем пустой массив
+            console.log(`No new messages found for chat ${chatId}`);
+            return [];
         } catch (error) {
             console.error(`Error getting new messages for chat ${chatId}:`, error);
             return [];
@@ -1109,44 +1486,113 @@ class ChatService {
                 const path = `userChats/${myUserId}`;
                 console.log(`Getting chats for user ${myUserId}`);
 
-                return new Promise((resolve) => {
-                    const userChatsRef = ref(database, path);
+                // Сначала пробуем получить из Firebase
+                try {
+                    return new Promise((resolve) => {
+                        const userChatsRef = ref(database, path);
 
-                    const handler = onValue(userChatsRef, (snapshot) => {
-                        const chatsData = snapshot.val() || {};
+                        const handler = onValue(userChatsRef, (snapshot) => {
+                            const chatsData = snapshot.val() || {};
 
-                        // Преобразуем в массив
-                        const chats = Object.entries(chatsData).map(([id, data]) => {
-                            // Гарантируем, что withUser всегда строка
-                            if (data.withUser) {
-                                data.withUser = String(data.withUser);
-                            }
+                            // Преобразуем в массив
+                            const chats = Object.entries(chatsData).map(([id, data]) => {
+                                // Гарантируем, что withUser всегда строка
+                                if (data.withUser) {
+                                    data.withUser = String(data.withUser);
+                                }
 
-                            return {
-                                id, ...data
-                            };
+                                return {
+                                    id, ...data
+                                };
+                            });
+
+                            // Сортируем по времени (сначала новые)
+                            chats.sort((a, b) => {
+                                const timeA = a.updatedAt || 0;
+                                const timeB = b.updatedAt || 0;
+                                return timeB - timeA;
+                            });
+
+                            // Обновляем локальный кэш
+                            chats.forEach(chat => {
+                                this.chatCache[chat.id] = chat;
+                            });
+
+                            // Сохраняем кэш асинхронно
+                            this.saveChatCache();
+
+                            console.log(`Loaded ${chats.length} chats for user ${myUserId} from Firebase`);
+                            resolve(chats);
+                        }, (error) => {
+                            console.error('Error getting user chats from Firebase:', error);
+
+                            // В случае ошибки Firebase используем локальный кэш
+                            const cachedChats = Object.values(this.chatCache).filter(chat => {
+                                // Для личных чатов проверяем по ID пользователя
+                                if (chat.type === 'personal') {
+                                    return chat.participants && chat.participants[myUserId];
+                                }
+                                // Для групповых чатов также проверяем участников
+                                return chat.participants && chat.participants[myUserId];
+                            });
+
+                            // Сортируем по времени
+                            cachedChats.sort((a, b) => {
+                                const timeA = a.updatedAt || 0;
+                                const timeB = b.updatedAt || 0;
+                                return timeB - timeA;
+                            });
+
+                            console.log(`Loaded ${cachedChats.length} chats for user ${myUserId} from local cache`);
+                            resolve(cachedChats);
                         });
 
-                        // Сортируем по времени (сначала новые)
-                        chats.sort((a, b) => {
-                            const timeA = a.updatedAt || 0;
-                            const timeB = b.updatedAt || 0;
-                            return timeB - timeA;
-                        });
+                        // Сохраняем слушателя для последующей отписки
+                        this.listeners.userChats = {path, event: 'value', handler};
+                    });
+                } catch (firebaseError) {
+                    console.warn('Firebase error getting user chats:', firebaseError);
 
-                        console.log(`Loaded ${chats.length} chats for user ${myUserId}`);
-                        resolve(chats);
-                    }, (error) => {
-                        console.error('Error getting user chats:', error);
-                        resolve([]);
+                    // Используем локальный кэш
+                    const cachedChats = Object.values(this.chatCache).filter(chat => {
+                        // Фильтруем чаты пользователя
+                        if (chat.type === 'personal') {
+                            // Для личных чатов проверяем ID участников
+                            return chat.withUser === myUserId || (chat.participants && chat.participants[myUserId]);
+                        }
+                        // Для групповых чатов проверяем участников
+                        return chat.participants && chat.participants[myUserId];
                     });
 
-                    // Сохраняем слушателя для последующей отписки
-                    this.listeners.userChats = {path, event: 'value', handler};
-                });
+                    // Сортируем по времени
+                    cachedChats.sort((a, b) => {
+                        const timeA = a.updatedAt || 0;
+                        const timeB = b.updatedAt || 0;
+                        return timeB - timeA;
+                    });
+
+                    console.log(`Loaded ${cachedChats.length} chats for user ${myUserId} from local cache`);
+                    return cachedChats;
+                }
             } catch (error) {
                 console.error('Error in getUserChats:', error);
-                return [];
+
+                // В случае общей ошибки используем локальный кэш
+                const cachedChats = Object.values(this.chatCache).filter(chat => {
+                    if (chat.type === 'personal') {
+                        return chat.withUser === myUserId || (chat.participants && chat.participants[myUserId]);
+                    }
+                    return chat.participants && chat.participants[myUserId];
+                });
+
+                cachedChats.sort((a, b) => {
+                    const timeA = a.updatedAt || 0;
+                    const timeB = b.updatedAt || 0;
+                    return timeB - timeA;
+                });
+
+                console.log(`Loaded ${cachedChats.length} chats for user ${myUserId} from local cache (after error)`);
+                return cachedChats;
             }
         } catch (outerError) {
             console.error('Unexpected error in getUserChats:', outerError);
@@ -1189,43 +1635,75 @@ class ChatService {
             const path = `messages/${chatId}`;
             console.log(`Getting messages for chat ${chatId}`);
 
-            return new Promise((resolve) => {
-                const messagesQuery = query(ref(database, path), orderByChild('timestamp'), limitToLast(limit));
+            // Сначала пробуем получить из Firebase
+            try {
+                return new Promise((resolve) => {
+                    const messagesQuery = query(ref(database, path), orderByChild('timestamp'), limitToLast(limit));
 
-                const handler = onValue(messagesQuery, (snapshot) => {
-                    const messagesData = snapshot.val() || {};
+                    const handler = onValue(messagesQuery, (snapshot) => {
+                        const messagesData = snapshot.val() || {};
 
-                    // Преобразуем в массив и сортируем
-                    const messages = Object.values(messagesData);
-                    messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+                        // Преобразуем в массив и сортируем
+                        const messages = Object.values(messagesData);
+                        messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
-                    // КРИТИЧЕСКИ ВАЖНО: Обрабатываем каждое сообщение
-                    const processedMessages = messages.map(message => {
-                        // 1. Преобразуем senderId в строку
-                        const senderId = String(message.senderId || '');
+                        // КРИТИЧЕСКИ ВАЖНО: Обрабатываем каждое сообщение
+                        const processedMessages = messages.map(message => {
+                            // 1. Преобразуем senderId в строку
+                            const senderId = String(message.senderId || '');
 
-                        // 2. Определяем владельца сообщения
-                        const isFromCurrentUser = senderId === myUserId;
+                            // 2. Определяем владельца сообщения
+                            const isFromCurrentUser = senderId === myUserId;
 
-                        return {
-                            ...message, senderId, isFromCurrentUser, // 3. Гарантируем наличие имени отправителя
-                            senderName: message.senderName || `Пользователь ${senderId}`
-                        };
+                            return {
+                                ...message, senderId, isFromCurrentUser, // 3. Гарантируем наличие имени отправителя
+                                senderName: message.senderName || `Пользователь ${senderId}`
+                            };
+                        });
+
+                        // Обновляем локальный кэш
+                        if (processedMessages.length > 0) {
+                            this.messageCache[chatId] = processedMessages;
+                            this.saveMessageCache();
+                        }
+
+                        console.log(`Loaded ${processedMessages.length} messages for chat ${chatId} from Firebase`);
+                        resolve(processedMessages);
+                    }, (error) => {
+                        console.error(`Error getting messages for chat ${chatId} from Firebase:`, error);
+
+                        // В случае ошибки используем локальный кэш
+                        const cachedMessages = this.messageCache[chatId] || [];
+
+                        // Ограничиваем количество сообщений
+                        const limitedMessages = cachedMessages.slice(-limit);
+
+                        console.log(`Loaded ${limitedMessages.length} messages for chat ${chatId} from local cache`);
+                        resolve(limitedMessages);
                     });
 
-                    console.log(`Loaded ${processedMessages.length} messages for chat ${chatId}`);
-                    resolve(processedMessages);
-                }, (error) => {
-                    console.error(`Error getting messages for chat ${chatId}:`, error);
-                    resolve([]);
+                    // Сохраняем слушателя для последующей отписки
+                    this.listeners[listenerKey] = {path, event: 'value', handler};
                 });
+            } catch (firebaseError) {
+                console.warn('Firebase error getting messages:', firebaseError);
 
-                // Сохраняем слушателя для последующей отписки
-                this.listeners[listenerKey] = {path, event: 'value', handler};
-            });
+                // Используем локальный кэш
+                const cachedMessages = this.messageCache[chatId] || [];
+
+                // Ограничиваем количество сообщений
+                const limitedMessages = cachedMessages.slice(-limit);
+
+                console.log(`Loaded ${limitedMessages.length} messages for chat ${chatId} from local cache`);
+                return limitedMessages;
+            }
         } catch (error) {
             console.error('Error in getChatMessages:', error);
-            return [];
+
+            // В случае общей ошибки используем локальный кэш
+            const cachedMessages = this.messageCache[chatId] || [];
+            const limitedMessages = cachedMessages.slice(-limit);
+            return limitedMessages;
         }
     }
 
@@ -1246,29 +1724,46 @@ class ChatService {
 
             const path = `chats/${chatId}`;
 
-            return new Promise((resolve) => {
-                const chatRef = ref(database, path);
+            // Сначала пробуем получить из Firebase
+            try {
+                return new Promise((resolve) => {
+                    const chatRef = ref(database, path);
 
-                const handler = onValue(chatRef, (snapshot) => {
-                    const chatData = snapshot.val() || null;
+                    const handler = onValue(chatRef, (snapshot) => {
+                        const chatData = snapshot.val() || null;
 
-                    // Если есть данные о последнем сообщении, преобразуем senderId
-                    if (chatData && chatData.lastMessage && chatData.lastMessage.senderId) {
-                        chatData.lastMessage.senderId = String(chatData.lastMessage.senderId);
-                    }
+                        // Если есть данные о последнем сообщении, преобразуем senderId
+                        if (chatData && chatData.lastMessage && chatData.lastMessage.senderId) {
+                            chatData.lastMessage.senderId = String(chatData.lastMessage.senderId);
+                        }
 
-                    resolve(chatData);
-                }, (error) => {
-                    console.error(`Error getting chat info for ${chatId}:`, error);
-                    resolve(null);
+                        // Обновляем локальный кэш
+                        if (chatData) {
+                            this.chatCache[chatId] = chatData;
+                            this.saveChatCache();
+                        }
+
+                        resolve(chatData);
+                    }, (error) => {
+                        console.error(`Error getting chat info for ${chatId} from Firebase:`, error);
+
+                        // В случае ошибки используем локальный кэш
+                        const cachedChat = this.chatCache[chatId] || null;
+                        resolve(cachedChat);
+                    });
+
+                    // Сохраняем слушателя для последующей отписки
+                    this.listeners[listenerKey] = {path, event: 'value', handler};
                 });
+            } catch (firebaseError) {
+                console.warn('Firebase error getting chat info:', firebaseError);
 
-                // Сохраняем слушателя для последующей отписки
-                this.listeners[listenerKey] = {path, event: 'value', handler};
-            });
+                // Используем локальный кэш
+                return this.chatCache[chatId] || null;
+            }
         } catch (error) {
             console.error('Error in getChatInfo:', error);
-            return null;
+            return this.chatCache[chatId] || null;
         }
     }
 
@@ -1287,42 +1782,73 @@ class ChatService {
         const myUserId = this.getCurrentUserId();
 
         try {
-            const messagesRef = ref(database, `messages/${chatId}`);
-            const snapshot = await get(messagesRef);
+            // Сначала пробуем обновить в Firebase
+            try {
+                const messagesRef = ref(database, `messages/${chatId}`);
+                const snapshot = await get(messagesRef);
 
-            if (!snapshot.exists()) return;
+                if (snapshot.exists()) {
+                    const updates = {};
+                    let updateCount = 0;
 
-            const updates = {};
-            let updateCount = 0;
+                    // Отмечаем все непрочитанные сообщения
+                    snapshot.forEach((childSnapshot) => {
+                        const message = childSnapshot.val() || {};
 
-            // Отмечаем все непрочитанные сообщения
-            snapshot.forEach((childSnapshot) => {
-                const message = childSnapshot.val() || {};
+                        // Преобразуем ID отправителя в строку
+                        const messageSenderId = String(message.senderId || '');
 
-                // Преобразуем ID отправителя в строку
-                const messageSenderId = String(message.senderId || '');
+                        // Пропускаем свои сообщения или уже прочитанные
+                        if (messageSenderId === myUserId || (message.read && message.read[myUserId])) {
+                            return;
+                        }
 
-                // Пропускаем свои сообщения или уже прочитанные
-                if (messageSenderId === myUserId || (message.read && message.read[myUserId])) {
-                    return;
-                }
-
-                // Добавляем в очередь на обновление
-                updates[`messages/${chatId}/${childSnapshot.key}/read/${myUserId}`] = true;
-                updateCount++;
-            });
-
-            // Если есть что обновлять
-            if (updateCount > 0) {
-                await update(ref(database), updates);
-                console.log(`Marked ${updateCount} messages as read in chat ${chatId}`);
-
-                // Notify about unread count change if callback exists
-                if (this.unreadCountCallback) {
-                    this.getUnreadMessageCount(chatId).then(count => {
-                        this.refreshUnreadMessagesCount();
+                        // Добавляем в очередь на обновление
+                        updates[`messages/${chatId}/${childSnapshot.key}/read/${myUserId}`] = true;
+                        updateCount++;
                     });
+
+                    // Если есть что обновлять
+                    if (updateCount > 0) {
+                        await update(ref(database), updates);
+                        console.log(`Marked ${updateCount} messages as read in chat ${chatId}`);
+                    }
                 }
+            } catch (firebaseError) {
+                console.warn('Firebase error marking messages as read:', firebaseError);
+            }
+
+            // Обновляем локальный кэш сообщений
+            if (this.messageCache[chatId]) {
+                let updateCount = 0;
+                this.messageCache[chatId] = this.messageCache[chatId].map(message => {
+                    // Пропускаем свои сообщения или уже прочитанные
+                    if (message.senderId === myUserId || (message.read && message.read[myUserId])) {
+                        return message;
+                    }
+
+                    // Отмечаем как прочитанное
+                    updateCount++;
+                    return {
+                        ...message,
+                        read: {
+                            ...message.read,
+                            [myUserId]: true
+                        }
+                    };
+                });
+
+                if (updateCount > 0) {
+                    await this.saveMessageCache();
+                    console.log(`Marked ${updateCount} messages as read in local cache for chat ${chatId}`);
+                }
+            }
+
+            // Notify about unread count change if callback exists
+            if (this.unreadCountCallback) {
+                this.getUnreadMessageCount(chatId).then(count => {
+                    this.refreshUnreadMessagesCount();
+                });
             }
         } catch (error) {
             console.warn('Error marking messages as read:', error);
@@ -1346,27 +1872,49 @@ class ChatService {
         const myUserId = this.getCurrentUserId();
 
         try {
-            const messagesRef = ref(database, `messages/${chatId}`);
-            const snapshot = await get(messagesRef);
+            // Сначала пробуем получить из Firebase
+            try {
+                const messagesRef = ref(database, `messages/${chatId}`);
+                const snapshot = await get(messagesRef);
 
-            if (!snapshot.exists()) return 0;
+                if (snapshot.exists()) {
+                    let unreadCount = 0;
 
-            let unreadCount = 0;
+                    // Count messages that are not from current user and not marked as read
+                    snapshot.forEach((childSnapshot) => {
+                        const message = childSnapshot.val() || {};
 
-            // Count messages that are not from current user and not marked as read
-            snapshot.forEach((childSnapshot) => {
-                const message = childSnapshot.val() || {};
+                        // Convert sender ID to string for comparison
+                        const messageSenderId = String(message.senderId || '');
 
-                // Convert sender ID to string for comparison
-                const messageSenderId = String(message.senderId || '');
+                        // Only count if: not from current user AND not read by current user
+                        if (messageSenderId !== myUserId && (!message.read || !message.read[myUserId])) {
+                            unreadCount++;
+                        }
+                    });
 
-                // Only count if: not from current user AND not read by current user
-                if (messageSenderId !== myUserId && (!message.read || !message.read[myUserId])) {
-                    unreadCount++;
+                    return unreadCount;
                 }
-            });
+            } catch (firebaseError) {
+                console.warn('Firebase error getting unread count:', firebaseError);
+                // Продолжаем и проверяем локальный кэш
+            }
 
-            return unreadCount;
+            // Используем локальный кэш
+            if (this.messageCache[chatId]) {
+                let unreadCount = 0;
+
+                for (const message of this.messageCache[chatId]) {
+                    // Only count if: not from current user AND not read by current user
+                    if (message.senderId !== myUserId && (!message.read || !message.read[myUserId])) {
+                        unreadCount++;
+                    }
+                }
+
+                return unreadCount;
+            }
+
+            return 0;
         } catch (error) {
             console.error(`Error getting unread count for chat ${chatId}:`, error);
             return 0;
@@ -1390,11 +1938,17 @@ class ChatService {
             // Get all user chats
             const chats = await this.getUserChats();
 
+            if (!chats || !Array.isArray(chats)) {
+                return 0;
+            }
+
             // Calculate total unread messages
             let totalUnread = 0;
 
             // Process each chat
             for (const chat of chats) {
+                if (!chat || !chat.id) continue;
+
                 try {
                     const unreadForChat = await this.getUnreadMessageCount(chat.id);
                     totalUnread += unreadForChat;
@@ -1443,6 +1997,10 @@ class ChatService {
 
                 // Call the refresh function to calculate and update count
                 this.refreshUnreadMessagesCount();
+            }, (error) => {
+                console.warn('Error in unread messages listener:', error);
+                // При ошибке просто обновляем счетчик
+                this.refreshUnreadMessagesCount();
             });
 
             // Save listener for later cleanup
@@ -1458,6 +2016,8 @@ class ChatService {
             this.refreshUnreadMessagesCount();
         } catch (error) {
             console.error('Error setting up unread messages listener:', error);
+            // При ошибке вызываем callback с 0
+            callback(0);
         }
     }
 
@@ -1472,6 +2032,8 @@ class ChatService {
             this.unreadCountCallback(totalUnread);
         } catch (error) {
             console.error('Error refreshing unread count:', error);
+            // При ошибке вызываем callback с 0
+            this.unreadCountCallback(0);
         }
     }
 
@@ -1515,6 +2077,10 @@ class ChatService {
             const messagesRef = ref(database, `messages/${chatId}`);
             const handler = onValue(messagesRef, (snapshot) => {
                 // Just trigger the callback - the component will handle fetching the count
+                callback();
+            }, (error) => {
+                console.warn(`Error in chat message listener for ${chatId}:`, error);
+                // При ошибке все равно вызываем callback
                 callback();
             });
 

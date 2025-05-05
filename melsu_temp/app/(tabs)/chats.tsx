@@ -15,6 +15,7 @@ import {useFocusEffect, useRouter} from 'expo-router';
 import {Ionicons} from '@expo/vector-icons';
 import chatService from '../../src/services/chatService';
 import {useAuth} from '../../hooks/useAuth'; // Import useAuth hook
+import NetInfo from '@react-native-community/netinfo';
 
 const ChatsList = forwardRef((props, ref) => {
     const [chats, setChats] = useState([]);
@@ -23,6 +24,8 @@ const ChatsList = forwardRef((props, ref) => {
     const [deletingChatId, setDeletingChatId] = useState(null);
     const [timeoutId, setTimeoutId] = useState(null); // Таймаут для отмены бесконечной загрузки
     const [isRefreshing, setIsRefreshing] = useState(false); // Состояние для pull-to-refresh
+    const [isOffline, setIsOffline] = useState(false); // Состояние для отслеживания режима офлайн
+    const [firebaseError, setFirebaseError] = useState(false); // Состояние для отслеживания ошибок Firebase
     const intervalRef = useRef(null); // Для хранения ссылки на интервал обновления
     const alreadyLoadedRef = useRef(false); // Для отслеживания первой загрузки
     const focusedRef = useRef(false); // Для отслеживания фокуса экрана
@@ -36,10 +39,54 @@ const ChatsList = forwardRef((props, ref) => {
     // Интервал обновления списка в миллисекундах
     const UPDATE_INTERVAL = 30000; // 30 секунд
 
-    // Функция загрузки чатов с таймаутом
+    // Проверяем состояние сети при загрузке компонента
+    useEffect(() => {
+        // Первоначальная проверка сети
+        NetInfo.fetch().then(state => {
+            setIsOffline(!state.isConnected);
+        });
+
+        // Подписываемся на изменения состояния сети
+        const unsubscribe = NetInfo.addEventListener(state => {
+            setIsOffline(!state.isConnected);
+            // Если соединение восстановлено и были ошибки Firebase - сбрасываем ошибку
+            if (state.isConnected && firebaseError) {
+                setFirebaseError(false);
+                // Пробуем загрузить чаты снова при восстановлении соединения
+                if (focusedRef.current) {
+                    setRefreshKey(prev => prev + 1);
+                }
+            }
+        });
+
+        return () => {
+            unsubscribe(); // Отписываемся при размонтировании
+        };
+    }, [firebaseError]);
+
+    // Функция загрузки чатов с таймаутом и обработкой ошибок сети
     const loadChats = async (silent = false) => {
         // Если пользователь не верифицирован, не загружаем чаты
         if (!isVerified && !isPending) {
+            return;
+        }
+
+        // Если устройство офлайн, но есть кэшированные чаты, показываем их
+        if (isOffline) {
+            // Здесь мы не показываем лоадер, только обновляем статус offline
+            console.log('Устройство офлайн, пробуем загрузить из кэша');
+            try {
+                const cachedChats = await chatService.getUserChats();
+                if (cachedChats && cachedChats.length > 0) {
+                    setChats(cachedChats);
+                    console.log(`Загружено ${cachedChats.length} чатов из кэша в режиме офлайн`);
+                }
+            } catch (cacheError) {
+                console.error('Ошибка при загрузке чатов из кэша:', cacheError);
+            } finally {
+                if (!silent) setIsLoading(false);
+                setIsRefreshing(false);
+            }
             return;
         }
 
@@ -67,11 +114,32 @@ const ChatsList = forwardRef((props, ref) => {
             const initialized = await chatService.initialize();
             if (!initialized) {
                 console.log('Не удалось инициализировать chatService');
+
+                // Проверяем, связана ли ошибка с Firebase
+                if (chatService.firebaseInitError) {
+                    console.log('Обнаружена ошибка инициализации Firebase');
+                    setFirebaseError(true);
+                }
+
                 if (!silent) setIsLoading(false);
                 setIsRefreshing(false); // Сбрасываем состояние pull-to-refresh
                 clearTimeout(loadingTimeout);
-                // Если инициализация не удалась, устанавливаем пустой массив
-                setChats([]);
+
+                // Пробуем использовать кэш даже при ошибке инициализации
+                try {
+                    const cachedChats = await chatService.getUserChats();
+                    if (cachedChats && cachedChats.length > 0) {
+                        setChats(cachedChats);
+                        console.log(`Загружено ${cachedChats.length} чатов из кэша после ошибки инициализации`);
+                    } else {
+                        // Если кэш пуст, устанавливаем пустой массив
+                        setChats([]);
+                    }
+                } catch (cacheError) {
+                    console.error('Ошибка при загрузке чатов из кэша:', cacheError);
+                    setChats([]);
+                }
+
                 return;
             }
 
@@ -84,6 +152,14 @@ const ChatsList = forwardRef((props, ref) => {
             const userChats = await Promise.race([fetchPromise, timeoutPromise])
                 .catch(err => {
                     console.log('Ошибка или таймаут при получении чатов:', err.message);
+                    // Проверяем, связана ли ошибка с Firebase
+                    if (err.message && (
+                        err.message.includes('Firebase') ||
+                        err.message.includes('auth') ||
+                        err.message.includes('Component')
+                    )) {
+                        setFirebaseError(true);
+                    }
                     return []; // Возвращаем пустой массив в случае ошибки или таймаута
                 });
 
@@ -91,6 +167,14 @@ const ChatsList = forwardRef((props, ref) => {
             setChats(userChats);
         } catch (error) {
             console.error('Ошибка загрузки чатов:', error);
+            // Проверяем, связана ли ошибка с Firebase
+            if (error.message && (
+                error.message.includes('Firebase') ||
+                error.message.includes('auth') ||
+                error.message.includes('Component')
+            )) {
+                setFirebaseError(true);
+            }
             // В случае ошибки устанавливаем пустой массив
             setChats([]);
         } finally {
@@ -122,7 +206,7 @@ const ChatsList = forwardRef((props, ref) => {
 
         // Устанавливаем новый интервал
         intervalRef.current = setInterval(() => {
-            if (focusedRef.current) {
+            if (focusedRef.current && !isOffline && !firebaseError) {
                 console.log('Интервальное обновление списка чатов');
                 loadChats(true); // Тихая загрузка без индикатора
             }
@@ -163,7 +247,7 @@ const ChatsList = forwardRef((props, ref) => {
                     intervalRef.current = null;
                 }
             };
-        }, [chats.length, isVerified, isPending])
+        }, [chats.length, isVerified, isPending, isOffline, firebaseError])
     );
 
     // Загрузка при первом рендере или изменении ключа обновления
@@ -281,12 +365,52 @@ const ChatsList = forwardRef((props, ref) => {
         handleDeleteChat(chat);
     };
 
+    // Компонент для отображения статуса офлайн
+    const OfflineStatusBar = () => (
+        <View style={styles.offlineContainer}>
+            <Ionicons name="cloud-offline-outline" size={18} color="#fff" />
+            <Text style={styles.offlineText}>
+                {firebaseError ? 'Ошибка подключения к серверу. Режим офлайн.' : 'Нет подключения к сети'}
+            </Text>
+        </View>
+    );
+
     // Рендер элемента чата
     const renderChatItem = ({item}) => {
-        // Определяем название чата
-        const chatName = item.type === 'group'
-            ? item.name
-            : (item.withUserName || `Пользователь ${item.withUser}`);
+        // Определяем название чата (первая строка)
+        let chatName = '';
+        if (item.type === 'group') {
+            chatName = item.name || 'Групповой чат';
+        } else {
+            // Для личных чатов извлекаем имя без скобок
+            const userName = item.withUserName || `Пользователь ${item.withUser}`;
+            // Если имя содержит скобки, берем только часть до скобок
+            chatName = userName.includes('(') ? userName.split('(')[0].trim() : userName;
+        }
+
+        // Определяем подзаголовок чата (вторая строка)
+        let chatSubtitle = '';
+        if (item.type === 'group') {
+            chatSubtitle = item.groupCode || '';
+        } else if (item.withUserRole === 'teacher') {
+            chatSubtitle = item.withUserDepartment || '';
+            // Если нет кафедры, но в имени есть скобки, извлекаем их содержимое
+            if (!chatSubtitle && item.withUserName && item.withUserName.includes('(')) {
+                const detailsPart = item.withUserName.split('(')[1];
+                if (detailsPart) {
+                    chatSubtitle = detailsPart.replace(')', '').trim();
+                }
+            }
+        } else if (item.withUserRole === 'student') {
+            chatSubtitle = item.withUserGroup || '';
+            // Если нет группы, но в имени есть скобки, извлекаем их содержимое
+            if (!chatSubtitle && item.withUserName && item.withUserName.includes('(')) {
+                const detailsPart = item.withUserName.split('(')[1];
+                if (detailsPart) {
+                    chatSubtitle = detailsPart.replace(')', '').trim();
+                }
+            }
+        }
 
         // Определяем время последнего сообщения
         const lastMessageTime = item.lastMessage?.timestamp
@@ -295,6 +419,12 @@ const ChatsList = forwardRef((props, ref) => {
 
         // Проверка, идет ли процесс удаления этого чата
         const isDeleting = deletingChatId === item.id;
+
+        // Определяем текст для отображения в последнем сообщении
+        const lastMessageText = item.lastMessage?.text || '';
+
+        // Показываем последнее сообщение только если есть подзаголовок
+        const showLastMessageText = chatSubtitle && lastMessageText;
 
         return (
             <View style={styles.chatItemContainer}>
@@ -316,6 +446,7 @@ const ChatsList = forwardRef((props, ref) => {
                             />
                         </View>
                         <View style={styles.chatInfo}>
+                            {/* Верхняя строка: имя чата и время */}
                             <View style={styles.chatHeader}>
                                 <Text style={[styles.chatName, isDeleting && styles.textDisabled]} numberOfLines={1}>
                                     {chatName}
@@ -326,9 +457,18 @@ const ChatsList = forwardRef((props, ref) => {
                                     </Text>
                                 )}
                             </View>
-                            {item.lastMessage && (
+
+                            {/* Подзаголовок (группа или кафедра) */}
+                            {chatSubtitle ? (
+                                <Text style={[styles.chatSubtitle, isDeleting && styles.textDisabled]} numberOfLines={1}>
+                                    {chatSubtitle}
+                                </Text>
+                            ) : null}
+
+                            {/* Последнее сообщение (если есть подзаголовок и сообщение) */}
+                            {showLastMessageText && (
                                 <Text style={[styles.lastMessage, isDeleting && styles.textDisabled]} numberOfLines={1}>
-                                    {item.lastMessage.text}
+                                    {lastMessageText}
                                 </Text>
                             )}
                         </View>
@@ -397,6 +537,9 @@ const ChatsList = forwardRef((props, ref) => {
 
     return (
         <View style={styles.container}>
+            {/* Отображаем плашку статуса офлайн, если нет сети или есть ошибка Firebase */}
+            {(isOffline || firebaseError) && <OfflineStatusBar />}
+
             {isLoading && (
                 <View style={styles.loaderContainer}>
                     <ActivityIndicator size="large" color="#770002"/>
@@ -423,19 +566,28 @@ const ChatsList = forwardRef((props, ref) => {
                     !isLoading ? (
                         <View style={styles.emptyContainer}>
                             <Ionicons name="chatbubbles-outline" size={48} color="#ccc"/>
-                            <Text style={styles.emptyText}>У вас пока нет чатов</Text>
+                            <Text style={styles.emptyText}>
+                                {isOffline || firebaseError
+                                    ? "Нет доступных локально сохраненных чатов"
+                                    : "У вас пока нет чатов"}
+                            </Text>
                             <Text style={styles.emptyHint}>Для удаления чата удерживайте его</Text>
-                            <Text style={styles.emptyHint}>Потяните вниз для обновления</Text>
+                            <Text style={styles.emptyHint}>
+                                {isOffline || firebaseError
+                                    ? "Подключитесь к сети для получения данных"
+                                    : "Потяните вниз для обновления"}
+                            </Text>
                         </View>
                     ) : null
                 }
             />
 
-            {/* Кнопка добавления нового чата */}
+            {/* Кнопка добавления нового чата (неактивна в режиме офлайн) */}
             <TouchableOpacity
-                style={styles.addButton}
+                style={[styles.addButton, (isOffline || firebaseError) && styles.addButtonDisabled]}
                 onPress={() => router.push('/new-chat')}
                 activeOpacity={0.8}
+                disabled={isOffline || firebaseError}
             >
                 <Ionicons name="add" size={28} color="#FFF"/>
             </TouchableOpacity>
@@ -447,6 +599,20 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: '#fff',
+    },
+    offlineContainer: {
+        backgroundColor: '#E53935',
+        flexDirection: 'row',
+        padding: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+        zIndex: 2,
+    },
+    offlineText: {
+        color: '#fff',
+        marginLeft: 8,
+        fontSize: 14,
+        fontWeight: '500',
     },
     loaderContainer: {
         position: 'absolute',
@@ -490,12 +656,13 @@ const styles = StyleSheet.create({
     },
     chatInfo: {
         flex: 1,
+        justifyContent: 'center',
     },
     chatHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 4,
+        marginBottom: 2,
     },
     chatName: {
         fontWeight: 'bold',
@@ -503,13 +670,19 @@ const styles = StyleSheet.create({
         color: '#333',
         flex: 1,
     },
+    chatSubtitle: {
+        fontSize: 14,
+        color: '#666',
+        marginBottom: 2,
+    },
     messageTime: {
         fontSize: 12,
         color: '#888',
+        marginLeft: 8,
     },
     lastMessage: {
         fontSize: 14,
-        color: '#666',
+        color: '#999',
     },
     emptyContainer: {
         flex: 1,
@@ -555,6 +728,9 @@ const styles = StyleSheet.create({
         shadowRadius: 3,
         elevation: 5,
         zIndex: 2,
+    },
+    addButtonDisabled: {
+        backgroundColor: '#cccccc',
     },
     verificationRequiredContainer: {
         flex: 1,

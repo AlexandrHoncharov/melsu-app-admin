@@ -26,6 +26,7 @@ class ChatService {
         this.unreadCountCallback = null; // Callback для обновления счетчика непрочитанных сообщений
         this.messageCache = {}; // Локальный кэш сообщений для каждого чата
         this.chatCache = {}; // Локальный кэш данных чатов
+        this.firebaseInitError = false; // Флаг ошибки инициализации Firebase
     }
 
     /**
@@ -157,6 +158,9 @@ class ChatService {
         }
 
         try {
+            // Сбрасываем флаг ошибки Firebase при каждой новой попытке инициализации
+            this.firebaseInitError = false;
+
             // Устанавливаем флаг, что инициализация в процессе
             this.initializationInProgress = true;
 
@@ -199,11 +203,25 @@ class ChatService {
             console.log(`ChatService: Initialized with user: ID=${this.currentUser.id}, Name=${this.currentUser.fullName || this.currentUser.username}, Role=${this.currentUser.role}`);
 
             // Используем authUtils для Firebase аутентификации
-            const authSuccess = await authUtils.syncFirebaseAuth();
-            if (authSuccess) {
-                console.log('Firebase authentication successful via authUtils');
-            } else {
-                console.warn('Firebase authentication failed via authUtils, but continuing');
+            try {
+                const authSuccess = await authUtils.syncFirebaseAuth();
+                if (authSuccess) {
+                    console.log('Firebase authentication successful via authUtils');
+                } else {
+                    console.warn('Firebase authentication failed via authUtils, but continuing');
+                    // Не устанавливаем флаг ошибки, так как это не критично
+                }
+            } catch (authError) {
+                console.error('Firebase authentication error:', authError);
+                // Отмечаем наличие ошибки Firebase, но продолжаем работу
+                if (authError.message && (
+                    authError.message.includes('Firebase') ||
+                    authError.message.includes('auth') ||
+                    authError.message.includes('Component')
+                )) {
+                    this.firebaseInitError = true;
+                }
+                // Продолжаем инициализацию даже при ошибке Firebase
             }
 
             // Записываем основную информацию о пользователе в Firebase
@@ -220,6 +238,14 @@ class ChatService {
                 });
             } catch (dbError) {
                 console.warn('Error writing user data to database:', dbError);
+                // Проверяем, связана ли ошибка с Firebase
+                if (dbError.message && (
+                    dbError.message.includes('Firebase') ||
+                    dbError.message.includes('auth') ||
+                    dbError.message.includes('Component')
+                )) {
+                    this.firebaseInitError = true;
+                }
                 // Продолжаем работу даже при ошибке записи
             }
 
@@ -238,6 +264,16 @@ class ChatService {
             return true;
         } catch (error) {
             console.error('Error initializing chat service:', error);
+
+            // Проверяем, связана ли ошибка с Firebase
+            if (error.message && (
+                error.message.includes('Firebase') ||
+                error.message.includes('auth') ||
+                error.message.includes('Component')
+            )) {
+                this.firebaseInitError = true;
+            }
+
             this.initialized = false;
             this.initializationInProgress = false;
             return false;
@@ -419,6 +455,7 @@ class ChatService {
         this.initializationInProgress = false;
         this.deviceToken = null;
         this.unreadCountCallback = null;
+        this.firebaseInitError = false;
 
         // Выход из Firebase Auth
         try {
@@ -605,6 +642,8 @@ class ChatService {
                         withUser: otherUserId,
                         withUserRole: otherUserInfo.role || 'unknown',
                         withUserName: otherUserDisplayName,
+                        withUserGroup: otherUserInfo.group || '',
+                        withUserDepartment: otherUserInfo.department || '',
                         updatedAt: serverTimestamp()
                     });
 
@@ -628,6 +667,8 @@ class ChatService {
                         withUser: myUserId,
                         withUserName: currentUserDisplayName,
                         withUserRole: this.currentUser.role || 'unknown',
+                        withUserGroup: this.currentUser.group || '',
+                        withUserDepartment: this.currentUser.department || '',
                         updatedAt: serverTimestamp()
                     });
 
@@ -642,6 +683,8 @@ class ChatService {
                         withUser: otherUserId,
                         withUserName: otherUserDisplayName,
                         withUserRole: otherUserInfo.role || 'unknown',
+                        withUserGroup: otherUserInfo.group || '',
+                        withUserDepartment: otherUserInfo.department || '',
                         createdAt: Date.now(),
                         updatedAt: Date.now()
                     };
@@ -668,6 +711,8 @@ class ChatService {
                                 console.log(`Updating other user name to: ${otherUserDisplayName}`);
                                 await update(myUserChatRef, {
                                     withUserName: otherUserDisplayName,
+                                    withUserGroup: otherUserInfo.group || '',
+                                    withUserDepartment: otherUserInfo.department || '',
                                     updatedAt: serverTimestamp()
                                 });
                             }
@@ -677,6 +722,8 @@ class ChatService {
                                 ...this.chatCache[chatId] || {},
                                 ...chatData,
                                 withUserName: otherUserDisplayName,
+                                withUserGroup: otherUserInfo.group || '',
+                                withUserDepartment: otherUserInfo.department || '',
                                 updatedAt: Date.now()
                             };
                         }
@@ -698,6 +745,8 @@ class ChatService {
                     withUser: otherUserId,
                     withUserName: otherUserDisplayName,
                     withUserRole: otherUserInfo.role || 'unknown',
+                    withUserGroup: otherUserInfo.group || '',
+                    withUserDepartment: otherUserInfo.department || '',
                     createdAt: Date.now(),
                     updatedAt: Date.now()
                 };
@@ -1453,6 +1502,14 @@ class ChatService {
                         // Даже если инициализация не удалась, проверяем, есть ли у нас данные пользователя
                         if (!this.currentUser || !this.currentUser.id) {
                             console.error('No current user available after initialization attempt');
+
+                            // Проверяем наличие кэша
+                            const cachedChats = Object.values(this.chatCache);
+                            if (cachedChats.length > 0) {
+                                console.log(`Returning ${cachedChats.length} chats from cache after failed initialization`);
+                                return cachedChats;
+                            }
+
                             return [];
                         }
                         // Продолжаем работу, если у нас есть ID пользователя, даже если Firebase аутентификация не удалась
@@ -1460,12 +1517,27 @@ class ChatService {
                     }
                 } catch (initError) {
                     console.error('Error during initialization:', initError);
+
+                    // Если есть ошибка инициализации Firebase, сразу возвращаем кэш
+                    if (this.firebaseInitError) {
+                        const cachedChats = Object.values(this.chatCache);
+                        console.log(`Returning ${cachedChats.length} chats from cache due to Firebase error`);
+                        return cachedChats;
+                    }
+
                     // Проверяем, есть ли у нас данные пользователя несмотря на ошибку
                     if (!this.currentUser || !this.currentUser.id) {
                         return [];
                     }
                     console.log('Continuing with user chats despite initialization error');
                 }
+            }
+
+            // Если Firebase инициализация не удалась, возвращаем данные из кэша
+            if (this.firebaseInitError) {
+                const cachedChats = Object.values(this.chatCache);
+                console.log(`Returning ${cachedChats.length} chats from cache due to Firebase error`);
+                return cachedChats;
             }
 
             if (!this.currentUser || !this.currentUser.id) {
@@ -1596,7 +1668,9 @@ class ChatService {
             }
         } catch (outerError) {
             console.error('Unexpected error in getUserChats:', outerError);
-            return [];
+            // В случае неожиданной ошибки используем локальный кэш
+            const cachedChats = Object.values(this.chatCache);
+            return cachedChats;
         }
     }
 
@@ -1634,6 +1708,14 @@ class ChatService {
 
             const path = `messages/${chatId}`;
             console.log(`Getting messages for chat ${chatId}`);
+
+            // Если есть ошибка Firebase инициализации, сразу возвращаем кэш
+            if (this.firebaseInitError) {
+                const cachedMessages = this.messageCache[chatId] || [];
+                const limitedMessages = cachedMessages.slice(-limit);
+                console.log(`Loaded ${limitedMessages.length} messages for chat ${chatId} from cache due to Firebase error`);
+                return limitedMessages;
+            }
 
             // Сначала пробуем получить из Firebase
             try {
@@ -1723,6 +1805,11 @@ class ChatService {
             }
 
             const path = `chats/${chatId}`;
+
+            // Если есть ошибка Firebase, используем кэш
+            if (this.firebaseInitError) {
+                return this.chatCache[chatId] || null;
+            }
 
             // Сначала пробуем получить из Firebase
             try {

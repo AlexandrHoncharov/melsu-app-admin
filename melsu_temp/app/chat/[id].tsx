@@ -218,6 +218,7 @@ export default function ChatScreen() {
     const [otherUserInfo, setOtherUserInfo] = useState(null);
     const [lastMessageTimestamp, setLastMessageTimestamp] = useState(0);
     const [isOffline, setIsOffline] = useState(false);
+    const [isFirebaseError, setIsFirebaseError] = useState(false);
     const [chatInfo, setChatInfo] = useState(null);
 
     // New states for action menu
@@ -280,6 +281,12 @@ export default function ChatScreen() {
         try {
             await chatService.initialize();
 
+            // Если есть ошибка инициализации Firebase, прерываем загрузку новых сообщений
+            if (chatService.firebaseInitError) {
+                setIsFirebaseError(true);
+                return;
+            }
+
             if (typeof chatService.forceCurrentUserId === 'function') {
                 await chatService.forceCurrentUserId(user.id);
             }
@@ -333,6 +340,15 @@ export default function ChatScreen() {
             }
         } catch (error) {
             console.error('📱 Error loading new messages:', error);
+
+            // Проверяем, связана ли ошибка с Firebase
+            if (error.message && (
+                error.message.includes('Firebase') ||
+                error.message.includes('auth') ||
+                error.message.includes('Component')
+            )) {
+                setIsFirebaseError(true);
+            }
         }
     }, [chatId, lastMessageTimestamp, user, isOffline]);
 
@@ -347,19 +363,21 @@ export default function ChatScreen() {
             // For personal chats, try to extract name and details
             const userName = chatData.withUserName || `Пользователь ${chatData.withUser}`;
 
-            // Split by parentheses if they exist to separate name and details
-            if (userName.includes('(')) {
-                const nameParts = userName.split('(');
-                titleText = nameParts[0].trim();
-                subtitleText = nameParts[1].replace(')', '').trim();
-            } else {
-                titleText = userName;
+            // Используем имя как заголовок
+            titleText = userName.split('(')[0].trim();
 
-                // Try to get other user role/details
-                if (chatData.withUserRole === 'student') {
-                    subtitleText = chatData.withUserGroup || '';
-                } else if (chatData.withUserRole === 'teacher') {
-                    subtitleText = chatData.withUserDepartment || '';
+            // Используем группу студента или кафедру преподавателя как подзаголовок
+            if (chatData.withUserRole === 'student') {
+                subtitleText = chatData.withUserGroup || '';
+            } else if (chatData.withUserRole === 'teacher') {
+                subtitleText = chatData.withUserDepartment || '';
+            }
+
+            // Если подзаголовок не установлен, попробуем извлечь из скобок, если они есть
+            if (!subtitleText && userName.includes('(')) {
+                const detailsPart = userName.split('(')[1];
+                if (detailsPart) {
+                    subtitleText = detailsPart.replace(')', '').trim();
                 }
             }
         } else if (chatData.type === 'group') {
@@ -425,6 +443,31 @@ export default function ChatScreen() {
 
             // Initialize service
             await chatService.initialize();
+
+            // Проверяем, есть ли ошибка инициализации Firebase
+            if (chatService.firebaseInitError) {
+                console.log('📱 Firebase initialization error detected, using offline mode');
+                setIsFirebaseError(true);
+
+                // Загружаем данные из кэша при ошибке Firebase
+                const cachedChatInfo = await getChatInfoFromCache(chatId);
+                if (cachedChatInfo) {
+                    parseChatInfo(cachedChatInfo);
+                }
+
+                const cachedMessages = await getChatMessagesFromCache(chatId);
+                if (cachedMessages && cachedMessages.length > 0) {
+                    setMessages(cachedMessages);
+                    const latestTimestamp = Math.max(...cachedMessages.map(m => m.timestamp || 0));
+                    setLastMessageTimestamp(latestTimestamp);
+                    console.log(`📱 Loaded ${cachedMessages.length} messages from cache after Firebase error`);
+                }
+
+                setLoading(false);
+                setRefreshing(false);
+                setIsInitialLoad(false);
+                return;
+            }
 
             // CRITICAL CHANGE: Force set correct user ID
             if (typeof chatService.forceCurrentUserId === 'function') {
@@ -500,7 +543,16 @@ export default function ChatScreen() {
         } catch (error) {
             console.error('📱 Error loading chat data:', error);
 
-            if (!isOffline) {
+            // Проверяем, связана ли ошибка с Firebase
+            if (error.message && (
+                error.message.includes('Firebase') ||
+                error.message.includes('auth') ||
+                error.message.includes('Component')
+            )) {
+                setIsFirebaseError(true);
+            }
+
+            if (!isOffline && !isFirebaseError) {
                 // Try to load from cache if online loading failed
                 console.log('📱 Loading from cache after online error...');
 
@@ -531,10 +583,16 @@ export default function ChatScreen() {
 
     // Enhanced message listener setup with optimization
     const setupEnhancedMessageListener = useCallback(async () => {
-        if (isOffline) return;
+        if (isOffline || isFirebaseError) return;
 
         try {
             await chatService.initialize();
+
+            // Если есть ошибка инициализации Firebase, прекращаем настройку
+            if (chatService.firebaseInitError) {
+                setIsFirebaseError(true);
+                return;
+            }
 
             // Set up modified listener with callback that will load only new messages
             await chatService.setupChatMessageListener(chatId, async (newMessageData) => {
@@ -588,13 +646,22 @@ export default function ChatScreen() {
             console.log('📱 Enhanced message listener setup complete');
         } catch (error) {
             console.error('📱 Error setting up enhanced message listener:', error);
+
+            // Проверяем, связана ли ошибка с Firebase
+            if (error.message && (
+                error.message.includes('Firebase') ||
+                error.message.includes('auth') ||
+                error.message.includes('Component')
+            )) {
+                setIsFirebaseError(true);
+            }
         }
-    }, [chatId, loadNewMessages, lastMessageTimestamp, isOffline]);
+    }, [chatId, loadNewMessages, lastMessageTimestamp, isOffline, isFirebaseError]);
 
     // Start or stop polling interval depending on app state
     const setupPolling = useCallback(() => {
-        // Don't set up polling if offline
-        if (isOffline) return () => {};
+        // Don't set up polling if offline or Firebase error
+        if (isOffline || isFirebaseError) return () => {};
 
         // Clear previous interval if it exists
         if (pollingIntervalRef.current) {
@@ -612,7 +679,7 @@ export default function ChatScreen() {
                 clearInterval(pollingIntervalRef.current);
             }
         };
-    }, [loadNewMessages, isOffline]);
+    }, [loadNewMessages, isOffline, isFirebaseError]);
 
     // Track app state to optimize background operation
     useEffect(() => {
@@ -724,7 +791,7 @@ export default function ChatScreen() {
     const handleSendMessage = async () => {
         if (!messageText.trim() || sending) return;
 
-        if (isOffline) {
+        if (isOffline || isFirebaseError) {
             Alert.alert(
                 "Нет подключения",
                 "Для отправки сообщений требуется подключение к интернету."
@@ -866,6 +933,18 @@ export default function ChatScreen() {
         router.back();
     };
 
+    // OfflineBar component
+    const OfflineBar = () => (
+        <View style={styles.offlineBar}>
+            <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
+            <Text style={styles.offlineText}>
+                {isFirebaseError
+                    ? 'Ошибка подключения к серверу. Режим офлайн.'
+                    : 'Не подключен к сети'}
+            </Text>
+        </View>
+    );
+
     // Fix the loading function to not show the loading on subsequent renders
     if (loading) {
         return (
@@ -914,12 +993,7 @@ export default function ChatScreen() {
                 </View>
 
                 {/* Offline indicator */}
-                {isOffline && (
-                    <View style={styles.offlineBar}>
-                        <Ionicons name="cloud-offline-outline" size={16} color="#fff" />
-                        <Text style={styles.offlineText}>Отключено от сети</Text>
-                    </View>
-                )}
+                {(isOffline || isFirebaseError) && <OfflineBar />}
 
                 <FlatList
                     ref={flatListRef}
@@ -938,7 +1012,7 @@ export default function ChatScreen() {
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Text style={styles.emptyText}>
-                                {isOffline
+                                {isOffline || isFirebaseError
                                     ? "Нет локально сохраненных сообщений"
                                     : "Нет сообщений. Начните общение прямо сейчас!"}
                             </Text>
@@ -949,21 +1023,21 @@ export default function ChatScreen() {
                 <View style={styles.inputContainer}>
                     <TextInput
                         style={styles.messageInput}
-                        placeholder={isOffline ? "Нет подключения к сети" : "Введите сообщение..."}
+                        placeholder={isOffline || isFirebaseError ? "Нет подключения к сети" : "Введите сообщение..."}
                         value={messageText}
                         onChangeText={setMessageText}
                         multiline
                         maxLength={1000}
-                        editable={!isOffline}
+                        editable={!(isOffline || isFirebaseError)}
                     />
 
                     <TouchableOpacity
                         style={[
                             styles.sendButton,
-                            (!messageText.trim() || sending || isOffline) && styles.sendButtonDisabled
+                            (!messageText.trim() || sending || isOffline || isFirebaseError) && styles.sendButtonDisabled
                         ]}
                         onPress={handleSendMessage}
-                        disabled={!messageText.trim() || sending || isOffline}
+                        disabled={!messageText.trim() || sending || isOffline || isFirebaseError}
                     >
                         {sending ? (
                             <ActivityIndicator size="small" color="#fff"/>
@@ -989,15 +1063,15 @@ export default function ChatScreen() {
                             <TouchableOpacity
                                 style={styles.actionMenuItem}
                                 onPress={handleRefresh}
-                                disabled={isOffline}
+                                disabled={isOffline || isFirebaseError}
                             >
                                 <Ionicons
                                     name="refresh"
                                     size={24}
-                                    color={isOffline ? "#999" : "#333"}
+                                    color={(isOffline || isFirebaseError) ? "#999" : "#333"}
                                     style={styles.actionMenuIcon}
                                 />
-                                <Text style={[styles.actionMenuText, isOffline && styles.disabledText]}>
+                                <Text style={[styles.actionMenuText, (isOffline || isFirebaseError) && styles.disabledText]}>
                                     Обновить
                                 </Text>
                             </TouchableOpacity>
@@ -1005,15 +1079,15 @@ export default function ChatScreen() {
                             <TouchableOpacity
                                 style={styles.actionMenuItem}
                                 onPress={handleMuteChat}
-                                disabled={isOffline}
+                                disabled={isOffline || isFirebaseError}
                             >
                                 <Ionicons
                                     name="notifications-off"
                                     size={24}
-                                    color={isOffline ? "#999" : "#1976D2"}
+                                    color={(isOffline || isFirebaseError) ? "#999" : "#1976D2"}
                                     style={styles.actionMenuIcon}
                                 />
-                                <Text style={[styles.actionMenuText, isOffline && styles.disabledText]}>
+                                <Text style={[styles.actionMenuText, (isOffline || isFirebaseError) && styles.disabledText]}>
                                     Отключить уведомления
                                 </Text>
                             </TouchableOpacity>
@@ -1021,15 +1095,15 @@ export default function ChatScreen() {
                             <TouchableOpacity
                                 style={styles.actionMenuItem}
                                 onPress={handleLeaveChat}
-                                disabled={isOffline}
+                                disabled={isOffline || isFirebaseError}
                             >
                                 <Ionicons
                                     name="exit-outline"
                                     size={24}
-                                    color={isOffline ? "#999" : "#D32F2F"}
+                                    color={(isOffline || isFirebaseError) ? "#999" : "#D32F2F"}
                                     style={styles.actionMenuIcon}
                                 />
-                                <Text style={[styles.actionMenuText, isOffline && styles.disabledText]}>
+                                <Text style={[styles.actionMenuText, (isOffline || isFirebaseError) && styles.disabledText]}>
                                     Покинуть чат
                                 </Text>
                             </TouchableOpacity>

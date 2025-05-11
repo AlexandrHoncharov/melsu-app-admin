@@ -31,7 +31,7 @@ from db import db
 from models import (
     User, Teacher, Schedule, ScheduleTeacher, VerificationLog,
     DeviceToken, Ticket, TicketAttachment, TicketMessage,
-    Notification
+    Notification, BulkNotification
 )
 
 # === Configuration & Initialization === #
@@ -43,6 +43,9 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 db.init_app(app)
 
+UPLOAD_FOLDER = 'uploads'
+STUDENT_CARDS_FOLDER = os.path.join(UPLOAD_FOLDER, 'student_cards')
+TICKET_ATTACHMENTS_FOLDER = os.path.join(UPLOAD_FOLDER, 'ticket_attachments')
 # Firebase initialization block
 FIREBASE_AVAILABLE = False
 try:
@@ -1195,24 +1198,186 @@ def get_ticket_attachment_admin(filename):
 
 # === Notification Management === #
 
-@app.route('/notifications')
+@app.route('/send_notifications', methods=['POST'])
 @login_required
-def notifications_page():
-    """Displays the notification sending form."""
-    groups = db.session.query(User.group).filter(User.role == 'student', User.group.isnot(None)).distinct().order_by(User.group).all()
-    groups = [g[0] for g in groups if g[0]]
-    faculties = db.session.query(User.faculty).filter(User.faculty.isnot(None)).distinct().order_by(User.faculty).all()
-    faculties = [f[0] for f in faculties if f[0]]
-    departments = db.session.query(Teacher.department).distinct().order_by(Teacher.department).all()
-    departments = [d[0] for d in departments if d[0]]
-    positions = db.session.query(Teacher.position).distinct().order_by(Teacher.position).all()
-    positions = [p[0] for p in positions if p[0]]
-    return render_template('notifications/send.html',groups=groups,faculties=faculties,departments=departments,positions=positions)
+def send_notifications():
+    """Обработка отправки уведомления."""
+    try:
+        # Получаем основные данные уведомления
+        title = request.form.get('title')
+        message = request.form.get('message')
+        notification_type = request.form.get('notification_type', 'info')
+        deep_link = request.form.get('deep_link', '')
+
+        # Получаем режим выбора получателей
+        recipient_mode = request.form.get('recipient_mode')
+
+        # Настраиваем фильтр в зависимости от режима
+        filter_data = {}
+
+        if recipient_mode == 'single':
+            # Один получатель
+            user_id = request.form.get('selected_user_id')
+            if not user_id:
+                flash('Не выбран получатель', 'error')
+                return redirect(url_for('notifications_page'))
+
+            filter_data['recipient_type'] = 'custom'
+            filter_data['selected_user_ids'] = user_id
+
+        elif recipient_mode == 'group':
+            # Группа студентов
+            group = request.form.get('student_group')
+            if not group:
+                flash('Не выбрана группа', 'error')
+                return redirect(url_for('notifications_page'))
+
+            filter_data['recipient_type'] = 'students'
+            filter_data['student_group'] = group
+
+            # Проверяем подгруппы
+            if request.form.get('include_subgroups'):
+                subgroups = request.form.getlist('subgroups[]')
+                if subgroups:
+                    filter_data['subgroups'] = subgroups
+
+        elif recipient_mode == 'faculty':
+            # Факультет
+            faculty = request.form.get('faculty')
+            if not faculty:
+                flash('Не выбран факультет', 'error')
+                return redirect(url_for('notifications_page'))
+
+            faculty_recipient_type = request.form.get('faculty_recipient_type', 'all')
+
+            filter_data['student_faculty'] = faculty
+            if faculty_recipient_type == 'all':
+                filter_data['recipient_type'] = 'all'
+            elif faculty_recipient_type == 'students':
+                filter_data['recipient_type'] = 'students'
+            elif faculty_recipient_type == 'teachers':
+                filter_data['recipient_type'] = 'teachers'
+
+        elif recipient_mode == 'department':
+            # Кафедра преподавателей
+            department = request.form.get('department')
+            if not department:
+                flash('Не выбрана кафедра', 'error')
+                return redirect(url_for('notifications_page'))
+
+            filter_data['recipient_type'] = 'teachers'
+            filter_data['teacher_department'] = department
+
+            position = request.form.get('teacher_position')
+            if position:
+                filter_data['teacher_position'] = position
+
+        elif recipient_mode == 'course':
+            # Курс студентов
+            course = request.form.get('course')
+            if not course:
+                flash('Не выбран курс', 'error')
+                return redirect(url_for('notifications_page'))
+
+            filter_data['recipient_type'] = 'students'
+            filter_data['student_course'] = course
+
+            course_faculty = request.form.get('course_faculty')
+            if course_faculty:
+                filter_data['student_faculty'] = course_faculty
+
+        elif recipient_mode == 'all':
+            # Все пользователи
+            filter_data['recipient_type'] = 'all'
+
+            verification_status = request.form.get('verification_status')
+            if verification_status:
+                filter_data['verification_status'] = verification_status
+
+        # Получаем список получателей
+        recipients, devices = get_notification_recipients(filter_data)
+
+        if not recipients:
+            flash('Не найдено получателей для отправки уведомления', 'error')
+            return redirect(url_for('notifications_page'))
+
+        # Создаем запись для отслеживания массовой рассылки
+        admin_id = session.get('user_id')
+        timestamp = datetime.datetime.utcnow()
+
+        # Предполагаем, что у вас есть модель BulkNotification для хранения массовых рассылок
+        bulk_notification = BulkNotification(
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            deep_link=deep_link,
+            admin_id=admin_id,
+            recipients_count=len(recipients),
+            devices_count=len(devices),
+            created_at=timestamp,
+            status='processing',
+            started_at=timestamp,
+            filter_data=json.dumps(filter_data)
+        )
+
+        db.session.add(bulk_notification)
+        db.session.commit()
+
+        # Запускаем отправку уведомлений (можно вынести в фоновую задачу)
+        success_count = 0
+        error_count = 0
+
+        for user in recipients:
+            try:
+                notification_data = {
+                    'bulk_id': bulk_notification.id,
+                    'deep_link': deep_link,
+                    'timestamp': timestamp.isoformat()
+                }
+
+                result = create_and_send_notification(
+                    recipient_id=user.id,
+                    title=title,
+                    body=message,
+                    notification_type=notification_type,
+                    sender_id=admin_id,
+                    data=notification_data
+                )
+
+                if result.get('db_success'):
+                    success_count += 1
+                else:
+                    error_count += 1
+            except Exception as e:
+                print(f"Error sending notification to user {user.id}: {e}")
+                error_count += 1
+
+        # Обновляем статус рассылки
+        bulk_notification.success_count = success_count
+        bulk_notification.error_count = error_count
+        bulk_notification.status = 'completed'
+        bulk_notification.completed_at = datetime.datetime.utcnow()
+        db.session.commit()
+
+        flash(f'Уведомление успешно отправлено {success_count} пользователям', 'success')
+        if error_count > 0:
+            flash(f'Не удалось отправить уведомление {error_count} пользователям', 'warning')
+
+        return redirect(url_for('notification_history'))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Ошибка при отправке уведомления: {e}', 'error')
+        print(f"Error in send_notifications: {e}")
+        import traceback
+        traceback.print_exc()
+        return redirect(url_for('notifications_page'))
+
 
 @app.route('/notifications/view')
 @login_required
 def view_notifications():
-    """Displays a list of sent notifications in the admin panel."""
+    """Отображает список отправленных уведомлений в админ-панели."""
     notification_type = request.args.get('type', '')
     user_id = request.args.get('user_id', type=int)
     sender_id = request.args.get('sender_id', type=int)
@@ -1222,11 +1387,16 @@ def view_notifications():
     per_page = 30
     query = Notification.query
 
-    if notification_type: query = query.filter_by(notification_type=notification_type)
-    if user_id: query = query.filter_by(user_id=user_id)
-    if sender_id: query = query.filter_by(sender_id=sender_id)
-    if is_read == 'read': query = query.filter_by(is_read=True)
-    elif is_read == 'unread': query = query.filter_by(is_read=False)
+    if notification_type:
+        query = query.filter_by(notification_type=notification_type)
+    if user_id:
+        query = query.filter_by(user_id=user_id)
+    if sender_id:
+        query = query.filter_by(sender_id=sender_id)
+    if is_read == 'read':
+        query = query.filter_by(is_read=True)
+    elif is_read == 'unread':
+        query = query.filter_by(is_read=False)
 
     if search_query:
         query = query.filter(
@@ -1237,27 +1407,183 @@ def view_notifications():
         )
 
     users = User.query.order_by(User.username).all()
-    notification_types = db.session.query(Notification.notification_type,db.func.count(Notification.id)).group_by(Notification.notification_type).all()
+    notification_types = db.session.query(Notification.notification_type, db.func.count(Notification.id)).group_by(Notification.notification_type).all()
     pagination = query.order_by(Notification.created_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
     notifications = pagination.items
     total_count = Notification.query.count()
     read_count = Notification.query.filter_by(is_read=True).count()
     unread_count = Notification.query.filter_by(is_read=False).count()
 
-    return render_template('notifications/view.html',
-                           notifications=notifications,
-                           pagination=pagination,
-                           users=users,
-                           notification_types=notification_types,
-                           total_count=total_count,
-                           read_count=read_count,
-                           unread_count=unread_count,
-                           current_type=notification_type,
-                           current_user_id=user_id,
-                           current_sender_id=sender_id,
-                           current_is_read=is_read,
-                           search_query=search_query)
+    return render_template(
+        'notifications/view.html',
+        notifications=notifications,
+        pagination=pagination,
+        users=users,
+        notification_types=notification_types,
+        total_count=total_count,
+        read_count=read_count,
+        unread_count=unread_count,
+        current_type=notification_type,
+        current_user_id=user_id,
+        current_sender_id=sender_id,
+        current_is_read=is_read,
+        search_query=search_query
+    )
 
+@app.route('/notification_history')
+@login_required
+def notification_history():
+    """Отображает историю отправленных уведомлений."""
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+
+    # Предполагаем, что у вас есть модель BulkNotification для хранения массовых рассылок
+    query = BulkNotification.query.order_by(BulkNotification.created_at.desc())
+
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    notifications = pagination.items
+
+    # Получаем статистику
+    total_notifications = BulkNotification.query.count()
+    total_success = db.session.query(db.func.sum(BulkNotification.success_count)).scalar() or 0
+    total_errors = db.session.query(db.func.sum(BulkNotification.error_count)).scalar() or 0
+    total_recipients = db.session.query(db.func.sum(BulkNotification.recipients_count)).scalar() or 0
+
+    return render_template(
+        'notifications/history.html',
+        notifications=notifications,
+        pagination=pagination,
+        total_notifications=total_notifications,
+        total_success=total_success,
+        total_errors=total_errors,
+        total_recipients=total_recipients
+    )
+
+
+@app.route('/notifications')
+@login_required
+def notifications_page():
+    """Отображает форму отправки уведомлений."""
+    groups = db.session.query(User.group).filter(User.role == 'student', User.group.isnot(None)).distinct().order_by(
+        User.group).all()
+    groups = [g[0] for g in groups if g[0]]
+    faculties = db.session.query(User.faculty).filter(User.faculty.isnot(None)).distinct().order_by(User.faculty).all()
+    faculties = [f[0] for f in faculties if f[0]]
+    departments = db.session.query(Teacher.department).distinct().order_by(Teacher.department).all()
+    departments = [d[0] for d in departments if d[0]]
+    positions = db.session.query(Teacher.position).distinct().order_by(Teacher.position).all()
+    positions = [p[0] for p in positions if p[0]]
+
+    # Получаем список всех активных пользователей для выпадающего списка
+    # Ограничиваем список до 200 пользователей, чтобы избежать проблем с производительностью
+    students = User.query.filter_by(role='student', verification_status='verified').order_by(User.full_name).limit(
+        100).all()
+    teachers = User.query.filter_by(role='teacher').order_by(User.full_name).limit(100).all()
+    all_users = students + teachers
+
+    return render_template('notifications/send.html',
+                           groups=groups,
+                           faculties=faculties,
+                           departments=departments,
+                           positions=positions,
+                           all_users=all_users)
+
+
+# Маршрут для повторной отправки уведомления
+@app.route('/notifications/resend/<int:notification_id>')
+@login_required
+def resend_notification(notification_id):
+    """Повторно отправляет существующее уведомление."""
+    try:
+        original = BulkNotification.query.get_or_404(notification_id)
+
+        # Создаем новую запись с теми же параметрами
+        new_notification = BulkNotification(
+            title=original.title,
+            message=original.message,
+            notification_type=original.notification_type,
+            deep_link=original.deep_link,
+            admin_id=session.get('user_id'),
+            recipients_count=original.recipients_count,
+            devices_count=original.devices_count,
+            created_at=datetime.datetime.utcnow(),
+            status='pending',
+            filter_data=original.filter_data
+        )
+
+        db.session.add(new_notification)
+        db.session.commit()
+
+        # Перенаправляем на страницу отправки с предзаполненными полями
+        flash('Уведомление готово к повторной отправке. Проверьте параметры и нажмите "Отправить"', 'info')
+        return redirect(url_for('edit_notification', notification_id=new_notification.id))
+
+    except Exception as e:
+        flash(f'Ошибка при подготовке повторной отправки: {e}', 'error')
+        return redirect(url_for('notification_history'))
+
+
+# Дополнительный маршрут для редактирования уведомления перед отправкой
+@app.route('/notifications/edit/<int:notification_id>')
+@login_required
+def edit_notification(notification_id):
+    """Позволяет редактировать уведомление перед отправкой."""
+    notification = BulkNotification.query.get_or_404(notification_id)
+
+    # Получаем данные для шаблона (группы, факультеты и т.д.)
+    groups = db.session.query(User.group).filter(User.role == 'student', User.group.isnot(None)).distinct().order_by(
+        User.group).all()
+    groups = [g[0] for g in groups if g[0]]
+    faculties = db.session.query(User.faculty).filter(User.faculty.isnot(None)).distinct().order_by(User.faculty).all()
+    faculties = [f[0] for f in faculties if f[0]]
+    departments = db.session.query(Teacher.department).distinct().order_by(Teacher.department).all()
+    departments = [d[0] for d in departments if d[0]]
+    positions = db.session.query(Teacher.position).distinct().order_by(Teacher.position).all()
+    positions = [p[0] for p in positions if p[0]]
+
+    # Восстанавливаем фильтр получателей
+    try:
+        recipient_filter = json.loads(notification.filter_data) if notification.filter_data else {}
+    except:
+        recipient_filter = {}
+
+    return render_template(
+        'notifications/edit.html',
+        notification=notification,
+        recipient_filter=recipient_filter,
+        groups=groups,
+        faculties=faculties,
+        departments=departments,
+        positions=positions
+    )
+
+
+@app.route('/notifications/view/<int:notification_id>')
+@login_required
+def view_notification_details(notification_id):
+    """Отображает детали конкретного уведомления."""
+    notification = BulkNotification.query.get_or_404(notification_id)
+
+    try:
+        recipient_filter = json.loads(notification.filter_data) if notification.filter_data else {}
+    except:
+        recipient_filter = {}
+
+    admin = None
+    if notification.admin_id:
+        admin = User.query.get(notification.admin_id)
+
+    # Получаем информацию об ошибках, если есть
+    error_details = []
+    # Здесь должна быть логика для получения деталей ошибок, если они сохраняются
+
+    return render_template(
+        'notifications/details.html',
+        notification=notification,
+        recipient_filter=recipient_filter,
+        admin=admin,
+        error_details=error_details
+    )
 @app.route('/api/notifications/preview', methods=['POST'])
 @login_required
 def preview_notifications():
@@ -1284,23 +1610,36 @@ def preview_notifications():
         print(f"Error getting notification preview: {e}")
         return jsonify({'error': str(e),'users_count': 0,'devices_count': 0}), 500
 
+
 @app.route('/api/users/search')
 @login_required
 def search_users():
-    """API to search for users by name, username, or email."""
+    """API для поиска пользователей по имени, логину или email."""
     search_term = request.args.get('term', '')
-    if len(search_term) < 2: return jsonify([])
+    if len(search_term) < 2:
+        return jsonify([])
+
     try:
+        # Используем or_ для поиска по нескольким полям
         users = User.query.filter(
-            or_(
+            db.or_(
                 User.full_name.ilike(f'%{search_term}%'),
                 User.username.ilike(f'%{search_term}%'),
                 User.email.ilike(f'%{search_term}%')
             )
         ).limit(10).all()
+
         results = []
         for user in users:
-            results.append({'id': user.id,'username': user.username,'full_name': user.full_name,'email': user.email,'role': user.role,'group': user.group if user.role == 'student' else None})
+            results.append({
+                'id': user.id,
+                'username': user.username,
+                'full_name': user.full_name or '',
+                'email': user.email or '',
+                'role': user.role or '',
+                'group': user.group if user.role == 'student' else None
+            })
+
         return jsonify(results)
     except Exception as e:
         print(f"Error searching users: {e}")

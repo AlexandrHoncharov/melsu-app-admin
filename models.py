@@ -412,3 +412,29 @@ class Notification(db.Model):
             notification.data = json.dumps(data)
 
         return notification
+
+
+class BulkNotification(db.Model):
+    """Модель для хранения массовых рассылок уведомлений."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(255), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    notification_type = db.Column(db.String(50), nullable=False, default='info')
+    deep_link = db.Column(db.String(255))
+
+    admin_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    recipients_count = db.Column(db.Integer, default=0)
+    devices_count = db.Column(db.Integer, default=0)
+    success_count = db.Column(db.Integer, default=0)
+    error_count = db.Column(db.Integer, default=0)
+
+    status = db.Column(db.String(20), default='pending')  # pending, processing, completed, failed
+    filter_data = db.Column(db.Text)  # JSON строка с параметрами фильтрации
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    started_at = db.Column(db.DateTime)
+    completed_at = db.Column(db.DateTime)
+
+    admin = db.relationship('User', foreign_keys=[admin_id])

@@ -7,7 +7,7 @@ from urllib.parse import unquote, quote
 import re
 import html
 import unicodedata
-
+from flask import request
 import firebase_admin
 import jwt
 import requests
@@ -384,7 +384,7 @@ def update_api_response_with_content_blocks(api_response, host_url):
         for block in content_blocks:
             if block['type'] == 'image' and block.get('src'):
                 src = block['src']
-                if src.startswith('http'):
+                if src.startswith('https'):
                     original_url = src
                 else:
                     original_url = f"https://melsu.ru/{src.lstrip('/')}"
@@ -403,7 +403,10 @@ def get_news():
     """Get news from the university website with image proxy."""
     try:
         page = request.args.get('page', 1, type=int)
-        host_url = request.host_url.rstrip('/')
+
+        # 1) HTTPS‑хост вместо request.host_url
+        host_url = get_host_url()
+
         url = f"https://melsu.ru/news?page={page}"
         response = requests.get(url, timeout=15)
 
@@ -417,100 +420,129 @@ def get_news():
         for news_box in news_boxes:
             try:
                 link = news_box.select_one('a')
-                if not link: continue
+                if not link:
+                    continue
                 href = link.get('href')
-                if not href: continue
+                if not href:
+                    continue
 
                 match = re.search(r'/news/show/(\d+)', href)
-                if not match: continue
+                if not match:
+                    continue
                 news_id = match.group(1)
 
+                # ── картинка ──────────────────────────────────────────────
                 image_tag = news_box.select_one('img')
                 image_url = None
                 original_src = None
                 if image_tag and image_tag.get('src'):
                     original_src = image_tag['src']
-                    if original_src.startswith('http'):
+                    if original_src.startswith('https'):
                         original_url = original_src
                     else:
                         original_url = f"https://melsu.ru/{original_src.lstrip('/')}"
                     encoded_url = quote(original_url)
                     image_url = f"{host_url}/api/image-proxy?url={encoded_url}"
 
+                # ── остальные поля ───────────────────────────────────────
                 category_tag = news_box.select_one('.meta-category')
                 category = clean_text(category_tag.text.strip()) if category_tag else None
 
                 date_tag = news_box.select_one('.bi-calendar2-week')
                 date = clean_text(date_tag.parent.text.strip()) if date_tag and date_tag.parent else None
 
-                title_container = news_box.select_one('h2') or news_box.select_one('h3') or news_box.select_one('.title')
+                title_container = (
+                    news_box.select_one('h2')
+                    or news_box.select_one('h3')
+                    or news_box.select_one('.title')
+                )
                 title = clean_text(title_container.text.strip()) if title_container else None
 
                 description = None
-                description_selectors = ['.line-clamp-10 p', '.line-clamp-10', 'p'] if "first-news-box" in news_box.get('class', []) else ['.description-news p', '.description-news', '.line-clamp-3', 'p']
+                description_selectors = (
+                    ['.line-clamp-10 p', '.line-clamp-10', 'p']
+                    if "first-news-box" in news_box.get('class', [])
+                    else ['.description-news p', '.description-news', '.line-clamp-3', 'p']
+                )
                 for selector in description_selectors:
-                    description_elements = news_box.select(selector)
-                    if description_elements:
-                        for elem in description_elements:
-                            text = elem.text.strip()
-                            if text and text != title:
-                                description = clean_text(text)
-                                break
-                    if description: break
+                    for elem in news_box.select(selector):
+                        text = elem.text.strip()
+                        if text and text != title:
+                            description = clean_text(text)
+                            break
+                    if description:
+                        break
 
-                news_url = href if href.startswith('http') else f"https://melsu.ru/{href.lstrip('/')}"
+                news_url = href if href.startswith('https') else f"https://melsu.ru/{href.lstrip('/')}"
 
-                news_items.append({
-                    "id": news_id,
-                    "title": title,
-                    "category": category,
-                    "date": date,
-                    "description": description,
-                    "image_url": image_url,
-                    "url": news_url,
-                    "_debug_original_src": original_src
-                })
+                news_items.append(
+                    {
+                        "id": news_id,
+                        "title": title,
+                        "category": category,
+                        "date": date,
+                        "description": description,
+                        "image_url": image_url,
+                        "url": news_url,
+                        "_debug_original_src": original_src,
+                    }
+                )
             except Exception as item_error:
                 print(f"Error processing news item: {str(item_error)}")
                 continue
 
-        pagination = soup.select_one('.pagination')
+        # ── пагинация на сайте часто «сломана», поэтому просто всегда has_next_page=True
         has_next_page = True
 
-        print(f"Processed {len(news_items)} news items, has_next_page: {has_next_page}")
-
-        return jsonify({
-            "news": news_items,
-            "page": page,
-            "has_next_page": has_next_page,
-            "success": True
-        }), 200
+        return (
+            jsonify(
+                {
+                    "news": news_items,
+                    "page": page,
+                    "has_next_page": has_next_page,
+                    "success": True,
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
         print(f"Error getting news: {str(e)}")
         return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
 
 
+def get_host_url(force_https: bool = True) -> str:
+    """
+    Возвращает host‑URL без завершающего «/».
+    Если force_https=True и схема оказалась http, подменяет её на https.
+    """
+    host_url = request.host_url.rstrip('/')
+    if force_https and host_url.startswith('http://'):
+        host_url = 'https://' + host_url[len('http://'):]
+    return host_url
+
 @app.route('/api/news/<int:news_id>', methods=['GET'])
 def get_news_detail(news_id):
     """Get detailed news article by ID with image proxy and improved content structure."""
     try:
-        host_url = request.host_url.rstrip('/')
+        # 1) HTTPS‑хост
+        host_url = get_host_url()
+
         url = f"https://melsu.ru/news/show/{news_id}"
         response = requests.get(url, timeout=15)
 
         if response.status_code != 200:
             return jsonify({"message": "News article not found", "success": False}), 404
 
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(response.text, "html.parser")
 
-        title_tag = soup.select_one('h1.text-4xl') or soup.select_one('h1')
+        title_tag = soup.select_one("h1.text-4xl") or soup.select_one("h1")
         title = clean_text(title_tag.text.strip()) if title_tag else None
 
-        date_tag = soup.select_one('.bi-calendar2-week')
+        date_tag = soup.select_one(".bi-calendar2-week")
         date = clean_text(date_tag.parent.text.strip()) if date_tag and date_tag.parent else None
 
-        content_div = soup.select_one('.content-news')
+        content_div = soup.select_one(".content-news")
 
         result = {
             "id": str(news_id),
@@ -520,73 +552,46 @@ def get_news_detail(news_id):
             "content_html": None,
             "content_text": None,
             "images": [],
-            "success": True
+            "success": True,
         }
 
-        category_tag = soup.select_one('.meta-category')
+        category_tag = soup.select_one(".meta-category")
         if category_tag:
             result["category"] = clean_text(category_tag.text.strip())
-        else:
-            breadcrumbs = soup.select('.breadcrumbs .crumb-home')
-            if len(breadcrumbs) > 1:
-                result["category"] = clean_text(breadcrumbs[1].text.strip())
 
+        # ── контент и заголовочная картинка ────────────────────────────
         if content_div:
             result["content_html"] = str(content_div)
-            result["content_text"] = BeautifulSoup(str(content_div), 'html.parser').get_text().strip()
+            result["content_text"] = BeautifulSoup(str(content_div), "html.parser").get_text().strip()
 
-            header_img = soup.select_one('.img-news-box img') or soup.select_one('.header-image img')
-            if header_img and header_img.get('src'):
-                src = header_img['src']
-                original_url = src if src.startswith('http') else f"https://melsu.ru/{src.lstrip('/')}"
+            header_img = soup.select_one(".img-news-box img") or soup.select_one(".header-image img")
+            if header_img and header_img.get("src"):
+                src = header_img["src"]
+                original_url = src if src.startswith("https") else f"https://melsu.ru/{src.lstrip('/')}"
                 encoded_url = quote(original_url)
                 proxy_url = f"{host_url}/api/image-proxy?url={encoded_url}"
                 result["images"].append(proxy_url)
 
+            # 2) content_blocks со «заставкой» https‑прокси
             result = update_api_response_with_content_blocks(result, host_url)
 
-        prev_article = None
-        next_article = None
+        # ── навигация «пред./след.» ─────────────────────────────────────
+        prev_article, next_article = None, None
         navigation_links = soup.select('a[href^="/news/show/"]')
-
         for link in navigation_links:
             link_text = link.text.strip().lower()
-            href = link.get('href', '')
-            if not href: continue
-            match = re.search(r'/news/show/(\d+)', href)
-            if not match: continue
-            news_id_from_link = match.group(1)
+            href = link.get("href", "")
+            match = re.search(r"/news/show/(\d+)", href)
+            if not match:
+                continue
+            link_id = match.group(1)
 
-            if 'предыдущ' in link_text or 'пред' in link_text or '←' in link_text:
-                title_span = link.select_one('span')
-                prev_title = clean_text(title_span.text.strip()) if title_span else "Предыдущая новость"
-                prev_article = {
-                    "id": news_id_from_link,
-                    "title": prev_title
-                }
-            elif 'следующ' in link_text or 'след' in link_text or '→' in link_text:
-                title_span = link.select_one('span')
-                next_title = clean_text(title_span.text.strip()) if title_span else "Следующая новость"
-                next_article = {
-                    "id": news_id_from_link,
-                    "title": next_title
-                }
-
-        if not prev_article and not next_article and len(navigation_links) >= 2:
-            first_link = navigation_links[0]
-            last_link = navigation_links[-1]
-            first_match = re.search(r'/news/show/(\d+)', first_link.get('href', ''))
-            last_match = re.search(r'/news/show/(\d+)', last_link.get('href', ''))
-            if first_match:
-                prev_article = {
-                    "id": first_match.group(1),
-                    "title": "Предыдущая новость"
-                }
-            if last_match:
-                next_article = {
-                    "id": last_match.group(1),
-                    "title": "Следующая новость"
-                }
+            if any(x in link_text for x in ("предыдущ", "пред", "←")):
+                title_span = link.select_one("span")
+                prev_article = {"id": link_id, "title": (clean_text(title_span.text) if title_span else "Предыдущая новость")}
+            elif any(x in link_text for x in ("следующ", "след", "→")):
+                title_span = link.select_one("span")
+                next_article = {"id": link_id, "title": (clean_text(title_span.text) if title_span else "Следующая новость")}
 
         result["prev_article"] = prev_article
         result["next_article"] = next_article
@@ -596,6 +601,7 @@ def get_news_detail(news_id):
     except Exception as e:
         print(f"Error getting news detail: {str(e)}")
         return jsonify({"message": f"Error: {str(e)}", "success": False}), 500
+
 
 
 @app.route('/api/image-proxy', methods=['GET'])
@@ -611,7 +617,7 @@ def image_proxy():
         except:
             pass
 
-        if not image_url.startswith(('http://', 'https://')):
+        if not image_url.startswith(('https://', 'https://')):
             if not image_url.startswith('/'):
                 image_url = f"/{image_url}"
             image_url = f"https://melsu.ru{image_url}"
